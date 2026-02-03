@@ -25,6 +25,7 @@ export interface JobInput {
   files?: string[]
   tools?: string[]
   provider?: string
+  model?: string
 }
 
 export interface JobContext {
@@ -217,7 +218,7 @@ async function executeWithCopilotApi(ctx: JobContext): Promise<void> {
 
   try {
     const body = {
-      model: 'gpt-4o',
+      model: ctx.input.model || 'gpt-4o',
       messages: [
         { role: 'system', content: 'You are a coding assistant.' },
         { role: 'user', content: message }

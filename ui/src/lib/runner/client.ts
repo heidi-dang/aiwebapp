@@ -26,6 +26,13 @@ export async function createJob(input?: unknown, timeoutMs?: number) {
     throw new Error(`createJob failed: ${res.status}`)
   }
 
+  const ct = res.headers.get('content-type') || ''
+  if (!ct.includes('application/json')) {
+    const txt = await res.text()
+    console.error('createJob returned non-JSON response:', txt)
+    throw new Error('createJob returned non-JSON response')
+  }
+
   const data = (await res.json()) as { id: string }
   return { jobId: data.id }
 }

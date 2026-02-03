@@ -4,7 +4,6 @@ import { toast } from 'sonner'
 import { TextArea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { useStore } from '@/store'
-import useAIChatStreamHandler from '@/hooks/useAIStreamHandler'
 import { createJob, startJob, streamJobEvents } from '@/lib/runner/client'
 import { useQueryState } from 'nuqs'
 import Icon from '@/components/ui/icon'
@@ -20,23 +19,27 @@ import {
 import { ModeSelector } from '@/components/chat/Sidebar/ModeSelector'
 import { EntitySelector } from '@/components/chat/Sidebar/EntitySelector'
 import { ProviderSelector } from '@/components/chat/Sidebar/ProviderSelector'
+import { ModelSelector } from '@/components/chat/Sidebar/ModelSelector'
 
 const ChatInput = () => {
-  const { chatInputRef } = useStore()
-
-  const { handleStreamResponse } = useAIChatStreamHandler()
+  const {
+    chatInputRef,
+    selectedEndpoint,
+    authToken,
+    selectedModel,
+    setSelectedModel,
+    setAvailableModels,
+    provider,
+    messages,
+    setMessages,
+    isStreaming,
+    initRun,
+    applyRunnerEvent,
+    setRunUnsubscribe
+  } = useStore()
   const [selectedAgent] = useQueryState('agent')
   const [teamId] = useQueryState('team')
   const [inputMessage, setInputMessage] = useState('')
-  const isStreaming = useStore((state) => state.isStreaming)
-  const provider = useStore((state) => state.provider)
-  const initRun = useStore((state) => state.initRun)
-  const applyRunnerEvent = useStore((state) => state.applyRunnerEvent)
-  const setRunUnsubscribe = useStore((state) => state.setRunUnsubscribe)
-  const selectedEndpoint = useStore((state) => state.selectedEndpoint)
-  const authToken = useStore((state) => state.authToken)
-  const messages = useStore((state) => state.messages)
-  const setMessages = useStore((state) => state.setMessages)
   const [copilotStatus, setCopilotStatus] = useState<'unknown' | 'up' | 'down'>(
     'unknown'
   )
@@ -48,6 +51,32 @@ const ChatInput = () => {
   const [isAgentDialogOpen, setIsAgentDialogOpen] = useState(false)
   const [isToolsDialogOpen, setIsToolsDialogOpen] = useState(false)
   const [isCopilotDialogOpen, setIsCopilotDialogOpen] = useState(false)
+  const [isModelDialogOpen, setIsModelDialogOpen] = useState(false)
+
+  // Fetch available models when provider is copilotapi
+  useEffect(() => {
+    if (provider === 'copilotapi') {
+      fetch(`${process.env.NEXT_PUBLIC_AI_API_URL}/v1/models`)
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`models fetch failed: ${res.status}`)
+          const ct = res.headers.get('content-type') || ''
+          if (!ct.includes('application/json')) {
+            const txt = await res.text()
+            console.error('Models endpoint returned non-JSON:', txt)
+            throw new Error('Models endpoint returned non-JSON')
+          }
+          return res.json()
+        })
+        .then((data) => {
+          const models = data.data.map((m: { id: string }) => m.id)
+          setAvailableModels(models)
+          if (!selectedModel && models.length > 0) {
+            setSelectedModel(models[0])
+          }
+        })
+        .catch((err) => console.error('Failed to fetch models:', err))
+    }
+  }, [provider, setAvailableModels, setSelectedModel, selectedModel])
 
   const checkCopilotHealth = useCallback(async () => {
     setIsCopilotChecking(true)
@@ -108,7 +137,7 @@ const ChatInput = () => {
         }
       ])
 
-      const { jobId } = await createJob({ message: currentMessage, provider })
+      const { jobId } = await createJob({ message: currentMessage, provider, model: selectedModel })
 
       initRun(jobId)
       setMessages((prev) => [
@@ -146,7 +175,7 @@ const ChatInput = () => {
         `Runner error: ${error instanceof Error ? error.message : String(error)}`
       )
     }
-  }, [applyRunnerEvent, initRun, inputMessage, setMessages, setRunUnsubscribe])
+  }, [applyRunnerEvent, initRun, inputMessage, setMessages, setRunUnsubscribe, provider, selectedModel])
 
   const handleSubmit = async () => {
     if (!inputMessage.trim()) return
@@ -288,6 +317,18 @@ const ChatInput = () => {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={isModelDialogOpen} onOpenChange={setIsModelDialogOpen}>
+        <DialogContent className="max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Select Copilot Model</DialogTitle>
+            <DialogDescription>
+              Choose the AI model for CopilotAPI responses.
+            </DialogDescription>
+          </DialogHeader>
+          <ModelSelector />
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isToolsDialogOpen} onOpenChange={setIsToolsDialogOpen}>
         <DialogContent className="max-w-[520px]">
           <DialogHeader>
@@ -380,6 +421,22 @@ const ChatInput = () => {
               className={`absolute right-1 top-1 h-2 w-2 rounded-full ${copilotDotClassName}`}
             />
           </Button>
+
+          {provider === 'copilotapi' && (
+            <Button
+              type="button"
+              aria-label="Select Copilot model"
+              title="Select Copilot model"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 rounded-lg"
+              onClick={() => {
+                setIsModelDialogOpen(true)
+              }}
+            >
+              <Icon type="agent" size="xs" />
+            </Button>
+          )}
         </div>
 
         <TextArea
@@ -400,6 +457,7 @@ const ChatInput = () => {
           className="w-full border border-accent bg-primaryAccent px-4 pl-12 text-sm text-primary focus:border-accent"
           disabled={!(selectedAgent || teamId)}
           ref={chatInputRef}
+          rows={4}
         />
       </div>
       <Button

@@ -46,6 +46,8 @@ interface Store {
   setTeams: (teams: TeamDetails[]) => void
   selectedModel: string
   setSelectedModel: (model: string) => void
+  availableModels: string[]
+  setAvailableModels: (models: string[]) => void
   mode: 'agent' | 'team'
   setMode: (mode: 'agent' | 'team') => void
   provider: 'bridge' | 'copilotapi'
@@ -103,6 +105,8 @@ export const useStore = create<Store>()(
       setTeams: (teams) => set({ teams }),
       selectedModel: '',
       setSelectedModel: (selectedModel) => set(() => ({ selectedModel })),
+      availableModels: [],
+      setAvailableModels: (availableModels) => set(() => ({ availableModels })),
       mode: 'agent',
       setMode: (mode) => set(() => ({ mode })),
       provider: 'bridge',

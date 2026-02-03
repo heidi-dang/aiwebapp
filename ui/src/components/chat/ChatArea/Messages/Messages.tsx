@@ -67,7 +67,6 @@ const AgentMessageWrapper = ({ message }: MessageWrapperProps) => {
 
   return (
     <div className="flex flex-col gap-y-9">
-      {runnerJobId && <RunCard jobId={runnerJobId} />}
       {message.extra_data?.reasoning_steps &&
         message.extra_data.reasoning_steps.length > 0 && (
           <div className="flex items-start gap-4">

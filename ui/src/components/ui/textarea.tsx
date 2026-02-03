@@ -8,8 +8,8 @@ type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement> & {
   onChange?: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
 }
 
-const MIN_HEIGHT = 48
-const MAX_HEIGHT = 112
+const MIN_HEIGHT = 96
+const MAX_HEIGHT = 192
 
 const TextArea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ className, value, onChange, ...props }, forwardedRef) => {
