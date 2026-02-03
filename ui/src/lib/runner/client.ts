@@ -10,10 +10,18 @@ function base(path: string) {
   return `${RUNNER_URL}${path}`
 }
 
+function getAuthHeaders() {
+  const token = process.env.NEXT_PUBLIC_RUNNER_TOKEN
+  if (token) {
+    return { 'Authorization': `Bearer ${token}` }
+  }
+  return {}
+}
+
 export async function createJob(input?: unknown, timeoutMs?: number) {
   const res = await fetch(base('/api/jobs'), {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({ input, timeout_ms: timeoutMs })
   })
 
@@ -27,7 +35,8 @@ export async function createJob(input?: unknown, timeoutMs?: number) {
 
 export async function startJob(jobId: string) {
   const res = await fetch(base(`/api/jobs/${encodeURIComponent(jobId)}/start`), {
-    method: 'POST'
+    method: 'POST',
+    headers: getAuthHeaders()
   })
 
   if (!res.ok) {
@@ -41,7 +50,8 @@ export async function cancelJob(jobId: string) {
   const res = await fetch(
     base(`/api/jobs/${encodeURIComponent(jobId)}/cancel`),
     {
-      method: 'POST'
+      method: 'POST',
+      headers: getAuthHeaders()
     }
   )
 

@@ -236,6 +236,12 @@ export default function RunCard({ jobId }: { jobId: string }) {
         </div>
       </div>
 
+      <div className="flex items-center gap-2">
+        <button onClick={handleReplay} aria-label="Replay Run">Replay</button>
+        <button onClick={handlePause} aria-label="Pause Run">Pause</button>
+        <button onClick={handleResume} aria-label="Resume Run">Resume</button>
+      </div>
+
       {!isCollapsed && (
         <div className="mt-4 space-y-3">
           {errorMessage && <ErrorBanner message={errorMessage} />}
@@ -255,4 +261,19 @@ export default function RunCard({ jobId }: { jobId: string }) {
       )}
     </div>
   )
+}
+
+function handleReplay() {
+  // Logic to replay the run
+  console.log('Replay button clicked');
+}
+
+function handlePause() {
+  // Logic to pause the run
+  console.log('Pause button clicked');
+}
+
+function handleResume() {
+  // Logic to resume the run
+  console.log('Resume button clicked');
 }

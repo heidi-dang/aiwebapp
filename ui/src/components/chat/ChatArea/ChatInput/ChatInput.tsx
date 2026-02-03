@@ -72,6 +72,14 @@ const ChatInput = () => {
     }
   }, [checkCopilotHealth])
 
+  useEffect(() => {
+    const inputElement = document.getElementById('chat-input')
+    if (inputElement) {
+      inputElement.setAttribute('aria-label', 'Chat input area')
+      inputElement.setAttribute('role', 'textbox')
+    }
+  }, [])
+
   const copilotDotClassName =
     copilotStatus === 'up'
       ? 'bg-green-500'
@@ -145,12 +153,51 @@ const ChatInput = () => {
     setInputMessage('')
 
     try {
-      await handleStreamResponse(currentMessage)
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'user',
+          content: currentMessage,
+          created_at: Math.floor(Date.now() / 1000)
+        }
+      ])
+
+      const { jobId } = await createJob({ message: currentMessage })
+
+      initRun(jobId)
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'agent',
+          content: '',
+          created_at: Math.floor(Date.now() / 1000),
+          extra_data: {
+            runner_job_id: jobId
+          }
+        }
+      ])
+
+      const unsubscribe = streamJobEvents(jobId, {
+        onEvent: (evt) => {
+          applyRunnerEvent(evt)
+        },
+        onDone: () => {
+          const unsub = useStore.getState().runUi[jobId]?.unsubscribe
+          unsub?.()
+          useStore.getState().setRunUnsubscribe(jobId, undefined)
+        },
+        onError: (err) => {
+          toast.error(
+            `Runner stream error: ${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+      })
+
+      setRunUnsubscribe(jobId, unsubscribe)
+      await startJob(jobId)
     } catch (error) {
       toast.error(
-        `Error in handleSubmit: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+        `Runner error: ${error instanceof Error ? error.message : String(error)}`
       )
     }
   }
