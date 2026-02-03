@@ -39,42 +39,61 @@ The application supports integration with GitHub Copilot via the CopilotAPI Brid
 
 ### Remote Access Setup
 
-The CopilotAPI Bridge only works locally by default. To access CopilotAPI models when connecting from remote domains (like heidiai.com.au), set up an ngrok tunnel:
+The CopilotAPI Bridge only works locally by default. To access CopilotAPI models when connecting from remote domains (like heidiai.com.au), set up a tunnel using either ngrok or Cloudflare Tunnel.
 
-1. **Install ngrok:**
-   ```bash
-   # Already installed via setup-tunnel.sh
-   ```
+#### Option 1: Using ngrok
 
-2. **Authenticate ngrok:**
+1. **Authenticate ngrok:**
    ```bash
    # Get token from https://dashboard.ngrok.com/get-started/your-authtoken
    ngrok config add-authtoken YOUR_TOKEN_HERE
    ```
 
-3. **Start the tunnel:**
+2. **Start the tunnel:**
    ```bash
    ./setup-tunnel.sh
    ```
    This creates a secure tunnel exposing `localhost:4000` to the internet.
 
-4. **Update environment variables:**
+3. **Update environment variables:**
    ```bash
    ./update-env-with-tunnel.sh
    ```
    This automatically updates your `.env` files with the tunnel URL.
 
-5. **Restart services:**
+#### Option 2: Using Cloudflare Tunnel (cloudflared)
+
+1. **Ensure cloudflared is installed and authenticated:**
+   ```bash
+   # Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/
+   cloudflared tunnel login
+   ```
+
+2. **Start the tunnel:**
+   ```bash
+   ./setup-cloudflared-tunnel.sh
+   ```
+   Choose between a named tunnel (with custom domain) or quick tunnel.
+
+3. **Update environment variables:**
+   ```bash
+   ./update-env-with-cloudflared.sh
+   ```
+   Enter your tunnel URL when prompted.
+
+#### Common Steps for Both Options
+
+4. **Restart services:**
    ```bash
    npm run dev
    ```
 
-6. **Access remotely:**
+5. **Access remotely:**
    - Your CopilotAPI models will now work from any domain
    - The tunnel URL replaces `http://localhost:4000`
-   - Keep ngrok running for remote access
+   - Keep the tunnel running for remote access
 
-**Security Note:** Stop the tunnel when not needed with `pkill ngrok` to avoid exposing your CopilotAPI Bridge unnecessarily.
+**Security Note:** Stop the tunnel when not needed to avoid exposing your CopilotAPI Bridge unnecessarily.
 
 ### Providers
 
