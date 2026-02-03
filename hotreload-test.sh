@@ -105,6 +105,14 @@ echo "RUNNER_TOKEN=${existing_token:-change_me}" >> ui/.env.local
 # Set RUNNER_TOKEN for the runner process
 RUNNER_TOKEN=${existing_token:-change_me}
 
+# Read bridge config from runner/.env if present
+if [ -f runner/.env ]; then
+    bridge_url=$(grep -m1 '^BRIDGE_URL=' runner/.env | cut -d'=' -f2- || true)
+    bridge_token=$(grep -m1 '^BRIDGE_TOKEN=' runner/.env | cut -d'=' -f2- || true)
+fi
+BRIDGE_URL=${bridge_url:-}
+BRIDGE_TOKEN=${bridge_token:-}
+
 # Helper to run a command using `ato` if available, otherwise fall back to nohup+disown.
 # Usage: run_with_ato <logfile> <command-as-string>
 run_with_ato() {
@@ -133,7 +141,7 @@ UI_PID=$(run_with_ato "$LOG_DIR/ui.log" "cd ui && npm run dev -- -p \"$UI_PORT\"
 sleep 0.2
 
 echo "Starting runner (logs/runner.log)..."
-RUNNER_PID=$(run_with_ato "$LOG_DIR/runner.log" "cd runner && PORT=\"$RUNNER_PORT\" RUNNER_TOKEN=\"$RUNNER_TOKEN\" npm run dev")
+RUNNER_PID=$(run_with_ato "$LOG_DIR/runner.log" "cd runner && PORT=\"$RUNNER_PORT\" RUNNER_TOKEN=\"$RUNNER_TOKEN\" BRIDGE_URL=\"$BRIDGE_URL\" BRIDGE_TOKEN=\"$BRIDGE_TOKEN\" npm run dev")
 sleep 0.2
 
 echo "PIDs: server=$SERVER_PID ui=$UI_PID runner=$RUNNER_PID"
