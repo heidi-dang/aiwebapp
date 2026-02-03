@@ -204,6 +204,7 @@ export interface ChatMessage {
     reasoning_steps?: ReasoningSteps[]
     reasoning_messages?: ReasoningMessage[]
     references?: ReferenceData[]
+    runner_job_id?: string
   }
   images?: ImageData[]
   videos?: VideoData[]

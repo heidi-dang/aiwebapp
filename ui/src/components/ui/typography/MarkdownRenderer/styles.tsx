@@ -1,6 +1,6 @@
 'use client'
 
-import { FC, useState } from 'react'
+import { FC, useEffect, useState } from 'react'
 
 import Image from 'next/image'
 import Link from 'next/link'
@@ -175,10 +175,24 @@ const Heading6 = ({ className, ...props }: HeadingProps) => (
   />
 )
 
-const Img = ({ src, alt }: ImgProps) => {
+const Img = ({ src, alt }: ImgProps & { src?: string | Blob }) => {
   const [error, setError] = useState(false)
+  const [objectUrl, setObjectUrl] = useState<string | null>(null)
 
-  if (!src) return null
+  useEffect(() => {
+    if (!(src instanceof Blob)) {
+      setObjectUrl(null)
+      return
+    }
+
+    const url = URL.createObjectURL(src)
+    setObjectUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [src])
+
+  const resolvedSrc = typeof src === 'string' ? src : objectUrl
+
+  if (!resolvedSrc) return null
 
   return (
     <div className="w-full max-w-xl">
@@ -186,16 +200,16 @@ const Img = ({ src, alt }: ImgProps) => {
         <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-md bg-secondary/50 text-muted">
           <Paragraph className="text-primary">Image unavailable</Paragraph>
           <Link
-            href={src}
+            href={resolvedSrc}
             target="_blank"
             className="max-w-md truncate underline"
           >
-            {src}
+            {resolvedSrc}
           </Link>
         </div>
       ) : (
         <Image
-          src={src}
+          src={resolvedSrc}
           width={1280}
           height={720}
           alt={alt ?? 'Rendered image'}

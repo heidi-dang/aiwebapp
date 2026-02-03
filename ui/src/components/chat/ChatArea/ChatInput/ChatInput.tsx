@@ -5,6 +5,7 @@ import { TextArea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { useStore } from '@/store'
 import useAIChatStreamHandler from '@/hooks/useAIStreamHandler'
+import { createJob, startJob, streamJobEvents } from '@/lib/runner/client'
 import { useQueryState } from 'nuqs'
 import Icon from '@/components/ui/icon'
 import { getStatusAPI } from '@/api/os'
@@ -26,9 +27,13 @@ const ChatInput = () => {
   const [teamId] = useQueryState('team')
   const [inputMessage, setInputMessage] = useState('')
   const isStreaming = useStore((state) => state.isStreaming)
+  const initRun = useStore((state) => state.initRun)
+  const applyRunnerEvent = useStore((state) => state.applyRunnerEvent)
+  const setRunUnsubscribe = useStore((state) => state.setRunUnsubscribe)
   const selectedEndpoint = useStore((state) => state.selectedEndpoint)
   const authToken = useStore((state) => state.authToken)
   const messages = useStore((state) => state.messages)
+  const setMessages = useStore((state) => state.setMessages)
   const [copilotStatus, setCopilotStatus] = useState<'unknown' | 'up' | 'down'>('unknown')
   const [copilotLatencyMs, setCopilotLatencyMs] = useState<number | null>(null)
   const [copilotLastCheckedAt, setCopilotLastCheckedAt] = useState<Date | null>(null)
@@ -70,6 +75,45 @@ const ChatInput = () => {
         : 'bg-muted-foreground'
 
   const toolCalls = messages.flatMap((m) => m.tool_calls ?? [])
+
+  const handleStartRunnerJob = useCallback(async () => {
+    try {
+      const { jobId } = await createJob({ prompt: inputMessage })
+
+      initRun(jobId)
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'agent',
+          content: '',
+          created_at: Math.floor(Date.now() / 1000),
+          extra_data: {
+            runner_job_id: jobId
+          }
+        }
+      ])
+
+      const unsubscribe = streamJobEvents(jobId, {
+        onEvent: (evt) => {
+          applyRunnerEvent(evt)
+        },
+        onDone: () => {
+          const unsub = useStore.getState().runUi[jobId]?.unsubscribe
+          unsub?.()
+          useStore.getState().setRunUnsubscribe(jobId, undefined)
+        },
+        onError: (err) => {
+          toast.error(`Runner stream error: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      })
+
+      setRunUnsubscribe(jobId, unsubscribe)
+      await startJob(jobId)
+    } catch (error) {
+      toast.error(`Runner error: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [applyRunnerEvent, initRun, inputMessage, setMessages, setRunUnsubscribe])
+
   const handleSubmit = async () => {
     if (!inputMessage.trim()) return
 
@@ -197,6 +241,17 @@ const ChatInput = () => {
 
       <div className="relative w-full">
         <div className="pointer-events-auto absolute bottom-2 left-2 z-10 flex items-center gap-x-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 rounded-lg"
+            onClick={handleStartRunnerJob}
+            disabled={!inputMessage.trim() || isStreaming}
+          >
+            <Icon type="sheet" size="xs" />
+          </Button>
+
           <Button
             type="button"
             variant="ghost"

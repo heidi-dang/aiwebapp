@@ -9,6 +9,7 @@ import Audios from './Multimedia/Audios'
 import { memo } from 'react'
 import AgentThinkingLoader from './AgentThinkingLoader'
 import dynamic from 'next/dynamic'
+import RunCard from './RunCard'
 
 const MarkdownRenderer = dynamic(
   () => import('@/components/ui/typography/MarkdownRenderer'),
@@ -22,6 +23,7 @@ interface MessageProps {
 const AgentMessage = ({ message }: MessageProps) => {
   const { streamingErrorMessage } = useStore()
   let messageContent
+  const runnerJobId = message.extra_data?.runner_job_id
   if (message.streamingError) {
     messageContent = (
       <p className="text-destructive">
@@ -32,6 +34,12 @@ const AgentMessage = ({ message }: MessageProps) => {
           'Please try refreshing the page or try again later.'
         )}
       </p>
+    )
+  } else if (runnerJobId) {
+    messageContent = (
+      <div className="flex w-full flex-col gap-4">
+        <RunCard jobId={runnerJobId} />
+      </div>
     )
   } else if (message.content) {
     messageContent = (

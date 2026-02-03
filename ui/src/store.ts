@@ -8,6 +8,8 @@ import {
   type ChatMessage
 } from '@/types/os'
 
+import type { RunnerEvent, RunState, RunStatus } from '@/lib/runner/types'
+
 interface Store {
   hydrated: boolean
   setHydrated: () => void
@@ -54,6 +56,13 @@ interface Store {
   ) => void
   isSessionsLoading: boolean
   setIsSessionsLoading: (isSessionsLoading: boolean) => void
+
+  runs: Record<string, RunState>
+  runUi: Record<string, { collapsed: boolean; unsubscribe?: () => void }>
+  initRun: (jobId: string) => void
+  applyRunnerEvent: (event: RunnerEvent) => void
+  setRunCollapsed: (jobId: string, collapsed: boolean) => void
+  setRunUnsubscribe: (jobId: string, unsubscribe?: () => void) => void
 }
 
 export const useStore = create<Store>()(
@@ -105,6 +114,101 @@ export const useStore = create<Store>()(
       isSessionsLoading: false,
       setIsSessionsLoading: (isSessionsLoading) =>
         set(() => ({ isSessionsLoading }))
+
+      ,
+      runs: {},
+      runUi: {},
+      initRun: (jobId) =>
+        set((state) => ({
+          runs: {
+            ...state.runs,
+            [jobId]: {
+              jobId,
+              status: 'pending',
+              events: []
+            }
+          },
+          runUi: {
+            ...state.runUi,
+            [jobId]: state.runUi[jobId] ?? { collapsed: false }
+          }
+        })),
+      applyRunnerEvent: (event) =>
+        set((state) => {
+          const jobId = event.job_id
+          const prev = state.runs[jobId] ?? {
+            jobId,
+            status: 'pending' as RunStatus,
+            events: []
+          }
+
+          if (prev.events.some((e) => e.raw.id === event.id)) {
+            return state
+          }
+
+          const ts = Date.parse(event.ts)
+          const nextEvents = [
+            ...prev.events,
+            {
+              key: event.id,
+              type: event.type,
+              ts: Number.isFinite(ts) ? ts : Date.now(),
+              payload: event.data,
+              raw: event
+            }
+          ]
+
+          let status: RunStatus = prev.status
+          let startedAt = prev.startedAt
+          let finishedAt = prev.finishedAt
+
+          if (event.type === 'job.started') {
+            status = 'running'
+            startedAt = startedAt ?? (Number.isFinite(ts) ? ts : Date.now())
+          } else if (event.type === 'job.cancelled') {
+            status = 'cancelled'
+          } else if (event.type === 'job.timeout') {
+            status = 'timeout'
+          } else if (event.type === 'error') {
+            status = 'error'
+          } else if (event.type === 'done') {
+            finishedAt = finishedAt ?? (Number.isFinite(ts) ? ts : Date.now())
+            if (status !== 'error' && status !== 'cancelled' && status !== 'timeout') {
+              status = 'done'
+            }
+          }
+
+          return {
+            runs: {
+              ...state.runs,
+              [jobId]: {
+                ...prev,
+                status,
+                startedAt,
+                finishedAt,
+                events: nextEvents
+              }
+            },
+            runUi: {
+              ...state.runUi,
+              [jobId]: state.runUi[jobId] ?? { collapsed: false }
+            }
+          }
+        }),
+      setRunCollapsed: (jobId, collapsed) =>
+        set((state) => ({
+          runUi: {
+            ...state.runUi,
+            [jobId]: { ...(state.runUi[jobId] ?? { collapsed: false }), collapsed }
+          }
+        })),
+      setRunUnsubscribe: (jobId, unsubscribe) =>
+        set((state) => ({
+          runUi: {
+            ...state.runUi,
+            [jobId]: { ...(state.runUi[jobId] ?? { collapsed: false }), unsubscribe }
+          }
+        }))
     }),
     {
       name: 'endpoint-storage',
