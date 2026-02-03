@@ -162,5 +162,6 @@ export function createBridgeClientFromEnv(): BridgeClient | null {
     return null
   }
 
+  console.log(`[Runner] Bridge client configured: ${baseUrl}`)
   return new BridgeClient({ baseUrl, token })
 }

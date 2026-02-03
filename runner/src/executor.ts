@@ -227,13 +227,15 @@ export async function executeJob(
 
     // Execute based on bridge availability
     if (bridge) {
+      console.log(`[Runner] Using bridge client for job ${jobId}`)
       try {
         await executeWithBridge(ctx)
-      } catch {
-        // Fall back to simulation if bridge fails
+      } catch (err) {
+        console.log(`[Runner] Bridge failed for job ${jobId}, falling back to simulation:`, err)
         await executeSimulated(ctx)
       }
     } else {
+      console.log(`[Runner] No bridge available for job ${jobId}, using simulation`)
       await executeSimulated(ctx)
     }
 
