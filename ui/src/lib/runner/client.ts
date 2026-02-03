@@ -1,7 +1,13 @@
 import type { RunnerEvent, RunnerEventType } from './types'
 
+const RUNNER_URL = process.env.NEXT_PUBLIC_RUNNER_URL ?? '/runner'
+
 function base(path: string) {
-  return `/runner${path}`
+  // Ensure we don't double-up slashes when joining
+  if (RUNNER_URL.endsWith('/')) {
+    return `${RUNNER_URL.replace(/\/$/, '')}${path}`
+  }
+  return `${RUNNER_URL}${path}`
 }
 
 export async function createJob(input?: unknown, timeoutMs?: number) {
