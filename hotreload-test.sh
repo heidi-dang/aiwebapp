@@ -89,15 +89,24 @@ echo "Clearing logs..."
 : > "$LOG_DIR/runner.log"
 
 # Ensure UI's env points to the runner started by this script.
-# Preserve existing RUNNER_TOKEN if present.
+# Preserve existing values if present.
 if [ -f ui/.env.local ]; then
     existing_token=$(grep -m1 '^RUNNER_TOKEN=' ui/.env.local | cut -d'=' -f2- || true)
+    existing_ai_api_url=$(grep -m1 '^NEXT_PUBLIC_AI_API_URL=' ui/.env.local | cut -d'=' -f2- || true)
 else
     existing_token="change_me"
+    existing_ai_api_url=""
 fi
+
+# Default AI API URL should work for both local dev and remote clients.
+# If you don't have a tunnel/domain, override in ui/.env.local before running this script.
+AI_API_PUBLIC_URL=${existing_ai_api_url:-https://copilot.heidiai.com.au}
 echo "# Managed by hotreload-test.sh" > ui/.env.local
 echo "# Optional: UI auth token for AgentOS requests" >> ui/.env.local
 echo "# NEXT_PUBLIC_OS_SECURITY_KEY=your_token_here" >> ui/.env.local
+echo >> ui/.env.local
+echo "NEXT_PUBLIC_API_URL=http://localhost:$SERVER_PORT" >> ui/.env.local
+echo "NEXT_PUBLIC_AI_API_URL=$AI_API_PUBLIC_URL" >> ui/.env.local
 echo >> ui/.env.local
 echo "RUNNER_URL=http://localhost:$RUNNER_PORT" >> ui/.env.local
 echo "RUNNER_TOKEN=${existing_token:-change_me}" >> ui/.env.local

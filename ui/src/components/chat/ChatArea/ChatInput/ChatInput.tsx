@@ -21,6 +21,12 @@ import { EntitySelector } from '@/components/chat/Sidebar/EntitySelector'
 import { ProviderSelector } from '@/components/chat/Sidebar/ProviderSelector'
 import { ModelSelector } from '@/components/chat/Sidebar/ModelSelector'
 
+const envAiApiUrl = process.env.NEXT_PUBLIC_AI_API_URL ?? ''
+
+function looksLocal(url: string) {
+  return url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1')
+}
+
 const ChatInput = () => {
   const {
     chatInputRef,
@@ -52,11 +58,46 @@ const ChatInput = () => {
   const [isToolsDialogOpen, setIsToolsDialogOpen] = useState(false)
   const [isCopilotDialogOpen, setIsCopilotDialogOpen] = useState(false)
   const [isModelDialogOpen, setIsModelDialogOpen] = useState(false)
+  const [aiApiBase, setAiApiBase] = useState(envAiApiUrl)
+  const [apiBase, setApiBase] = useState<string | null>(null)
+
+  // Derive AI API base from /api/config if env is missing or localhost
+  useEffect(() => {
+    if (aiApiBase && !looksLocal(aiApiBase) && apiBase) return
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/config', { cache: 'no-store' })
+        if (!res.ok) return
+        const cfg = await res.json()
+        const api = typeof cfg?.aiApiUrl === 'string' ? cfg.aiApiUrl : ''
+        const agentApi = typeof cfg?.apiUrl === 'string' ? cfg.apiUrl : ''
+        if (!cancelled && api) {
+          setAiApiBase(api)
+        }
+        if (!cancelled && agentApi) {
+          setApiBase(agentApi)
+        }
+      } catch {
+        /* ignore */
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [aiApiBase, apiBase])
 
   // Fetch available models when provider is copilotapi
   useEffect(() => {
     if (provider === 'copilotapi') {
-      fetch(`${process.env.NEXT_PUBLIC_AI_API_URL}/v1/models`)
+      if (!aiApiBase || looksLocal(aiApiBase)) {
+        console.error('AI API base URL is missing or local; skipping models fetch')
+        return
+      }
+
+      fetch(`${aiApiBase}/v1/models`)
         .then(async (res) => {
           if (!res.ok) throw new Error(`models fetch failed: ${res.status}`)
           const ct = res.headers.get('content-type') || ''
@@ -76,13 +117,26 @@ const ChatInput = () => {
         })
         .catch((err) => console.error('Failed to fetch models:', err))
     }
-  }, [provider, setAvailableModels, setSelectedModel, selectedModel])
+  }, [provider, setAvailableModels, setSelectedModel, selectedModel, aiApiBase])
 
   const checkCopilotHealth = useCallback(async () => {
     setIsCopilotChecking(true)
     const startedAt = Date.now()
     try {
-      const status = await getStatusAPI(selectedEndpoint, authToken)
+      const base =
+        apiBase && !looksLocal(apiBase)
+          ? apiBase
+          : !looksLocal(selectedEndpoint)
+            ? selectedEndpoint
+            : null
+
+      if (!base) {
+        setCopilotStatus('down')
+        setCopilotLastCheckedAt(new Date())
+        return
+      }
+
+      const status = await getStatusAPI(base, authToken)
       setCopilotLatencyMs(Date.now() - startedAt)
       setCopilotLastCheckedAt(new Date())
       setCopilotStatus(status === 200 ? 'up' : 'down')
@@ -93,7 +147,7 @@ const ChatInput = () => {
     } finally {
       setIsCopilotChecking(false)
     }
-  }, [selectedEndpoint, authToken])
+  }, [selectedEndpoint, authToken, apiBase])
 
   useEffect(() => {
     checkCopilotHealth()

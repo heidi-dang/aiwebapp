@@ -1,19 +1,55 @@
 'use client'
 import Sidebar from '@/components/chat/Sidebar/Sidebar'
 import { ChatArea } from '@/components/chat/ChatArea'
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { Button } from '@/components/ui/button'
 import Icon from '@/components/ui/icon'
 import { Dialog, DialogOverlay, DialogPortal } from '@/components/ui/dialog'
 import { motion } from 'framer-motion'
+import { useStore } from '@/store'
 
 export default function Home() {
   // Check if OS_SECURITY_KEY is defined on server-side
   const hasEnvToken = !!process.env.NEXT_PUBLIC_OS_SECURITY_KEY
   const envToken = process.env.NEXT_PUBLIC_OS_SECURITY_KEY || ''
+  const selectedEndpoint = useStore((state) => state.selectedEndpoint)
+  const setSelectedEndpoint = useStore((state) => state.setSelectedEndpoint)
   const isMobile = useIsMobile(430, true)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+
+  useEffect(() => {
+    const hostname = window.location.hostname
+    const isLocal = hostname === 'localhost' || hostname === '127.0.0.1'
+    if (isLocal) return
+
+    const looksLikeLocalhost =
+      !selectedEndpoint ||
+      selectedEndpoint.startsWith('http://localhost') ||
+      selectedEndpoint.startsWith('http://127.0.0.1')
+
+    if (!looksLikeLocalhost) return
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/config', { cache: 'no-store' })
+        if (!res.ok) return
+        const cfg = await res.json()
+        const apiUrl = typeof cfg?.apiUrl === 'string' ? cfg.apiUrl : ''
+        if (!cancelled && apiUrl) {
+          setSelectedEndpoint(apiUrl)
+        }
+      } catch {
+        // ignore
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedEndpoint, setSelectedEndpoint])
+
   return (
     <Suspense fallback={<div>Loading...</div>}>
       {isMobile ? (

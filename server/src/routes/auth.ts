@@ -1,9 +1,14 @@
 import { FastifyInstance } from 'fastify';
 import jwt from 'jsonwebtoken';
 
+interface LoginBody {
+  username: string;
+  password: string;
+}
+
 export default async function authRoutes(fastify: FastifyInstance) {
   fastify.post('/auth/login', async (request, reply) => {
-    const { username, password } = request.body;
+    const { username, password } = request.body as LoginBody;
 
     // Replace this with your actual user validation logic
     if (username === 'admin' && password === 'password') {

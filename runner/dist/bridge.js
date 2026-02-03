@@ -93,5 +93,6 @@ export function createBridgeClientFromEnv() {
     if (!baseUrl || !token) {
         return null;
     }
+    console.log(`[Runner] Bridge client configured: ${baseUrl}`);
     return new BridgeClient({ baseUrl, token });
 }

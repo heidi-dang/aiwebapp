@@ -8,8 +8,14 @@ import { registerAgentRoutes } from './routes/agents.js';
 import { registerTeamRoutes } from './routes/teams.js';
 import { registerSessionRoutes } from './routes/sessions.js';
 import { registerRunRoutes } from './routes/runs.js';
+import authRoutes from './routes/auth.js';
 const PORT = Number(process.env.PORT ?? 7777);
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000';
+const EXTRA_ORIGINS = [
+    'https://heidiai.com.au',
+    'https://www.heidiai.com.au',
+    'https://api.heidiai.com.au'
+];
 async function main() {
     const app = Fastify({
         logger: true
@@ -24,7 +30,8 @@ async function main() {
             const allowlist = new Set([
                 CORS_ORIGIN,
                 'http://localhost:3000',
-                'http://localhost:3001'
+                'http://localhost:3001',
+                ...EXTRA_ORIGINS
             ]);
             if (!origin) {
                 cb(null, true);
@@ -48,6 +55,8 @@ async function main() {
     await registerTeamRoutes(app, store);
     await registerSessionRoutes(app, store);
     await registerRunRoutes(app, store);
+    // Register the auth routes
+    await app.register(authRoutes);
     await app.listen({ port: PORT, host: '0.0.0.0' });
 }
 main().catch((err) => {

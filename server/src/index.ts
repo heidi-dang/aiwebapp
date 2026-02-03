@@ -14,6 +14,11 @@ import authRoutes from './routes/auth.js'
 
 const PORT = Number(process.env.PORT ?? 7777)
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000'
+const EXTRA_ORIGINS = [
+  'https://heidiai.com.au',
+  'https://www.heidiai.com.au',
+  'https://api.heidiai.com.au'
+]
 
 async function main() {
   const app = Fastify({
@@ -31,7 +36,8 @@ async function main() {
       const allowlist = new Set([
         CORS_ORIGIN,
         'http://localhost:3000',
-        'http://localhost:3001'
+        'http://localhost:3001',
+        ...EXTRA_ORIGINS
       ])
 
       if (!origin) {

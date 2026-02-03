@@ -7,9 +7,14 @@
  * 3. Emitting progress events
  * 4. Completing with done event
  */
+import { promises as fs } from 'node:fs'
+import { exec as execCb } from 'node:child_process'
+import { promisify } from 'node:util'
 import type { RunnerEvent, RunnerEventType, JobStore, JobStatus } from './db.js'
 import { BridgeClient, createBridgeClientFromEnv } from './bridge.js'
 import type { FastifyReply } from 'fastify'
+
+const execAsync = promisify(execCb)
 
 function nowIso() {
   return new Date().toISOString()
@@ -26,6 +31,20 @@ export interface JobInput {
   tools?: string[]
   provider?: string
   model?: string
+}
+
+type ToolCall = {
+  id: string
+  type: 'function'
+  function: { name: string; arguments?: string }
+}
+
+type ChatMessage = {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content?: string | null
+  name?: string
+  tool_call_id?: string
+  tool_calls?: ToolCall[]
 }
 
 export interface JobContext {
@@ -61,6 +80,120 @@ async function emitEvent(ctx: JobContext, type: RunnerEventType, data?: unknown)
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function parseToolArgs(raw?: string): Record<string, unknown> {
+  if (!raw) return {}
+  try {
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+async function handleReadFileTool(ctx: JobContext, path: string) {
+  await emitEvent(ctx, 'tool.start', { tool: 'read_file', input: { path } })
+  try {
+    const res = ctx.bridge
+      ? await ctx.bridge.readFile(path)
+      : { path, text: await fs.readFile(path, 'utf8') }
+
+    await emitEvent(ctx, 'tool.output', {
+      tool: 'read_file',
+      output: `Read ${res.text.length} bytes from ${res.path ?? path}`
+    })
+    await emitEvent(ctx, 'tool.end', { tool: 'read_file', success: true })
+    return { path: res.path ?? path, content: res.text }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await emitEvent(ctx, 'tool.end', { tool: 'read_file', success: false, error: message })
+    return { error: message }
+  }
+}
+
+async function handleWriteFileTool(ctx: JobContext, path: string, content: string) {
+  await emitEvent(ctx, 'tool.start', { tool: 'write_file', input: { path } })
+  try {
+    if (ctx.bridge) {
+      let current = ''
+      try {
+        const existing = await ctx.bridge.readFile(path)
+        current = existing.text
+      } catch {
+        current = ''
+      }
+      await ctx.bridge.applyEdits([
+        {
+          path,
+          range: { start: 0, end: current.length },
+          text: content
+        }
+      ])
+    } else {
+      await fs.writeFile(path, content, 'utf8')
+    }
+
+    await emitEvent(ctx, 'tool.output', {
+      tool: 'write_file',
+      output: `Wrote ${content.length} bytes to ${path}`
+    })
+    await emitEvent(ctx, 'tool.end', { tool: 'write_file', success: true })
+    return { path, bytes: content.length }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await emitEvent(ctx, 'tool.end', { tool: 'write_file', success: false, error: message })
+    return { error: message }
+  }
+}
+
+async function handleListFilesTool(ctx: JobContext, glob: string) {
+  await emitEvent(ctx, 'tool.start', { tool: 'list_files', input: { glob } })
+  try {
+    if (ctx.bridge) {
+      const entries = await ctx.bridge.listFiles(glob, 200)
+      await emitEvent(ctx, 'tool.output', {
+        tool: 'list_files',
+        output: `Found ${entries.length} file(s)`
+      })
+      await emitEvent(ctx, 'tool.end', { tool: 'list_files', success: true })
+      return { files: entries.map((e) => e.path) }
+    }
+
+    await emitEvent(ctx, 'tool.end', {
+      tool: 'list_files',
+      success: false,
+      error: 'Bridge not configured; cannot list files'
+    })
+    return { error: 'Bridge not configured; cannot list files' }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await emitEvent(ctx, 'tool.end', { tool: 'list_files', success: false, error: message })
+    return { error: message }
+  }
+}
+
+async function handleRunCommandTool(ctx: JobContext, command: string) {
+  await emitEvent(ctx, 'tool.start', { tool: 'run_command', input: { command } })
+  try {
+    const { stdout, stderr } = await execAsync(command, {
+      timeout: 15000,
+      maxBuffer: 1024 * 1024
+    })
+
+    const output = (stdout || '').slice(0, 4000)
+    const errOut = (stderr || '').slice(0, 4000)
+
+    await emitEvent(ctx, 'tool.output', {
+      tool: 'run_command',
+      output: output || errOut || '(no output)'
+    })
+    await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: true })
+    return { stdout: output, stderr: errOut }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
+    return { error: message }
+  }
 }
 
 /**
@@ -206,46 +339,180 @@ async function executeSimulated(ctx: JobContext): Promise<void> {
  */
 async function executeWithCopilotApi(ctx: JobContext): Promise<void> {
   const message = ctx.input.message ?? ctx.input.instruction ?? 'Hello'
+  const model = ctx.input.model || 'gpt-4o'
 
-  // Emit plan
+  const tools = [
+    {
+      type: 'function',
+      function: {
+        name: 'read_file',
+        description: 'Read a UTF-8 text file from the workspace',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Path to the file relative to the workspace root'
+            }
+          },
+          required: ['path']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'write_file',
+        description: 'Replace the full contents of a file in the workspace',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Path to the file relative to the workspace root'
+            },
+            content: {
+              type: 'string',
+              description: 'Full file contents to write (UTF-8)'
+            }
+          },
+          required: ['path', 'content']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'list_files',
+        description: 'List files using a glob pattern (requires bridge)',
+        parameters: {
+          type: 'object',
+          properties: {
+            glob: {
+              type: 'string',
+              description: 'Glob pattern, e.g. src/**/*.ts'
+            }
+          },
+          required: ['glob']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'run_command',
+        description: 'Run a terminal command in the workspace (15s timeout)',
+        parameters: {
+          type: 'object',
+          properties: {
+            command: {
+              type: 'string',
+              description: 'Shell command to execute'
+            }
+          },
+          required: ['command']
+        }
+      }
+    }
+  ]
+
+  const messages: ChatMessage[] = [
+    {
+      role: 'system',
+      content:
+        'You are a coding assistant. Use the available tools to read/write files, list files, and run terminal commands before answering.'
+    },
+    { role: 'user', content: message }
+  ]
+
   await emitEvent(ctx, 'plan', {
     steps: [
-      { tool: 'chatCompletion', description: 'Generating chat response' }
+      { tool: 'read_file', description: 'Gather context from files' },
+      { tool: 'write_file', description: 'Apply requested changes' },
+      { tool: 'run_command', description: 'Run checks if needed' }
     ]
   })
 
-  await emitEvent(ctx, 'tool.start', { tool: 'chatCompletion', input: { message } })
+  await emitEvent(ctx, 'tool.start', { tool: 'copilot', input: { model, message } })
 
-  try {
-    const body = {
-      model: ctx.input.model || 'gpt-4o',
-      messages: [
-        { role: 'system', content: 'You are a coding assistant.' },
-        { role: 'user', content: message }
-      ]
-    }
+  for (let i = 0; i < 6; i++) {
     const res = await fetch(`${process.env.AI_API_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(process.env.AI_API_KEY && { 'X-API-Key': process.env.AI_API_KEY })
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify({
+        model,
+        messages,
+        tools,
+        tool_choice: 'auto',
+        temperature: 0.2
+      })
     })
 
     if (!res.ok) {
       throw new Error(`CopilotAPI request failed: ${res.status}`)
     }
 
-    const json = await res.json()
-    const content = json.choices?.[0]?.message?.content ?? 'No response'
+    const ct = res.headers.get('content-type') || ''
+    if (!ct.includes('application/json')) {
+      const txt = await res.text()
+      throw new Error(`CopilotAPI returned non-JSON response: ${txt.slice(0, 500)}`)
+    }
 
-    await emitEvent(ctx, 'tool.output', { tool: 'chatCompletion', output: content })
-    await emitEvent(ctx, 'tool.end', { tool: 'chatCompletion', success: true })
-  } catch (err) {
-    await emitEvent(ctx, 'tool.end', { tool: 'chatCompletion', success: false, error: String(err) })
-    throw err
+    const json = await res.json()
+    const choice = json.choices?.[0]
+    const assistantMessage = choice?.message as ChatMessage | undefined
+
+    if (!assistantMessage) {
+      throw new Error('CopilotAPI returned no message')
+    }
+
+    messages.push(assistantMessage)
+
+    const toolCalls: ToolCall[] = assistantMessage.tool_calls ?? []
+    if (toolCalls.length === 0) {
+      const content = assistantMessage.content ?? 'No response'
+      await emitEvent(ctx, 'tool.output', { tool: 'copilot', output: content })
+      await emitEvent(ctx, 'tool.end', { tool: 'copilot', success: true })
+      return
+    }
+
+    for (const call of toolCalls) {
+      const args = parseToolArgs(call.function?.arguments)
+      let result: unknown = { error: 'Unsupported tool' }
+
+      if (call.function?.name === 'read_file') {
+        const path = typeof args.path === 'string' ? args.path : ''
+        result = path ? await handleReadFileTool(ctx, path) : { error: 'Missing path' }
+      } else if (call.function?.name === 'write_file') {
+        const path = typeof args.path === 'string' ? args.path : ''
+        const content = typeof args.content === 'string' ? args.content : ''
+        result = path ? await handleWriteFileTool(ctx, path, content) : { error: 'Missing path' }
+      } else if (call.function?.name === 'list_files') {
+        const glob = typeof args.glob === 'string' ? args.glob : ''
+        result = glob ? await handleListFilesTool(ctx, glob) : { error: 'Missing glob' }
+      } else if (call.function?.name === 'run_command') {
+        const command = typeof args.command === 'string' ? args.command : ''
+        result = command ? await handleRunCommandTool(ctx, command) : { error: 'Missing command' }
+      }
+
+      messages.push({
+        role: 'tool',
+        tool_call_id: call.id,
+        name: call.function?.name ?? 'unknown',
+        content: JSON.stringify(result)
+      })
+    }
   }
+
+  await emitEvent(ctx, 'tool.end', {
+    tool: 'copilot',
+    success: false,
+    error: 'Exceeded tool-call iterations'
+  })
+  throw new Error('Copilot tool loop exceeded iteration limit')
 }
 
 /**
