@@ -22,6 +22,26 @@ This application consists of three main services:
 - **UI** (`/ui`): Next.js web application providing the user interface
 - **Runner** (`/runner`): Fastify service for executing agent workflows and processing tasks
 
+## CopilotAPI Bridge Integration
+
+The application supports integration with GitHub Copilot via the CopilotAPI Bridge extension, providing access to advanced AI models.
+
+### Setup
+
+1. Install the CopilotAPI Bridge VS Code extension (already installed).
+2. The API server runs on `http://localhost:4000`.
+3. Configure environment variables in `ui/.env.local`:
+   ```
+   AI_API_URL=http://localhost:4000
+   AI_API_KEY=<your-api-key>
+   ```
+4. In the UI, select "CopilotAPI" provider for chat completions using Copilot models.
+
+### Providers
+
+- **Bridge**: Uses the custom VS Code extension bridge for file operations and agent workflows.
+- **CopilotAPI**: Uses the CopilotAPI Bridge for direct chat completions with OpenAI-compatible endpoints.
+
 ## Prerequisites
 
 - Node.js 20.x or later

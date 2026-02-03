@@ -24,6 +24,7 @@ export interface JobInput {
   instruction?: string
   files?: string[]
   tools?: string[]
+  provider?: string
 }
 
 export interface JobContext {
@@ -200,6 +201,53 @@ async function executeSimulated(ctx: JobContext): Promise<void> {
 }
 
 /**
+ * Execute a job with CopilotAPI Bridge
+ */
+async function executeWithCopilotApi(ctx: JobContext): Promise<void> {
+  const message = ctx.input.message ?? ctx.input.instruction ?? 'Hello'
+
+  // Emit plan
+  await emitEvent(ctx, 'plan', {
+    steps: [
+      { tool: 'chatCompletion', description: 'Generating chat response' }
+    ]
+  })
+
+  await emitEvent(ctx, 'tool.start', { tool: 'chatCompletion', input: { message } })
+
+  try {
+    const body = {
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'You are a coding assistant.' },
+        { role: 'user', content: message }
+      ]
+    }
+    const res = await fetch(`${process.env.AI_API_URL}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.AI_API_KEY && { 'X-API-Key': process.env.AI_API_KEY })
+      },
+      body: JSON.stringify(body)
+    })
+
+    if (!res.ok) {
+      throw new Error(`CopilotAPI request failed: ${res.status}`)
+    }
+
+    const json = await res.json()
+    const content = json.choices?.[0]?.message?.content ?? 'No response'
+
+    await emitEvent(ctx, 'tool.output', { tool: 'chatCompletion', output: content })
+    await emitEvent(ctx, 'tool.end', { tool: 'chatCompletion', success: true })
+  } catch (err) {
+    await emitEvent(ctx, 'tool.end', { tool: 'chatCompletion', success: false, error: String(err) })
+    throw err
+  }
+}
+
+/**
  * Main job executor
  */
 export async function executeJob(
@@ -225,8 +273,11 @@ export async function executeJob(
     await store.updateJobStatus(jobId, 'running', nowIso())
     await emitEvent(ctx, 'job.started', { input })
 
-    // Execute based on bridge availability
-    if (bridge) {
+    // Execute based on provider
+    if (input.provider === 'copilotapi') {
+      console.log(`[Runner] Using CopilotAPI for job ${jobId}`)
+      await executeWithCopilotApi(ctx)
+    } else if (bridge) {
       console.log(`[Runner] Using bridge client for job ${jobId}`)
       try {
         await executeWithBridge(ctx)

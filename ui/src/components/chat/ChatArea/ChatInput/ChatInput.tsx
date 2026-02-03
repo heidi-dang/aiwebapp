@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dialog'
 import { ModeSelector } from '@/components/chat/Sidebar/ModeSelector'
 import { EntitySelector } from '@/components/chat/Sidebar/EntitySelector'
+import { ProviderSelector } from '@/components/chat/Sidebar/ProviderSelector'
 
 const ChatInput = () => {
   const { chatInputRef } = useStore()
@@ -28,6 +29,7 @@ const ChatInput = () => {
   const [teamId] = useQueryState('team')
   const [inputMessage, setInputMessage] = useState('')
   const isStreaming = useStore((state) => state.isStreaming)
+  const provider = useStore((state) => state.provider)
   const initRun = useStore((state) => state.initRun)
   const applyRunnerEvent = useStore((state) => state.applyRunnerEvent)
   const setRunUnsubscribe = useStore((state) => state.setRunUnsubscribe)
@@ -106,7 +108,7 @@ const ChatInput = () => {
         }
       ])
 
-      const { jobId } = await createJob({ message: currentMessage })
+      const { jobId } = await createJob({ message: currentMessage, provider })
 
       initRun(jobId)
       setMessages((prev) => [
@@ -162,7 +164,7 @@ const ChatInput = () => {
         }
       ])
 
-      const { jobId } = await createJob({ message: currentMessage })
+      const { jobId } = await createJob({ message: currentMessage, provider })
 
       initRun(jobId)
       setMessages((prev) => [
@@ -215,6 +217,7 @@ const ChatInput = () => {
           <div className="flex flex-col gap-3">
             <ModeSelector />
             <EntitySelector />
+            <ProviderSelector />
           </div>
         </DialogContent>
       </Dialog>

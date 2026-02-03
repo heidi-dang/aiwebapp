@@ -48,6 +48,8 @@ interface Store {
   setSelectedModel: (model: string) => void
   mode: 'agent' | 'team'
   setMode: (mode: 'agent' | 'team') => void
+  provider: 'bridge' | 'copilotapi'
+  setProvider: (provider: 'bridge' | 'copilotapi') => void
   sessionsData: SessionEntry[] | null
   setSessionsData: (
     sessionsData:
@@ -103,6 +105,8 @@ export const useStore = create<Store>()(
       setSelectedModel: (selectedModel) => set(() => ({ selectedModel })),
       mode: 'agent',
       setMode: (mode) => set(() => ({ mode })),
+      provider: 'bridge',
+      setProvider: (provider) => set(() => ({ provider })),
       sessionsData: null,
       setSessionsData: (sessionsData) =>
         set((state) => ({
