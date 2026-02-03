@@ -8,6 +8,7 @@
  * 4. Completing with done event
  */
 import { promises as fs } from 'node:fs'
+import { glob } from 'glob'
 import { exec as execCb } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { RunnerEvent, RunnerEventType, JobStore, JobStatus } from './db.js'
@@ -146,11 +147,11 @@ async function handleWriteFileTool(ctx: JobContext, path: string, content: strin
   }
 }
 
-async function handleListFilesTool(ctx: JobContext, glob: string) {
-  await emitEvent(ctx, 'tool.start', { tool: 'list_files', input: { glob } })
+async function handleListFilesTool(ctx: JobContext, globPattern: string) {
+  await emitEvent(ctx, 'tool.start', { tool: 'list_files', input: { glob: globPattern } })
   try {
     if (ctx.bridge) {
-      const entries = await ctx.bridge.listFiles(glob, 200)
+      const entries = await ctx.bridge.listFiles(globPattern, 200)
       await emitEvent(ctx, 'tool.output', {
         tool: 'list_files',
         output: `Found ${entries.length} file(s)`
@@ -159,12 +160,14 @@ async function handleListFilesTool(ctx: JobContext, glob: string) {
       return { files: entries.map((e) => e.path) }
     }
 
-    await emitEvent(ctx, 'tool.end', {
+    // Fallback: use glob package
+    const files = await glob(globPattern, { cwd: process.cwd() })
+    await emitEvent(ctx, 'tool.output', {
       tool: 'list_files',
-      success: false,
-      error: 'Bridge not configured; cannot list files'
+      output: `Found ${files.length} file(s)`
     })
-    return { error: 'Bridge not configured; cannot list files' }
+    await emitEvent(ctx, 'tool.end', { tool: 'list_files', success: true })
+    return { files }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     await emitEvent(ctx, 'tool.end', { tool: 'list_files', success: false, error: message })
@@ -192,6 +195,69 @@ async function handleRunCommandTool(ctx: JobContext, command: string) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
+    return { error: message }
+  }
+}
+
+async function handleListDirTool(ctx: JobContext, path: string) {
+  await emitEvent(ctx, 'tool.start', { tool: 'list_dir', input: { path } })
+  try {
+    const entries = await fs.readdir(path, { withFileTypes: true })
+    const files = entries.map(entry => ({
+      name: entry.name,
+      type: entry.isDirectory() ? 'directory' : 'file'
+    }))
+
+    await emitEvent(ctx, 'tool.output', {
+      tool: 'list_dir',
+      output: `Found ${files.length} items in ${path}`
+    })
+    await emitEvent(ctx, 'tool.end', { tool: 'list_dir', success: true })
+    return { path, files }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await emitEvent(ctx, 'tool.end', { tool: 'list_dir', success: false, error: message })
+    return { error: message }
+  }
+}
+
+async function handleGrepSearchTool(ctx: JobContext, query: string, includePattern?: string) {
+  await emitEvent(ctx, 'tool.start', { tool: 'grep_search', input: { query, include_pattern: includePattern } })
+  try {
+    let command = `grep -r -n "${query.replace(/"/g, '\\"')}" .`
+    if (includePattern) {
+      command += ` --include="${includePattern}"`
+    }
+    command += ` | head -50`
+
+    const { stdout } = await execAsync(command, {
+      timeout: 10000,
+      maxBuffer: 1024 * 1024,
+      cwd: process.cwd()
+    })
+
+    const lines = stdout.trim().split('\n').filter(line => line.trim())
+    const matches = lines.map(line => {
+      const colonIndex = line.indexOf(':')
+      if (colonIndex === -1) return null
+      const file = line.slice(0, colonIndex)
+      const rest = line.slice(colonIndex + 1)
+      const colonIndex2 = rest.indexOf(':')
+      if (colonIndex2 === -1) return null
+      const lineNum = parseInt(rest.slice(0, colonIndex2), 10)
+      const text = rest.slice(colonIndex2 + 1)
+      return { file, line: lineNum, text }
+    }).filter(Boolean)
+
+    await emitEvent(ctx, 'tool.output', {
+      tool: 'grep_search',
+      output: `Found ${matches.length} matches`
+    })
+    await emitEvent(ctx, 'tool.end', { tool: 'grep_search', success: true })
+    return { query, matches }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await emitEvent(ctx, 'tool.end', { tool: 'grep_search', success: false, error: message })
     return { error: message }
   }
 }
@@ -384,7 +450,7 @@ async function executeWithCopilotApi(ctx: JobContext): Promise<void> {
       type: 'function',
       function: {
         name: 'list_files',
-        description: 'List files using a glob pattern (requires bridge)',
+        description: 'List files using a glob pattern',
         parameters: {
           type: 'object',
           properties: {
@@ -394,6 +460,44 @@ async function executeWithCopilotApi(ctx: JobContext): Promise<void> {
             }
           },
           required: ['glob']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'list_dir',
+        description: 'List contents of a directory',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Directory path to list'
+            }
+          },
+          required: ['path']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'grep_search',
+        description: 'Search for text patterns in files using regex',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Regex pattern to search for'
+            },
+            include_pattern: {
+              type: 'string',
+              description: 'Glob pattern for files to include (optional)'
+            }
+          },
+          required: ['query']
         }
       }
     },
@@ -429,7 +533,10 @@ async function executeWithCopilotApi(ctx: JobContext): Promise<void> {
     steps: [
       { tool: 'read_file', description: 'Gather context from files' },
       { tool: 'write_file', description: 'Apply requested changes' },
-      { tool: 'run_command', description: 'Run checks if needed' }
+      { tool: 'list_files', description: 'List files with glob patterns' },
+      { tool: 'list_dir', description: 'List directory contents' },
+      { tool: 'grep_search', description: 'Search text in files' },
+      { tool: 'run_command', description: 'Run terminal commands' }
     ]
   })
 
@@ -493,6 +600,13 @@ async function executeWithCopilotApi(ctx: JobContext): Promise<void> {
       } else if (call.function?.name === 'list_files') {
         const glob = typeof args.glob === 'string' ? args.glob : ''
         result = glob ? await handleListFilesTool(ctx, glob) : { error: 'Missing glob' }
+      } else if (call.function?.name === 'list_dir') {
+        const path = typeof args.path === 'string' ? args.path : ''
+        result = path ? await handleListDirTool(ctx, path) : { error: 'Missing path' }
+      } else if (call.function?.name === 'grep_search') {
+        const query = typeof args.query === 'string' ? args.query : ''
+        const includePattern = typeof args.include_pattern === 'string' ? args.include_pattern : undefined
+        result = query ? await handleGrepSearchTool(ctx, query, includePattern) : { error: 'Missing query' }
       } else if (call.function?.name === 'run_command') {
         const command = typeof args.command === 'string' ? args.command : ''
         result = command ? await handleRunCommandTool(ctx, command) : { error: 'Missing command' }
