@@ -1,6 +1,6 @@
 import type { RunnerEvent, RunnerEventType } from './types'
 
-const RUNNER_URL = process.env.NEXT_PUBLIC_RUNNER_URL ?? '/runner'
+const RUNNER_URL = process.env.NEXT_PUBLIC_RUNNER_URL ?? '/api/runner'
 
 function base(path: string) {
   // Ensure we don't double-up slashes when joining
@@ -11,10 +11,7 @@ function base(path: string) {
 }
 
 function getAuthHeaders() {
-  const token = process.env.NEXT_PUBLIC_RUNNER_TOKEN
-  if (token) {
-    return { 'Authorization': `Bearer ${token}` }
-  }
+  // Auth headers are added by the Next.js API proxy route server-side
   return {}
 }
 

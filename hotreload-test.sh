@@ -99,8 +99,11 @@ echo "# Managed by hotreload-test.sh" > ui/.env.local
 echo "# Optional: UI auth token for AgentOS requests" >> ui/.env.local
 echo "# NEXT_PUBLIC_OS_SECURITY_KEY=your_token_here" >> ui/.env.local
 echo >> ui/.env.local
-echo "RUNNER_BASE_URL=http://localhost:$RUNNER_PORT" >> ui/.env.local
+echo "RUNNER_URL=http://localhost:$RUNNER_PORT" >> ui/.env.local
 echo "RUNNER_TOKEN=${existing_token:-change_me}" >> ui/.env.local
+
+# Set RUNNER_TOKEN for the runner process
+RUNNER_TOKEN=${existing_token:-change_me}
 
 # Helper to run a command using `ato` if available, otherwise fall back to nohup+disown.
 # Usage: run_with_ato <logfile> <command-as-string>
@@ -130,7 +133,7 @@ UI_PID=$(run_with_ato "$LOG_DIR/ui.log" "cd ui && npm run dev -- -p \"$UI_PORT\"
 sleep 0.2
 
 echo "Starting runner (logs/runner.log)..."
-RUNNER_PID=$(run_with_ato "$LOG_DIR/runner.log" "cd runner && PORT=\"$RUNNER_PORT\" npm run dev")
+RUNNER_PID=$(run_with_ato "$LOG_DIR/runner.log" "cd runner && PORT=\"$RUNNER_PORT\" RUNNER_TOKEN=\"$RUNNER_TOKEN\" npm run dev")
 sleep 0.2
 
 echo "PIDs: server=$SERVER_PID ui=$UI_PID runner=$RUNNER_PID"
