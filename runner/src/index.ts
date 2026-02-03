@@ -4,50 +4,19 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 
-type JobStatus = 'pending' | 'running' | 'done' | 'cancelled' | 'timeout' | 'error'
-
-type RunnerEventType =
-  | 'job.started'
-  | 'job.cancelled'
-  | 'job.timeout'
-  | 'plan'
-  | 'plan.update'
-  | 'tool.start'
-  | 'tool.output'
-  | 'tool.end'
-  | 'error'
-  | 'done'
-
-type RunnerEvent = {
-  id: string
-  type: RunnerEventType
-  ts: string
-  job_id: string
-  data?: unknown
-}
-
-type JobRecord = {
-  id: string
-  status: JobStatus
-  created_at: string
-  started_at?: string
-  finished_at?: string
-  timeout_ms?: number
-  input?: unknown
-  events: RunnerEvent[]
-  subscribers: Set<FastifyReply>
-  timeoutHandle?: NodeJS.Timeout
-  workHandle?: NodeJS.Timeout
-}
-
-const PORT = Number(process.env.PORT ?? 8788)
-const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000'
+import { createSqliteStore, createInMemoryStore, type JobStore, type RunnerEvent, type JobStatus } from './db.js'
+import { executeJob, type JobInput } from './executor.js'
 
 function requireEnv(name: string): string {
   const v = process.env[name]
   if (!v) throw new Error(`Missing required env var: ${name}`)
   return v
 }
+
+const PORT = Number(process.env.PORT ?? 8788)
+const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000'
+const DB_PATH = process.env.RUNNER_DB ?? './runner.db'
+const USE_SQLITE = process.env.RUNNER_PERSIST !== 'false'
 
 function nowIso() {
   return new Date().toISOString()
@@ -70,8 +39,23 @@ function sendSse(reply: FastifyReply, event: RunnerEvent) {
   reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
 }
 
+// In-memory subscriber tracking (SSE connections per job)
+const jobSubscribers = new Map<string, Set<FastifyReply>>()
+// Active job handles for cancellation/timeout
+const jobHandles = new Map<string, { timeoutHandle?: NodeJS.Timeout; cancel: () => void }>()
+
 async function main() {
   const RUNNER_TOKEN = requireEnv('RUNNER_TOKEN')
+
+  // Initialize store
+  let store: JobStore
+  if (USE_SQLITE) {
+    console.log(`Using SQLite store: ${DB_PATH}`)
+    store = await createSqliteStore(DB_PATH)
+  } else {
+    console.log('Using in-memory store')
+    store = createInMemoryStore()
+  }
 
   const app = Fastify({
     logger: true
@@ -98,41 +82,43 @@ async function main() {
     }
   })
 
-  const jobs = new Map<string, JobRecord>()
-
+  // Health check
   app.get('/health', async () => {
-    return { ok: true }
+    return { ok: true, persist: USE_SQLITE }
   })
 
+  // List jobs
+  app.get('/api/jobs', async (req: FastifyRequest<{ Querystring: { limit?: string } }>) => {
+    const limit = Number(req.query.limit) || 50
+    const jobs = await store.listJobs(limit)
+    return { jobs }
+  })
+
+  // Create job
   app.post<{
     Body: {
-      input?: unknown
+      input?: JobInput
       timeout_ms?: number
     }
-  }>('/v1/jobs', async (req: FastifyRequest<{ Body: { input?: unknown; timeout_ms?: number } }>) => {
+  }>('/api/jobs', async (req: FastifyRequest<{ Body: { input?: JobInput; timeout_ms?: number } }>) => {
     const id = randomId('job')
-    const job: JobRecord = {
-      id,
-      status: 'pending',
-      created_at: nowIso(),
-      timeout_ms: req.body?.timeout_ms,
-      input: req.body?.input,
-      events: [],
-      subscribers: new Set()
-    }
+    const timeoutMs = req.body?.timeout_ms
+    const input = req.body?.input
 
-    jobs.set(id, job)
+    await store.createJob(id, input, timeoutMs)
+    jobSubscribers.set(id, new Set())
 
     return {
       id,
-      status: job.status,
-      created_at: job.created_at
+      status: 'pending',
+      created_at: nowIso()
     }
   })
 
-  app.get('/v1/jobs/:jobId', async (req: FastifyRequest, reply: FastifyReply) => {
+  // Get job details
+  app.get('/api/jobs/:jobId', async (req: FastifyRequest, reply: FastifyReply) => {
     const { jobId } = req.params as { jobId: string }
-    const job = jobs.get(jobId)
+    const job = await store.getJob(jobId)
     if (!job) return reply.code(404).send({ detail: 'Job not found' })
 
     return {
@@ -144,124 +130,148 @@ async function main() {
     }
   })
 
-  app.post('/v1/jobs/:jobId/start', async (req: FastifyRequest, reply: FastifyReply) => {
+  // Start job execution
+  app.post('/api/jobs/:jobId/start', async (req: FastifyRequest, reply: FastifyReply) => {
     const { jobId } = req.params as { jobId: string }
-    const job = jobs.get(jobId)
+    const job = await store.getJob(jobId)
     if (!job) return reply.code(404).send({ detail: 'Job not found' })
     if (job.status !== 'pending') return reply.code(400).send({ detail: 'Job not pending' })
 
-    job.status = 'running'
-    job.started_at = nowIso()
+    const subscribers = jobSubscribers.get(jobId) ?? new Set()
+    const input: JobInput = job.input ? JSON.parse(job.input) : {}
 
-    const startedEvent: RunnerEvent = {
-      id: randomId('evt'),
-      type: 'job.started',
-      ts: nowIso(),
-      job_id: job.id
+    // Set up timeout if specified
+    let timeoutHandle: NodeJS.Timeout | undefined
+    let cancelled = false
+
+    const cleanup = (status: JobStatus) => {
+      if (timeoutHandle) clearTimeout(timeoutHandle)
+      jobHandles.delete(jobId)
+
+      // Close SSE connections
+      for (const sub of subscribers) {
+        sub.raw.end()
+      }
+      subscribers.clear()
     }
 
-    job.events.push(startedEvent)
-    for (const sub of job.subscribers) sendSse(sub, startedEvent)
-
     if (job.timeout_ms && job.timeout_ms > 0) {
-      job.timeoutHandle = setTimeout(() => {
-        if (job.status !== 'running') return
-        job.status = 'timeout'
-        job.finished_at = nowIso()
+      timeoutHandle = setTimeout(async () => {
+        if (cancelled) return
+        cancelled = true
 
-        const ev: RunnerEvent = {
+        await store.updateJobStatus(jobId, 'timeout', undefined, nowIso())
+
+        const timeoutEvent: RunnerEvent = {
           id: randomId('evt'),
           type: 'job.timeout',
           ts: nowIso(),
-          job_id: job.id
+          job_id: jobId
         }
+        await store.addEvent(timeoutEvent)
+        for (const sub of subscribers) sendSse(sub, timeoutEvent)
 
-        job.events.push(ev)
-        for (const sub of job.subscribers) sendSse(sub, ev)
-
-        const doneEv: RunnerEvent = {
+        const doneEvent: RunnerEvent = {
           id: randomId('evt'),
           type: 'done',
           ts: nowIso(),
-          job_id: job.id,
-          data: { status: job.status }
+          job_id: jobId,
+          data: { status: 'timeout' }
         }
+        await store.addEvent(doneEvent)
+        for (const sub of subscribers) sendSse(sub, doneEvent)
 
-        job.events.push(doneEv)
-        for (const sub of job.subscribers) sendSse(sub, doneEv)
-        for (const sub of job.subscribers) sub.raw.end()
-        job.subscribers.clear()
+        cleanup('timeout')
       }, job.timeout_ms)
     }
 
-    job.workHandle = setTimeout(() => {
-      if (job.status !== 'running') return
-
-      job.status = 'done'
-      job.finished_at = nowIso()
-
-      const doneEv: RunnerEvent = {
-        id: randomId('evt'),
-        type: 'done',
-        ts: nowIso(),
-        job_id: job.id,
-        data: { status: job.status }
+    jobHandles.set(jobId, {
+      timeoutHandle,
+      cancel: () => {
+        cancelled = true
       }
+    })
 
-      job.events.push(doneEv)
-      for (const sub of job.subscribers) sendSse(sub, doneEv)
-      for (const sub of job.subscribers) sub.raw.end()
-      job.subscribers.clear()
+    // Execute job asynchronously
+    executeJob(store, jobId, subscribers, input, cleanup).catch((err) => {
+      console.error(`Job ${jobId} failed:`, err)
+    })
 
-      if (job.timeoutHandle) clearTimeout(job.timeoutHandle)
-    }, 500)
-
-    return { id: job.id, status: job.status, started_at: job.started_at }
+    return { id: jobId, status: 'running', started_at: nowIso() }
   })
 
-  app.post('/v1/jobs/:jobId/cancel', async (req: FastifyRequest, reply: FastifyReply) => {
+  // Cancel job
+  app.post('/api/jobs/:jobId/cancel', async (req: FastifyRequest, reply: FastifyReply) => {
     const { jobId } = req.params as { jobId: string }
-    const job = jobs.get(jobId)
+    const job = await store.getJob(jobId)
     if (!job) return reply.code(404).send({ detail: 'Job not found' })
     if (job.status !== 'pending' && job.status !== 'running') {
       return reply.code(400).send({ detail: 'Job not cancellable' })
     }
 
-    job.status = 'cancelled'
-    job.finished_at = nowIso()
+    // Cancel execution
+    const handle = jobHandles.get(jobId)
+    if (handle) {
+      handle.cancel()
+      if (handle.timeoutHandle) clearTimeout(handle.timeoutHandle)
+    }
 
-    if (job.timeoutHandle) clearTimeout(job.timeoutHandle)
-    if (job.workHandle) clearTimeout(job.workHandle)
+    await store.updateJobStatus(jobId, 'cancelled', undefined, nowIso())
 
-    const ev: RunnerEvent = {
+    const cancelEvent: RunnerEvent = {
       id: randomId('evt'),
       type: 'job.cancelled',
       ts: nowIso(),
-      job_id: job.id
+      job_id: jobId
     }
+    await store.addEvent(cancelEvent)
 
-    job.events.push(ev)
-    for (const sub of job.subscribers) sendSse(sub, ev)
+    const subscribers = jobSubscribers.get(jobId) ?? new Set()
+    for (const sub of subscribers) sendSse(sub, cancelEvent)
 
-    const doneEv: RunnerEvent = {
+    const doneEvent: RunnerEvent = {
       id: randomId('evt'),
       type: 'done',
       ts: nowIso(),
-      job_id: job.id,
-      data: { status: job.status }
+      job_id: jobId,
+      data: { status: 'cancelled' }
     }
+    await store.addEvent(doneEvent)
+    for (const sub of subscribers) sendSse(sub, doneEvent)
+    for (const sub of subscribers) sub.raw.end()
+    subscribers.clear()
 
-    job.events.push(doneEv)
-    for (const sub of job.subscribers) sendSse(sub, doneEv)
-    for (const sub of job.subscribers) sub.raw.end()
-    job.subscribers.clear()
+    jobHandles.delete(jobId)
 
-    return { id: job.id, status: job.status, finished_at: job.finished_at }
+    return { id: jobId, status: 'cancelled', finished_at: nowIso() }
   })
 
-  app.get('/v1/jobs/:jobId/events', async (req: FastifyRequest, reply: FastifyReply) => {
+  // Delete job
+  app.delete('/api/jobs/:jobId', async (req: FastifyRequest, reply: FastifyReply) => {
     const { jobId } = req.params as { jobId: string }
-    const job = jobs.get(jobId)
+    const job = await store.getJob(jobId)
+    if (!job) return reply.code(404).send({ detail: 'Job not found' })
+
+    // Cancel if running
+    if (job.status === 'pending' || job.status === 'running') {
+      const handle = jobHandles.get(jobId)
+      if (handle) {
+        handle.cancel()
+        if (handle.timeoutHandle) clearTimeout(handle.timeoutHandle)
+      }
+    }
+
+    await store.deleteJob(jobId)
+    jobSubscribers.delete(jobId)
+    jobHandles.delete(jobId)
+
+    return { ok: true }
+  })
+
+  // SSE event stream
+  app.get('/api/jobs/:jobId/events', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { jobId } = req.params as { jobId: string }
+    const job = await store.getJob(jobId)
     if (!job) return reply.code(404).send({ detail: 'Job not found' })
 
     reply.raw.writeHead(200, {
@@ -272,22 +282,36 @@ async function main() {
 
     if (typeof reply.raw.flushHeaders === 'function') reply.raw.flushHeaders()
 
-    for (const ev of job.events) sendSse(reply, ev)
+    // Send backlog of events
+    const events = await store.getEvents(jobId)
+    for (const ev of events) sendSse(reply, ev)
 
-    job.subscribers.add(reply)
+    // Subscribe to new events
+    let subscribers = jobSubscribers.get(jobId)
+    if (!subscribers) {
+      subscribers = new Set()
+      jobSubscribers.set(jobId, subscribers)
+    }
+    subscribers.add(reply)
+
+    // Heartbeat to keep connection alive
+    const heartbeat = setInterval(() => {
+      reply.raw.write(':heartbeat\n\n')
+    }, 15000)
 
     req.raw.on('close', () => {
-      job.subscribers.delete(reply)
+      clearInterval(heartbeat)
+      subscribers?.delete(reply)
     })
 
     return reply
   })
 
   await app.listen({ port: PORT, host: '0.0.0.0' })
+  console.log(`Runner listening on port ${PORT}`)
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
   console.error(err)
   process.exit(1)
 })

@@ -1,11 +1,11 @@
 import type { RunnerEvent, RunnerEventType } from './types'
 
 function base(path: string) {
-  return `/api/runner${path}`
+  return `/runner${path}`
 }
 
 export async function createJob(input?: unknown, timeoutMs?: number) {
-  const res = await fetch(base('/v1/jobs'), {
+  const res = await fetch(base('/api/jobs'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ input, timeout_ms: timeoutMs })
@@ -20,7 +20,7 @@ export async function createJob(input?: unknown, timeoutMs?: number) {
 }
 
 export async function startJob(jobId: string) {
-  const res = await fetch(base(`/v1/jobs/${encodeURIComponent(jobId)}/start`), {
+  const res = await fetch(base(`/api/jobs/${encodeURIComponent(jobId)}/start`), {
     method: 'POST'
   })
 
@@ -33,7 +33,7 @@ export async function startJob(jobId: string) {
 
 export async function cancelJob(jobId: string) {
   const res = await fetch(
-    base(`/v1/jobs/${encodeURIComponent(jobId)}/cancel`),
+    base(`/api/jobs/${encodeURIComponent(jobId)}/cancel`),
     {
       method: 'POST'
     }
@@ -47,7 +47,7 @@ export async function cancelJob(jobId: string) {
 }
 
 export async function getJob(jobId: string) {
-  const res = await fetch(base(`/v1/jobs/${encodeURIComponent(jobId)}`), {
+  const res = await fetch(base(`/api/jobs/${encodeURIComponent(jobId)}`), {
     method: 'GET'
   })
 
@@ -65,7 +65,7 @@ type StreamCallbacks = {
 }
 
 export function streamJobEvents(jobId: string, cb: StreamCallbacks) {
-  const url = base(`/v1/jobs/${encodeURIComponent(jobId)}/events`)
+  const url = base(`/api/jobs/${encodeURIComponent(jobId)}/events`)
   const es = new EventSource(url)
 
   const seen = new Set<string>()

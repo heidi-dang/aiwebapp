@@ -47,6 +47,11 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       sessionName: message || 'New session'
     })
 
+    const origin = req.headers.origin
+    if (origin) {
+      reply.raw.setHeader('Access-Control-Allow-Origin', origin)
+      reply.raw.setHeader('Access-Control-Allow-Credentials', 'true')
+    }
     reply.raw.setHeader('Content-Type', 'application/json; charset=utf-8')
     reply.raw.setHeader('Cache-Control', 'no-cache')
     reply.raw.setHeader('Connection', 'keep-alive')
@@ -136,6 +141,11 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       sessionName: message || 'New session'
     })
 
+    const origin = req.headers.origin
+    if (origin) {
+      reply.raw.setHeader('Access-Control-Allow-Origin', origin)
+      reply.raw.setHeader('Access-Control-Allow-Credentials', 'true')
+    }
     reply.raw.setHeader('Content-Type', 'application/json; charset=utf-8')
     reply.raw.setHeader('Cache-Control', 'no-cache')
     reply.raw.setHeader('Connection', 'keep-alive')

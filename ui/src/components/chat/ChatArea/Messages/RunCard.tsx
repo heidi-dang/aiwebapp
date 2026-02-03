@@ -14,7 +14,7 @@ function shortId(id: string) {
 function statusClass(status: RunState['status']) {
   switch (status) {
     case 'running':
-      return 'bg-green-500/15 text-green-400'
+      return 'bg-blue-500/15 text-blue-400'
     case 'done':
       return 'bg-green-500/15 text-green-400'
     case 'pending':
@@ -30,6 +30,83 @@ function statusClass(status: RunState['status']) {
   }
 }
 
+interface PlanStep {
+  tool: string
+  description: string
+}
+
+interface ToolState {
+  name: string
+  status: 'running' | 'done' | 'error'
+  outputs: string[]
+}
+
+function PlanSection({ steps }: { steps: PlanStep[] }) {
+  return (
+    <div className="rounded-lg border border-primary/10 bg-accent/50 p-3">
+      <div className="mb-2 text-xs font-medium uppercase text-muted">Plan</div>
+      <div className="space-y-1">
+        {steps.map((step, i) => (
+          <div key={`${step.tool}-${i}`} className="flex items-center gap-2 text-xs">
+            <span className="font-mono text-primary/60">{i + 1}.</span>
+            <span className="font-medium text-primary">{step.tool}</span>
+            <span className="text-secondary">{step.description}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ToolTimeline({ tools }: { tools: Map<string, ToolState> }) {
+  return (
+    <div className="space-y-2">
+      {Array.from(tools.entries()).map(([name, tool]) => (
+        <div
+          key={name}
+          className="rounded-lg border border-primary/10 bg-accent/50 p-3"
+        >
+          <div className="flex items-center gap-2">
+            {tool.status === 'running' && (
+              <div className="h-2 w-2 animate-pulse rounded-full bg-blue-400" />
+            )}
+            {tool.status === 'done' && (
+              <Icon type="check" size="xs" className="text-green-400" />
+            )}
+            {tool.status === 'error' && (
+              <Icon type="x" size="xs" className="text-red-400" />
+            )}
+            <span className="font-mono text-xs font-medium text-primary">
+              {name}
+            </span>
+          </div>
+          {tool.outputs.length > 0 && (
+            <div className="mt-2 max-h-32 overflow-y-auto rounded bg-background/50 p-2">
+              {tool.outputs.map((output, i) => (
+                <div key={i} className="text-[11px] text-secondary">
+                  {output}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+      <div className="flex items-center gap-2">
+        <Icon type="warning" size="xs" className="text-red-400" />
+        <span className="text-xs font-medium text-red-400">Error</span>
+      </div>
+      <div className="mt-1 text-xs text-red-300">{message}</div>
+    </div>
+  )
+}
+
 export default function RunCard({ jobId }: { jobId: string }) {
   const run = useStore((s) => s.runs[jobId])
   const setRunCollapsed = useStore((s) => s.setRunCollapsed)
@@ -38,15 +115,68 @@ export default function RunCard({ jobId }: { jobId: string }) {
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    const i = setInterval(() => setNow(Date.now()), 250)
-    return () => clearInterval(i)
-  }, [])
+    if (run?.status === 'running') {
+      const i = setInterval(() => setNow(Date.now()), 250)
+      return () => clearInterval(i)
+    }
+  }, [run?.status])
 
   const elapsedMs = useMemo(() => {
     if (!run?.startedAt) return 0
     const end = run.finishedAt ?? now
     return Math.max(0, end - run.startedAt)
   }, [run?.startedAt, run?.finishedAt, now])
+
+  // Derive structured view from events
+  const { planSteps, tools, errorMessage, planUpdateMessage } = useMemo(() => {
+    let planSteps: PlanStep[] = []
+    const tools = new Map<string, ToolState>()
+    let errorMessage: string | null = null
+    let planUpdateMessage: string | null = null
+
+    if (!run) return { planSteps, tools, errorMessage, planUpdateMessage }
+
+    for (const evt of run.events) {
+      const payload = evt.payload as Record<string, unknown> | undefined
+
+      if (evt.type === 'plan' && payload?.steps) {
+        planSteps = payload.steps as PlanStep[]
+      }
+
+      if (evt.type === 'plan.update' && payload?.message) {
+        planUpdateMessage = payload.message as string
+      }
+
+      if (evt.type === 'tool.start' && payload?.tool) {
+        const toolName = payload.tool as string
+        tools.set(toolName, { name: toolName, status: 'running', outputs: [] })
+      }
+
+      if (evt.type === 'tool.output' && payload?.tool) {
+        const toolName = payload.tool as string
+        const output = payload.output as string | undefined
+        const existing = tools.get(toolName)
+        if (existing && output) {
+          existing.outputs.push(output)
+        }
+      }
+
+      if (evt.type === 'tool.end' && payload?.tool) {
+        const toolName = payload.tool as string
+        const success = payload.success as boolean
+        const existing = tools.get(toolName)
+        if (existing) {
+          existing.status = success ? 'done' : 'error'
+        }
+      }
+
+      if (evt.type === 'error' && payload?.message) {
+        errorMessage = payload.message as string
+      }
+    }
+
+    return { planSteps, tools, errorMessage, planUpdateMessage }
+  }, [run])
 
   if (!run) return null
 
@@ -55,8 +185,11 @@ export default function RunCard({ jobId }: { jobId: string }) {
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
+            {run.status === 'running' && (
+              <div className="h-3 w-3 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
+            )}
             <div
-              className={`rounded-md px-2 py-1 text-[11px] uppercase ${statusClass(run.status)}`}
+              className={`rounded-md px-2 py-1 text-[11px] font-medium uppercase ${statusClass(run.status)}`}
             >
               {run.status}
             </div>
@@ -67,6 +200,9 @@ export default function RunCard({ jobId }: { jobId: string }) {
               </div>
             )}
           </div>
+          {planUpdateMessage && (
+            <div className="text-xs text-secondary">{planUpdateMessage}</div>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -99,34 +235,15 @@ export default function RunCard({ jobId }: { jobId: string }) {
       </div>
 
       {!isCollapsed && (
-        <div className="mt-3 space-y-2">
-          {run.events.length === 0 ? (
-            <div className="text-xs text-muted">No events yet.</div>
-          ) : (
-            <div className="space-y-2">
-              {run.events.map((e: RunEvent) => (
-                <div
-                  key={e.key}
-                  className="rounded-lg border border-primary/10 bg-accent p-2"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs font-medium text-primary">
-                      {e.type}
-                    </div>
-                    <div className="text-[11px] text-muted">
-                      {new Date(e.ts).toLocaleTimeString()}
-                    </div>
-                  </div>
-                  {e.payload != null && (
-                    <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-[11px] text-secondary">
-                      {typeof e.payload === 'string'
-                        ? e.payload
-                        : JSON.stringify(e.payload, null, 2)}
-                    </pre>
-                  )}
-                </div>
-              ))}
-            </div>
+        <div className="mt-4 space-y-3">
+          {errorMessage && <ErrorBanner message={errorMessage} />}
+
+          {planSteps.length > 0 && <PlanSection steps={planSteps} />}
+
+          {tools.size > 0 && <ToolTimeline tools={tools} />}
+
+          {run.events.length === 0 && (
+            <div className="text-xs text-muted">Waiting for events...</div>
           )}
         </div>
       )}

@@ -8,6 +8,7 @@ import useAIChatStreamHandler from '@/hooks/useAIStreamHandler'
 import { createJob, startJob, streamJobEvents } from '@/lib/runner/client'
 import { useQueryState } from 'nuqs'
 import Icon from '@/components/ui/icon'
+import Tooltip from '@/components/ui/tooltip'
 import { getStatusAPI } from '@/api/os'
 import {
   Dialog,
@@ -81,8 +82,23 @@ const ChatInput = () => {
   const toolCalls = messages.flatMap((m) => m.tool_calls ?? [])
 
   const handleStartRunnerJob = useCallback(async () => {
+    if (!inputMessage.trim()) return
+
+    const currentMessage = inputMessage
+    setInputMessage('')
+
     try {
-      const { jobId } = await createJob({ prompt: inputMessage })
+      // Add user message first
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'user',
+          content: currentMessage,
+          created_at: Math.floor(Date.now() / 1000)
+        }
+      ])
+
+      const { jobId } = await createJob({ message: currentMessage })
 
       initRun(jobId)
       setMessages((prev) => [
@@ -255,16 +271,18 @@ const ChatInput = () => {
 
       <div className="relative w-full">
         <div className="pointer-events-auto absolute bottom-2 left-2 z-10 flex items-center gap-x-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 rounded-lg"
-            onClick={handleStartRunnerJob}
-            disabled={!inputMessage.trim() || isStreaming}
-          >
-            <Icon type="sheet" size="xs" />
-          </Button>
+          <Tooltip content="Run as job" side="top" delayDuration={300}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 rounded-lg"
+              onClick={handleStartRunnerJob}
+              disabled={!inputMessage.trim() || isStreaming}
+            >
+              <Icon type="play" size="xs" />
+            </Button>
+          </Tooltip>
 
           <Button
             type="button"

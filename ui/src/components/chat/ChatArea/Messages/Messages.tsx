@@ -16,6 +16,7 @@ import React, { type FC } from 'react'
 
 import Icon from '@/components/ui/icon'
 import ChatBlankState from './ChatBlankState'
+import RunCard from './RunCard'
 
 interface MessageListProps {
   messages: ChatMessage[]
@@ -62,8 +63,11 @@ const References: FC<ReferenceProps> = ({ references }) => (
 )
 
 const AgentMessageWrapper = ({ message }: MessageWrapperProps) => {
+  const runnerJobId = message.extra_data?.runner_job_id as string | undefined
+
   return (
     <div className="flex flex-col gap-y-9">
+      {runnerJobId && <RunCard jobId={runnerJobId} />}
       {message.extra_data?.reasoning_steps &&
         message.extra_data.reasoning_steps.length > 0 && (
           <div className="flex items-start gap-4">
