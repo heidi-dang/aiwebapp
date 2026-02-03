@@ -50,7 +50,11 @@ export default function Home() {
                 className="fixed left-0 top-0 z-50 h-[100dvh] w-[min(20rem,90vw)] border-r border-border bg-background"
                 onClick={(e) => e.stopPropagation()}
               >
-                <Sidebar hasEnvToken={hasEnvToken} envToken={envToken} isMobile />
+                <Sidebar
+                  hasEnvToken={hasEnvToken}
+                  envToken={envToken}
+                  isMobile
+                />
               </motion.aside>
             </DialogPortal>
           </Dialog>

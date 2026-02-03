@@ -32,9 +32,12 @@ export async function startJob(jobId: string) {
 }
 
 export async function cancelJob(jobId: string) {
-  const res = await fetch(base(`/v1/jobs/${encodeURIComponent(jobId)}/cancel`), {
-    method: 'POST'
-  })
+  const res = await fetch(
+    base(`/v1/jobs/${encodeURIComponent(jobId)}/cancel`),
+    {
+      method: 'POST'
+    }
+  )
 
   if (!res.ok) {
     throw new Error(`cancelJob failed: ${res.status}`)

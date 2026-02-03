@@ -244,8 +244,12 @@ const Sidebar = ({
           : 'relative flex h-screen shrink-0 grow-0 flex-col overflow-hidden px-2 py-3 font-dmmono'
       }
       initial={isMobile ? false : { width: '16rem' }}
-      animate={isMobile ? undefined : { width: isCollapsed ? '2.5rem' : '16rem' }}
-      transition={isMobile ? undefined : { type: 'spring', stiffness: 300, damping: 30 }}
+      animate={
+        isMobile ? undefined : { width: isCollapsed ? '2.5rem' : '16rem' }
+      }
+      transition={
+        isMobile ? undefined : { type: 'spring', stiffness: 300, damping: 30 }
+      }
     >
       {!isMobile && (
         <motion.button
@@ -271,7 +275,11 @@ const Sidebar = ({
             : { opacity: isCollapsed ? 0 : 1, x: isCollapsed ? -20 : 0 }
         }
         transition={isMobile ? undefined : { duration: 0.3, ease: 'easeInOut' }}
-        style={isMobile ? undefined : { pointerEvents: isCollapsed ? 'none' : 'auto' }}
+        style={
+          isMobile
+            ? undefined
+            : { pointerEvents: isCollapsed ? 'none' : 'auto' }
+        }
       >
         <SidebarHeader />
         <NewChatButton

@@ -14,7 +14,13 @@ const ChatArea = () => {
       }
     >
       <MessageArea />
-      <div className={isMobile ? 'sticky bottom-0 px-3 pb-2' : 'sticky bottom-0 ml-9 px-4 pb-2'}>
+      <div
+        className={
+          isMobile
+            ? 'sticky bottom-0 px-3 pb-2'
+            : 'sticky bottom-0 ml-9 px-4 pb-2'
+        }
+      >
         <ChatInput />
       </div>
     </main>

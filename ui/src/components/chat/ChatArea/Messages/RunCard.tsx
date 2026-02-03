@@ -55,14 +55,16 @@ export default function RunCard({ jobId }: { jobId: string }) {
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <div className={`rounded-md px-2 py-1 text-[11px] uppercase ${statusClass(run.status)}`}>
+            <div
+              className={`rounded-md px-2 py-1 text-[11px] uppercase ${statusClass(run.status)}`}
+            >
               {run.status}
             </div>
-            <div className="text-xs text-muted">
-              job {shortId(run.jobId)}
-            </div>
+            <div className="text-xs text-muted">job {shortId(run.jobId)}</div>
             {run.startedAt && (
-              <div className="text-xs text-muted">{(elapsedMs / 1000).toFixed(1)}s</div>
+              <div className="text-xs text-muted">
+                {(elapsedMs / 1000).toFixed(1)}s
+              </div>
             )}
           </div>
         </div>
@@ -88,7 +90,10 @@ export default function RunCard({ jobId }: { jobId: string }) {
             className="h-8 w-8 rounded-lg"
             onClick={() => setRunCollapsed(run.jobId, !isCollapsed)}
           >
-            <Icon type={isCollapsed ? 'chevron-down' : 'chevron-up'} size="xs" />
+            <Icon
+              type={isCollapsed ? 'chevron-down' : 'chevron-up'}
+              size="xs"
+            />
           </Button>
         </div>
       </div>
@@ -100,9 +105,14 @@ export default function RunCard({ jobId }: { jobId: string }) {
           ) : (
             <div className="space-y-2">
               {run.events.map((e: RunEvent) => (
-                <div key={e.key} className="rounded-lg border border-primary/10 bg-accent p-2">
+                <div
+                  key={e.key}
+                  className="rounded-lg border border-primary/10 bg-accent p-2"
+                >
                   <div className="flex items-center justify-between">
-                    <div className="text-xs font-medium text-primary">{e.type}</div>
+                    <div className="text-xs font-medium text-primary">
+                      {e.type}
+                    </div>
                     <div className="text-[11px] text-muted">
                       {new Date(e.ts).toLocaleTimeString()}
                     </div>

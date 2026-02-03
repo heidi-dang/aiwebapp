@@ -34,9 +34,13 @@ const ChatInput = () => {
   const authToken = useStore((state) => state.authToken)
   const messages = useStore((state) => state.messages)
   const setMessages = useStore((state) => state.setMessages)
-  const [copilotStatus, setCopilotStatus] = useState<'unknown' | 'up' | 'down'>('unknown')
+  const [copilotStatus, setCopilotStatus] = useState<'unknown' | 'up' | 'down'>(
+    'unknown'
+  )
   const [copilotLatencyMs, setCopilotLatencyMs] = useState<number | null>(null)
-  const [copilotLastCheckedAt, setCopilotLastCheckedAt] = useState<Date | null>(null)
+  const [copilotLastCheckedAt, setCopilotLastCheckedAt] = useState<Date | null>(
+    null
+  )
   const [isCopilotChecking, setIsCopilotChecking] = useState(false)
   const [isAgentDialogOpen, setIsAgentDialogOpen] = useState(false)
   const [isToolsDialogOpen, setIsToolsDialogOpen] = useState(false)
@@ -103,14 +107,18 @@ const ChatInput = () => {
           useStore.getState().setRunUnsubscribe(jobId, undefined)
         },
         onError: (err) => {
-          toast.error(`Runner stream error: ${err instanceof Error ? err.message : String(err)}`)
+          toast.error(
+            `Runner stream error: ${err instanceof Error ? err.message : String(err)}`
+          )
         }
       })
 
       setRunUnsubscribe(jobId, unsubscribe)
       await startJob(jobId)
     } catch (error) {
-      toast.error(`Runner error: ${error instanceof Error ? error.message : String(error)}`)
+      toast.error(
+        `Runner error: ${error instanceof Error ? error.message : String(error)}`
+      )
     }
   }, [applyRunnerEvent, initRun, inputMessage, setMessages, setRunUnsubscribe])
 
@@ -158,7 +166,9 @@ const ChatInput = () => {
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between rounded-xl border border-primary/15 bg-accent p-3">
               <div className="flex items-center gap-3">
-                <div className={`h-2 w-2 rounded-full ${copilotDotClassName}`} />
+                <div
+                  className={`h-2 w-2 rounded-full ${copilotDotClassName}`}
+                />
                 <div className="text-xs font-medium uppercase text-primary">
                   {copilotStatus === 'up'
                     ? 'Healthy'
@@ -221,12 +231,16 @@ const ChatInput = () => {
             </DialogDescription>
           </DialogHeader>
           {toolCalls.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No tool calls yet.</div>
+            <div className="text-muted-foreground text-sm">
+              No tool calls yet.
+            </div>
           ) : (
             <div className="flex flex-wrap gap-2">
               {toolCalls.map((tc, idx) => (
                 <div
-                  key={tc.tool_call_id || `${tc.tool_name}-${tc.created_at}-${idx}`}
+                  key={
+                    tc.tool_call_id || `${tc.tool_name}-${tc.created_at}-${idx}`
+                  }
                   className="cursor-default rounded-full bg-accent px-2 py-1.5 text-xs"
                 >
                   <p className="font-dmmono uppercase text-primary/80">
@@ -292,25 +306,25 @@ const ChatInput = () => {
           </Button>
         </div>
 
-      <TextArea
-        placeholder={'Ask anything'}
-        value={inputMessage}
-        onChange={(e) => setInputMessage(e.target.value)}
-        onKeyDown={(e) => {
-          if (
-            e.key === 'Enter' &&
-            !e.nativeEvent.isComposing &&
-            !e.shiftKey &&
-            !isStreaming
-          ) {
-            e.preventDefault()
-            handleSubmit()
-          }
-        }}
-        className="w-full border border-accent bg-primaryAccent px-4 pl-12 text-sm text-primary focus:border-accent"
-        disabled={!(selectedAgent || teamId)}
-        ref={chatInputRef}
-      />
+        <TextArea
+          placeholder={'Ask anything'}
+          value={inputMessage}
+          onChange={(e) => setInputMessage(e.target.value)}
+          onKeyDown={(e) => {
+            if (
+              e.key === 'Enter' &&
+              !e.nativeEvent.isComposing &&
+              !e.shiftKey &&
+              !isStreaming
+            ) {
+              e.preventDefault()
+              handleSubmit()
+            }
+          }}
+          className="w-full border border-accent bg-primaryAccent px-4 pl-12 text-sm text-primary focus:border-accent"
+          disabled={!(selectedAgent || teamId)}
+          ref={chatInputRef}
+        />
       </div>
       <Button
         onClick={handleSubmit}

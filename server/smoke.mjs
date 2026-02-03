@@ -1,4 +1,4 @@
-const base = (process.env.BASE_URL || process.argv[2] || 'http://localhost:7777').replace(/\/$/, '')
+const base = (process.env.BASE_URL || process.argv[2] || 'http://localhost:3001').replace(/\/$/, '')
 
 async function check(path, opts) {
   const url = `${base}${path}`

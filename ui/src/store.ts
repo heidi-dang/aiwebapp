@@ -113,9 +113,8 @@ export const useStore = create<Store>()(
         })),
       isSessionsLoading: false,
       setIsSessionsLoading: (isSessionsLoading) =>
-        set(() => ({ isSessionsLoading }))
+        set(() => ({ isSessionsLoading })),
 
-      ,
       runs: {},
       runUi: {},
       initRun: (jobId) =>
@@ -173,7 +172,11 @@ export const useStore = create<Store>()(
             status = 'error'
           } else if (event.type === 'done') {
             finishedAt = finishedAt ?? (Number.isFinite(ts) ? ts : Date.now())
-            if (status !== 'error' && status !== 'cancelled' && status !== 'timeout') {
+            if (
+              status !== 'error' &&
+              status !== 'cancelled' &&
+              status !== 'timeout'
+            ) {
               status = 'done'
             }
           }
@@ -199,14 +202,20 @@ export const useStore = create<Store>()(
         set((state) => ({
           runUi: {
             ...state.runUi,
-            [jobId]: { ...(state.runUi[jobId] ?? { collapsed: false }), collapsed }
+            [jobId]: {
+              ...(state.runUi[jobId] ?? { collapsed: false }),
+              collapsed
+            }
           }
         })),
       setRunUnsubscribe: (jobId, unsubscribe) =>
         set((state) => ({
           runUi: {
             ...state.runUi,
-            [jobId]: { ...(state.runUi[jobId] ?? { collapsed: false }), unsubscribe }
+            [jobId]: {
+              ...(state.runUi[jobId] ?? { collapsed: false }),
+              unsubscribe
+            }
           }
         }))
     }),

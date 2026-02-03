@@ -10,7 +10,9 @@ export function useIsMobile(maxWidthPx = 430, portraitOnly = false): boolean {
     const portraitQuery = window.matchMedia('(orientation: portrait)')
 
     const update = () =>
-      setIsMobile(mediaQuery.matches && (!portraitOnly || portraitQuery.matches))
+      setIsMobile(
+        mediaQuery.matches && (!portraitOnly || portraitQuery.matches)
+      )
 
     update()
 
