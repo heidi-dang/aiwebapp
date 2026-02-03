@@ -73,22 +73,22 @@ async function proxy(req: NextRequest, pathParts: string[]) {
   })
 }
 
-export async function GET(req: NextRequest, ctx: { params: { path: string[] } }) {
+export async function GET(req: NextRequest, ctx: any) {
   return proxy(req, ctx.params.path)
 }
 
-export async function POST(req: NextRequest, ctx: { params: { path: string[] } }) {
+export async function POST(req: NextRequest, ctx: any) {
   return proxy(req, ctx.params.path)
 }
 
-export async function DELETE(req: NextRequest, ctx: { params: { path: string[] } }) {
+export async function DELETE(req: NextRequest, ctx: any) {
   return proxy(req, ctx.params.path)
 }
 
-export async function PUT(req: NextRequest, ctx: { params: { path: string[] } }) {
+export async function PUT(req: NextRequest, ctx: any) {
   return proxy(req, ctx.params.path)
 }
 
-export async function PATCH(req: NextRequest, ctx: { params: { path: string[] } }) {
+export async function PATCH(req: NextRequest, ctx: any) {
   return proxy(req, ctx.params.path)
 }

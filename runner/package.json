@@ -7,10 +7,12 @@
     "dev": "tsx watch src/index.ts",
     "start": "node --enable-source-maps dist/index.js",
     "build": "tsc -p tsconfig.json",
+    "smoke": "node smoke.mjs",
     "lint": "echo \"(no lint configured)\""
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",
+    "dotenv": "^16.4.5",
     "fastify": "^5.2.1"
   },
   "devDependencies": {

@@ -234,6 +234,16 @@ All PRs must pass:
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
+## Port fallback behavior
+
+When running the bundled `hotreload-test.sh`, the script will try to bind the default ports:
+
+- UI: 3000..3050 (starts at 3000)
+- Server: 3001..3050 (starts at 3001)
+- Runner: 3002..3050 (starts at 3002)
+
+If a default port is already in use, the script will increment to the next available port within the 3000–3050 range and start the service there. The chosen ports are printed when the script starts, and health checks use those actual ports. This helps avoid EADDRINUSE errors during local development.
+
 ## Support
 
 For questions or issues:

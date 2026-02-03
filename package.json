@@ -1,0 +1,17 @@
+{
+  "name": "aiwebapp",
+  "private": true,
+  "scripts": {
+    "init:env": "test -f server/.env || cp server/.env.example server/.env && test -f runner/.env || cp runner/.env.example runner/.env && test -f ui/.env.local || cp ui/.env.example ui/.env.local",
+    "setup": "npm install && npm run bootstrap && npm run init:env",
+    "bootstrap": "npm --prefix server install && npm --prefix runner install && npm --prefix ui install",
+    "dev": "concurrently -k -n server,runner,ui -c blue,magenta,green \"npm --prefix server run dev\" \"npm --prefix runner run dev\" \"npm --prefix ui run dev\"",
+    "build": "npm --prefix server run build && npm --prefix runner run build && npm --prefix ui run build",
+    "start": "concurrently -k -n server,runner,ui -c blue,magenta,green \"npm --prefix server start\" \"npm --prefix runner start\" \"npm --prefix ui start\"",
+    "smoke": "npm --prefix server run smoke && npm --prefix runner run smoke && npm --prefix ui run smoke",
+    "lint": "npm --prefix ui run lint"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
