@@ -13,23 +13,13 @@ export default function Home() {
   // Check if OS_SECURITY_KEY is defined on server-side
   const hasEnvToken = !!process.env.NEXT_PUBLIC_OS_SECURITY_KEY
   const envToken = process.env.NEXT_PUBLIC_OS_SECURITY_KEY || ''
-  const selectedEndpoint = useStore((state) => state.selectedEndpoint)
+  const hydrated = useStore((state) => state.hydrated)
   const setSelectedEndpoint = useStore((state) => state.setSelectedEndpoint)
   const isMobile = useIsMobile(430, true)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
+  // Fetch config once on mount
   useEffect(() => {
-    const hostname = window.location.hostname
-    const isLocal = hostname === 'localhost' || hostname === '127.0.0.1'
-    if (isLocal) return
-
-    const looksLikeLocalhost =
-      !selectedEndpoint ||
-      selectedEndpoint.startsWith('http://localhost') ||
-      selectedEndpoint.startsWith('http://127.0.0.1')
-
-    if (!looksLikeLocalhost) return
-
     let cancelled = false
     ;(async () => {
       try {
@@ -48,7 +38,12 @@ export default function Home() {
     return () => {
       cancelled = true
     }
-  }, [selectedEndpoint, setSelectedEndpoint])
+  }, [setSelectedEndpoint])
+
+  // Don't render until store is hydrated to avoid SSR mismatch
+  if (!hydrated) {
+    return null
+  }
 
   return (
     <Suspense fallback={<div>Loading...</div>}>

@@ -105,7 +105,8 @@ echo "# Managed by hotreload-test.sh" > ui/.env.local
 echo "# Optional: UI auth token for AgentOS requests" >> ui/.env.local
 echo "# NEXT_PUBLIC_OS_SECURITY_KEY=your_token_here" >> ui/.env.local
 echo >> ui/.env.local
-echo "NEXT_PUBLIC_API_URL=http://localhost:$SERVER_PORT" >> ui/.env.local
+echo "# Leave NEXT_PUBLIC_API_URL empty to use dynamic detection based on hostname" >> ui/.env.local
+echo "NEXT_PUBLIC_API_URL=" >> ui/.env.local
 echo "NEXT_PUBLIC_AI_API_URL=$AI_API_PUBLIC_URL" >> ui/.env.local
 echo >> ui/.env.local
 echo "RUNNER_URL=http://localhost:$RUNNER_PORT" >> ui/.env.local
@@ -146,7 +147,7 @@ sleep 0.2
 
 echo "Starting UI (logs/ui.log)..."
 # pass -p for Next
-UI_PID=$(run_with_ato "$LOG_DIR/ui.log" "cd ui && npm run dev -- -p \"$UI_PORT\"")
+UI_PID=$(run_with_ato "$LOG_DIR/ui.log" "cd ui && npm run dev")
 sleep 0.2
 
 echo "Starting runner (logs/runner.log)..."
