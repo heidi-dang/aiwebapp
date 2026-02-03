@@ -274,6 +274,8 @@ const ChatInput = () => {
           <Tooltip content="Run as job" side="top" delayDuration={300}>
             <Button
               type="button"
+              aria-label="Run message as job"
+              title="Run message as job"
               variant="ghost"
               size="icon"
               className="h-8 w-8 rounded-lg"
@@ -286,6 +288,8 @@ const ChatInput = () => {
 
           <Button
             type="button"
+            aria-label="Select agent or team"
+            title="Select agent or team"
             variant="ghost"
             size="icon"
             className="h-8 w-8 rounded-lg"
@@ -298,6 +302,8 @@ const ChatInput = () => {
 
           <Button
             type="button"
+            aria-label="Open tools"
+            title="Open tools"
             variant="ghost"
             size="icon"
             className="h-8 w-8 rounded-lg"
@@ -310,6 +316,8 @@ const ChatInput = () => {
 
           <Button
             type="button"
+            aria-label="Copilot status and controls"
+            title="Copilot status and controls"
             variant="ghost"
             size="icon"
             className="relative h-8 w-8 rounded-lg"

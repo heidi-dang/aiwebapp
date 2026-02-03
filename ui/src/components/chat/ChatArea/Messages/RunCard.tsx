@@ -211,6 +211,8 @@ export default function RunCard({ jobId }: { jobId: string }) {
               type="button"
               size="sm"
               variant="outline"
+              aria-label={`Cancel job ${shortId(run.jobId)}`}
+              title={`Cancel job ${shortId(run.jobId)}`}
               onClick={async () => {
                 await cancelJob(run.jobId)
               }}
@@ -240,7 +242,11 @@ export default function RunCard({ jobId }: { jobId: string }) {
 
           {planSteps.length > 0 && <PlanSection steps={planSteps} />}
 
-          {tools.size > 0 && <ToolTimeline tools={tools} />}
+          {tools.size > 0 && (
+            <div aria-live="polite">
+              <ToolTimeline tools={tools} />
+            </div>
+          )}
 
           {run.events.length === 0 && (
             <div className="text-xs text-muted">Waiting for events...</div>
