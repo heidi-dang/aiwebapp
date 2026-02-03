@@ -26,7 +26,7 @@ This application consists of three main services:
 
 The application supports integration with GitHub Copilot via the CopilotAPI Bridge extension, providing access to advanced AI models.
 
-### Setup
+### Local Development Setup
 
 1. Install the CopilotAPI Bridge VS Code extension (already installed).
 2. The API server runs on `http://localhost:4000`.
@@ -36,6 +36,45 @@ The application supports integration with GitHub Copilot via the CopilotAPI Brid
    AI_API_KEY=<your-api-key>
    ```
 4. In the UI, select "CopilotAPI" provider for chat completions using Copilot models.
+
+### Remote Access Setup
+
+The CopilotAPI Bridge only works locally by default. To access CopilotAPI models when connecting from remote domains (like heidiai.com.au), set up an ngrok tunnel:
+
+1. **Install ngrok:**
+   ```bash
+   # Already installed via setup-tunnel.sh
+   ```
+
+2. **Authenticate ngrok:**
+   ```bash
+   # Get token from https://dashboard.ngrok.com/get-started/your-authtoken
+   ngrok config add-authtoken YOUR_TOKEN_HERE
+   ```
+
+3. **Start the tunnel:**
+   ```bash
+   ./setup-tunnel.sh
+   ```
+   This creates a secure tunnel exposing `localhost:4000` to the internet.
+
+4. **Update environment variables:**
+   ```bash
+   ./update-env-with-tunnel.sh
+   ```
+   This automatically updates your `.env` files with the tunnel URL.
+
+5. **Restart services:**
+   ```bash
+   npm run dev
+   ```
+
+6. **Access remotely:**
+   - Your CopilotAPI models will now work from any domain
+   - The tunnel URL replaces `http://localhost:4000`
+   - Keep ngrok running for remote access
+
+**Security Note:** Stop the tunnel when not needed with `pkill ngrok` to avoid exposing your CopilotAPI Bridge unnecessarily.
 
 ### Providers
 
