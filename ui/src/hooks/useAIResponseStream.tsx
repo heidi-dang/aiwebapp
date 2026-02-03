@@ -13,33 +13,16 @@ function processChunk(
   onChunk(chunk)
 }
 
-// TODO: Make new format the default and phase out legacy format
-
-/**
- * Detects if the incoming data is in the legacy format (direct RunResponseContent)
- * @param data - The parsed data object
- * @returns true if it's in the legacy format, false if it's in the new format
- */
-function isLegacyFormat(data: RunResponseContent): boolean {
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    'event' in data &&
-    !('data' in data) &&
-    typeof data.event === 'string'
-  )
-}
+// Phased out legacy format - now only supports new format
 
 interface NewFormatData {
   event: string
   data: string | Record<string, unknown>
 }
 
-type LegacyEventFormat = RunResponseContent & { event: string }
-
 function convertNewFormatToLegacy(
   newFormatData: NewFormatData
-): LegacyEventFormat {
+): RunResponseContent {
   const { event, data } = newFormatData
 
   // Parse the data field if it's a string
@@ -61,7 +44,7 @@ function convertNewFormatToLegacy(
   return {
     event: event,
     ...cleanData
-  } as LegacyEventFormat
+  } as RunResponseContent
 }
 /**
  * Parses a string buffer to extract complete JSON objects.
@@ -127,14 +110,9 @@ function parseBuffer(
       try {
         const parsed = JSON.parse(jsonString)
 
-        // Check if it's in the legacy format - use as is
-        if (isLegacyFormat(parsed)) {
-          processChunk(parsed, onChunk)
-        } else {
-          // New format - convert to legacy format for compatibility
-          const legacyChunk = convertNewFormatToLegacy(parsed)
-          processChunk(legacyChunk, onChunk)
-        }
+        // Assume new format - convert to RunResponseContent
+        const legacyChunk = convertNewFormatToLegacy(parsed)
+        processChunk(legacyChunk, onChunk)
       } catch {
         // Move past the starting brace to avoid re-parsing the same invalid JSON.
         jsonStartIndex = buffer.indexOf('{', jsonStartIndex + 1)
@@ -161,14 +139,13 @@ function parseBuffer(
 /**
  * Custom React hook to handle streaming API responses as JSON objects.
  *
- * This hook supports two streaming formats:
- * 1. Legacy format: Direct JSON objects matching RunResponseContent interface
- * 2. New format: Event/data structure with { event: string, data: string|object }
+ * This hook supports the new streaming format:
+ * - New format: Event/data structure with { event: string, data: string|object }
  *
  * The hook:
  * - Accumulates partial JSON data from streaming responses.
  * - Extracts complete JSON objects and processes them via onChunk.
- * - Automatically detects new format and converts it to legacy format for compatibility.
+ * - Converts new format to RunResponseContent for compatibility.
  * - Parses stringified data field if it's a string (supports both JSON and Python dict syntax).
  * - Removes redundant event field from data object during conversion.
  * - Handles errors via onError and signals completion with onComplete.
