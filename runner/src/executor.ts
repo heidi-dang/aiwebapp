@@ -199,6 +199,26 @@ async function handleRunCommandTool(ctx: JobContext, command: string) {
   }
 }
 
+// Heuristics to avoid running natural-language or unsafe commands
+function looksLikeNaturalLanguageCommand(command: string): boolean {
+  // If the assistant returns phrases like "run the tests" or "execute the task",
+  // these are natural-language instructions rather than shell commands.
+  if (/\b(run|execute|start|stop|open|close|list|show|find)\b\s+(the|a|an)\b/i.test(command)) {
+    return true
+  }
+  // If it's multiple words of plain English without typical CLI chars, consider NL
+  if (/^[A-Za-z ,]+$/.test(command) && command.trim().split(/\s+/).length > 3) {
+    return true
+  }
+  return false
+}
+
+function isDangerousCommand(command: string): boolean {
+  const lowered = command.toLowerCase()
+  // Simple blacklist of dangerous patterns
+  return /(^|\s)(rm\s+-rf|sudo\b|shutdown\b|reboot\b|mkfs\b|dd\s+if=|:\(\)\s*{\s*:|:;};:|:\s*>\s*\/|>\s*\/)/.test(lowered)
+}
+
 async function handleListDirTool(ctx: JobContext, path: string) {
   await emitEvent(ctx, 'tool.start', { tool: 'list_dir', input: { path } })
   try {
@@ -609,7 +629,21 @@ async function executeWithCopilotApi(ctx: JobContext): Promise<void> {
         result = query ? await handleGrepSearchTool(ctx, query, includePattern) : { error: 'Missing query' }
       } else if (call.function?.name === 'run_command') {
         const command = typeof args.command === 'string' ? args.command : ''
-        result = command ? await handleRunCommandTool(ctx, command) : { error: 'Missing command' }
+        if (!command) {
+          result = { error: 'Missing command' }
+        } else if (looksLikeNaturalLanguageCommand(command)) {
+          const message = 'Refused to run: command looks like natural language rather than a shell command.'
+          await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message })
+          await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
+          result = { error: message }
+        } else if (isDangerousCommand(command)) {
+          const message = 'Refused to run: command matches disallowed or unsafe patterns.'
+          await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message })
+          await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
+          result = { error: message }
+        } else {
+          result = await handleRunCommandTool(ctx, command)
+        }
       }
 
       messages.push({
