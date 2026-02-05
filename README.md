@@ -285,6 +285,17 @@ PORT=3002
 SERVER_URL=http://localhost:3001
 ```
 
+### Important: Environment files & Copilot API — do NOT edit committed env files ⚠️
+
+- **Do not modify or commit** environment files that are tracked in the repository. If you need local overrides, create or edit the service-local env files (for example, `ui/.env.local`, `server/.env`, `runner/.env`) — these files are listed in `.gitignore` and should not be committed.
+- The UI forwards Copilot API requests to the host defined by `NEXT_PUBLIC_AI_API_URL`. If that host is unreachable, the UI proxy will return a `502 Bad Gateway` (e.g., "models fetch failed: 502").
+- For local development with a locally running Copilot API, set `NEXT_PUBLIC_AI_API_URL` to the Copilot host (for example `http://localhost:8080`).
+- Quick debugging steps if you see a `502` when fetching models:
+  - Check the UI proxy response: `curl -i http://localhost:3000/api/copilot/v1/models`
+  - Check the Copilot API directly: `curl -i http://localhost:8080/v1/models`
+- If you need to share environment values, use `.env.example` or a secure channel; do not commit secrets to the repository.
+- If you want repository-managed env changes, open an issue and confirm before any automated edits are made.
+
 ## Development Guidelines
 
 ### Code Style

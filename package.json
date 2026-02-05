@@ -9,9 +9,11 @@
     "build": "npm --prefix server run build && npm --prefix runner run build && npm --prefix ui run build",
     "start": "concurrently -k -n server,runner,ui -c blue,magenta,green \"npm --prefix server start\" \"npm --prefix runner start\" \"npm --prefix ui start\"",
     "smoke": "npm --prefix server run smoke && npm --prefix runner run smoke && npm --prefix ui run smoke",
-    "lint": "npm --prefix ui run lint"
+    "lint": "npm --prefix ui run lint",
+    "check:tools": "node scripts/check-tools.js"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "glob": "^13.0.1"
   }
 }
