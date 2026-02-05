@@ -11,6 +11,7 @@ export class InMemoryStore {
     teams;
     sessionsByListKey = new Map();
     sessionsByKey = new Map();
+    users = [];
     constructor() {
         this.agents = [
             {
@@ -100,6 +101,29 @@ export class InMemoryStore {
         this.sessionsByListKey.set(listKey, current.filter((s) => s.session_id !== args.sessionId));
         return true;
     }
+    async createUser(email, name, hashedPassword) {
+        const createdAt = nowSeconds();
+        const role = (await this.getUserCount()) === 0 ? 'admin' : 'user';
+        const id = (this.users.length + 1).toString();
+        const user = { id, email, name, role, created_at: createdAt };
+        this.users.push(user);
+        return user;
+    }
+    async getUserByEmail(email) {
+        return this.users.find(user => user.email === email) || null;
+    }
+    async getUserById(id) {
+        return this.users.find(user => user.id === id) || null;
+    }
+    async updateUserLastLogin(id) {
+        const user = this.users.find(user => user.id === id);
+        if (user) {
+            user.last_login_at = nowSeconds();
+        }
+    }
+    async getUserCount() {
+        return this.users.length;
+    }
 }
 export class SqliteStore {
     agents;
@@ -153,7 +177,17 @@ export class SqliteStore {
             '  run_input TEXT,',
             '  content_json TEXT',
             ');',
-            'CREATE INDEX IF NOT EXISTS runs_session_idx ON runs (db_id, entity_type, component_id, session_id, created_at ASC);'
+            'CREATE INDEX IF NOT EXISTS runs_session_idx ON runs (db_id, entity_type, component_id, session_id, created_at ASC);',
+            'CREATE TABLE IF NOT EXISTS users (',
+            '  id INTEGER PRIMARY KEY AUTOINCREMENT,',
+            '  email TEXT NOT NULL UNIQUE,',
+            '  name TEXT NOT NULL,',
+            '  hashed_password TEXT NOT NULL,',
+            '  role TEXT NOT NULL,',
+            '  created_at INTEGER NOT NULL,',
+            '  last_login_at INTEGER',
+            ');',
+            'CREATE INDEX IF NOT EXISTS users_email_idx ON users (email);'
         ].join('\n'));
         return new SqliteStore(db);
     }
@@ -207,6 +241,34 @@ export class SqliteStore {
         const result = await this.db.run('DELETE FROM sessions WHERE db_id = ? AND entity_type = ? AND component_id = ? AND session_id = ?', args.dbId, args.entityType, args.componentId, args.sessionId);
         await this.db.run('DELETE FROM runs WHERE db_id = ? AND entity_type = ? AND component_id = ? AND session_id = ?', args.dbId, args.entityType, args.componentId, args.sessionId);
         return (result.changes ?? 0) > 0;
+    }
+    async createUser(email, name, hashedPassword) {
+        const createdAt = nowSeconds();
+        const role = (await this.getUserCount()) === 0 ? 'admin' : 'user';
+        const result = await this.db.run(`INSERT INTO users (email, name, hashed_password, role, created_at) VALUES (?, ?, ?, ?, ?)`, email, name, hashedPassword, role, createdAt);
+        return {
+            id: result.lastID?.toString() || "0",
+            email,
+            name,
+            role,
+            created_at: createdAt
+        };
+    }
+    async getUserByEmail(email) {
+        const row = await this.db.get(`SELECT * FROM users WHERE email = ?`, email);
+        return row || null;
+    }
+    async getUserById(id) {
+        const row = await this.db.get(`SELECT * FROM users WHERE id = ?`, id);
+        return row || null;
+    }
+    async updateUserLastLogin(id) {
+        const lastLoginAt = nowSeconds();
+        await this.db.run(`UPDATE users SET last_login_at = ? WHERE id = ?`, lastLoginAt, id);
+    }
+    async getUserCount() {
+        const row = await this.db.get(`SELECT COUNT(*) as count FROM users`);
+        return row?.count || 0;
     }
 }
 function safeJsonParse(value) {

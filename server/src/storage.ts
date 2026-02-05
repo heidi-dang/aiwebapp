@@ -1,4 +1,4 @@
-import { AgentDetails, EntityType, RunRecord, SessionEntry, TeamDetails } from './types.js'
+import { AgentDetails, EntityType, RunRecord, SessionEntry, TeamDetails, User } from './types.js'
 
 import sqlite3 from 'sqlite3'
 import { open, type Database } from 'sqlite'
@@ -49,6 +49,13 @@ export interface Store {
     componentId: string
     sessionId: string
   }): Promise<boolean>
+
+  // User management
+  createUser(email: string, name: string, hashedPassword: string): Promise<User>
+  getUserByEmail(email: string): Promise<User | null>
+  getUserById(id: string): Promise<User | null>
+  updateUserLastLogin(id: string): Promise<void>
+  getUserCount(): Promise<number>
 }
 
 function makeSessionKey(args: {
@@ -70,6 +77,8 @@ export class InMemoryStore implements Store {
 
   private readonly sessionsByListKey: Map<string, SessionEntry[]> = new Map()
   private readonly sessionsByKey: Map<SessionKey, StoredSession> = new Map()
+
+  private users: User[] = []
 
   constructor() {
     this.agents = [
@@ -203,6 +212,34 @@ export class InMemoryStore implements Store {
     )
     return true
   }
+
+  async createUser(email: string, name: string, hashedPassword: string): Promise<User> {
+    const createdAt = nowSeconds();
+    const role = (await this.getUserCount()) === 0 ? 'admin' : 'user';
+    const id = (this.users.length + 1).toString();
+    const user: User = { id, email, name, role, created_at: createdAt };
+    this.users.push(user);
+    return user;
+  }
+
+  async getUserByEmail(email: string): Promise<User | null> {
+    return this.users.find(user => user.email === email) || null;
+  }
+
+  async getUserById(id: string): Promise<User | null> {
+    return this.users.find(user => user.id === id) || null;
+  }
+
+  async updateUserLastLogin(id: string): Promise<void> {
+    const user = this.users.find(user => user.id === id);
+    if (user) {
+      user.last_login_at = nowSeconds();
+    }
+  }
+
+  async getUserCount(): Promise<number> {
+    return this.users.length;
+  }
 }
 
 export class SqliteStore implements Store {
@@ -264,7 +301,17 @@ export class SqliteStore implements Store {
         '  run_input TEXT,',
         '  content_json TEXT',
         ');',
-        'CREATE INDEX IF NOT EXISTS runs_session_idx ON runs (db_id, entity_type, component_id, session_id, created_at ASC);'
+        'CREATE INDEX IF NOT EXISTS runs_session_idx ON runs (db_id, entity_type, component_id, session_id, created_at ASC);',
+        'CREATE TABLE IF NOT EXISTS users (',
+        '  id INTEGER PRIMARY KEY AUTOINCREMENT,',
+        '  email TEXT NOT NULL UNIQUE,',
+        '  name TEXT NOT NULL,',
+        '  hashed_password TEXT NOT NULL,',
+        '  role TEXT NOT NULL,',
+        '  created_at INTEGER NOT NULL,',
+        '  last_login_at INTEGER',
+        ');',
+        'CREATE INDEX IF NOT EXISTS users_email_idx ON users (email);'
       ].join('\n')
     )
 
@@ -421,6 +468,46 @@ export class SqliteStore implements Store {
     )
 
     return (result.changes ?? 0) > 0
+  }
+
+  async createUser(email: string, name: string, hashedPassword: string): Promise<User> {
+    const createdAt = nowSeconds()
+    const role = (await this.getUserCount()) === 0 ? 'admin' : 'user'
+    const result = await this.db.run(
+      `INSERT INTO users (email, name, hashed_password, role, created_at) VALUES (?, ?, ?, ?, ?)`,
+      email,
+      name,
+      hashedPassword,
+      role,
+      createdAt
+    )
+    return {
+      id: result.lastID?.toString() || "0",
+      email,
+      name,
+      role,
+      created_at: createdAt
+    }
+  }
+
+  async getUserByEmail(email: string): Promise<User | null> {
+    const row = await this.db.get<User>(`SELECT * FROM users WHERE email = ?`, email)
+    return row || null
+  }
+
+  async getUserById(id: string): Promise<User | null> {
+    const row = await this.db.get<User>(`SELECT * FROM users WHERE id = ?`, id)
+    return row || null
+  }
+
+  async updateUserLastLogin(id: string): Promise<void> {
+    const lastLoginAt = nowSeconds()
+    await this.db.run(`UPDATE users SET last_login_at = ? WHERE id = ?`, lastLoginAt, id)
+  }
+
+  async getUserCount(): Promise<number> {
+    const row = await this.db.get<{ count: number }>(`SELECT COUNT(*) as count FROM users`)
+    return row?.count || 0
   }
 }
 

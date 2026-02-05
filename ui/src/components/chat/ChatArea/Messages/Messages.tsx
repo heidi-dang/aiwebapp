@@ -153,7 +153,7 @@ const ToolComponent = memo(({ tools }: ToolCallProps) => (
   </div>
 ))
 ToolComponent.displayName = 'ToolComponent'
-const Messages = ({ messages }: MessageListProps) => {
+const Messages = memo(({ messages }: MessageListProps) => {
   if (messages.length === 0) {
     return <ChatBlankState />
   }
@@ -177,6 +177,8 @@ const Messages = ({ messages }: MessageListProps) => {
       })}
     </>
   )
-}
+})
+
+Messages.displayName = 'Messages'
 
 export default Messages

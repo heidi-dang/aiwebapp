@@ -30,10 +30,29 @@ function statusClass(status: RunState['status']) {
   }
 }
 
+// Convert internal tool/step identifiers into human-friendly labels.
+function formatToolLabel(name: string) {
+  const map: Record<string, string> = {
+    planning: 'Planning',
+    code_generation: 'Code generation',
+    code_execution: 'Code execution',
+    review: 'Review',
+    iterate: 'Iterate',
+    finish: 'Finish',
+  }
+
+  if (map[name]) return map[name]
+
+  // Fallback: replace underscores with spaces and title-case words
+  return name
+    .replace(/_/g, ' ')
+    .replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1))
+}
+
 interface PlanStep {
   tool: string
   description: string
-}
+} 
 
 interface ToolState {
   name: string
@@ -49,8 +68,8 @@ function PlanSection({ steps }: { steps: PlanStep[] }) {
         {steps.map((step, i) => (
           <div key={`${step.tool}-${i}`} className="flex items-center gap-2 text-xs">
             <span className="font-mono text-primary/60">{i + 1}.</span>
-            <span className="font-medium text-primary">{step.tool}</span>
-            <span className="text-secondary">{step.description}</span>
+            <span className="font-medium text-primary">{formatToolLabel(step.tool)}</span>
+            <span className="text-secondary">{step.description}</span> 
           </div>
         ))}
       </div>
@@ -77,7 +96,7 @@ function ToolTimeline({ tools }: { tools: Map<string, ToolState> }) {
               <Icon type="x" size="xs" className="text-red-400" />
             )}
             <span className="font-mono text-xs font-medium text-primary">
-              {name}
+              {formatToolLabel(name)}
             </span>
           </div>
           {tool.outputs.length > 0 && (

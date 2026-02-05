@@ -57,6 +57,9 @@ async function main() {
     await registerRunRoutes(app, store);
     // Register the auth routes
     await app.register(authRoutes);
+    // Register toolbox routes for UI-driven tools (internal)
+    const { registerToolboxRoutes } = await import('./routes/toolbox.js');
+    await registerToolboxRoutes(app);
     await app.listen({ port: PORT, host: '0.0.0.0' });
 }
 main().catch((err) => {

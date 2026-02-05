@@ -59,3 +59,18 @@ export interface StreamChunk {
   team_id?: string
   content?: string
 }
+
+export interface User {
+  id: string
+  email: string
+  name?: string
+  role: 'admin' | 'user'
+  created_at: number
+  last_login_at?: number
+}
+
+export interface AuthTokens {
+  access_token: string
+  refresh_token: string
+  user: User
+}

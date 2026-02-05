@@ -20,7 +20,7 @@ interface MessageProps {
   message: ChatMessage
 }
 
-const AgentMessage = ({ message }: MessageProps) => {
+const AgentMessage = memo(({ message }: MessageProps) => {
   const { streamingErrorMessage } = useStore()
   let messageContent
   const runnerJobId = message.extra_data?.runner_job_id
@@ -91,7 +91,7 @@ const AgentMessage = ({ message }: MessageProps) => {
       {messageContent}
     </div>
   )
-}
+})
 
 const UserMessage = memo(({ message }: MessageProps) => {
   return (

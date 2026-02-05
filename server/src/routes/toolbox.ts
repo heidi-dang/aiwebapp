@@ -3,7 +3,7 @@ import { requireOptionalBearerAuth } from '../auth.js'
 import { promises as fs } from 'node:fs'
 import { exec as execCb } from 'child_process'
 import { promisify } from 'util'
-import { glob } from 'glob'
+import * as glob from 'glob'
 
 const exec = promisify(execCb)
 
@@ -77,7 +77,7 @@ export async function registerToolboxRoutes(app: FastifyInstance) {
 
       if (tool === 'list_files') {
         const pattern = String(params.glob ?? '**/*')
-        const entries = await glob(pattern, { cwd: process.cwd() })
+        const entries = await glob.glob(pattern, { cwd: process.cwd() })
         return { success: true, result: { files: entries } }
       }
 

@@ -12,7 +12,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 function writeChunk(replyRaw: NodeJS.WritableStream, chunk: StreamChunk) {
-  replyRaw.write(JSON.stringify(chunk))
+  // Ensure chunks are newline-delimited so downstream stream parsers
+  // can split and parse individual JSON objects incrementally.
+  replyRaw.write(JSON.stringify(chunk) + '\n')
 }
 
 function requireEnv(name: string): string {
@@ -75,6 +77,7 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       body: JSON.stringify({
         input: {
           message,
+          session_id: created.sessionId,
           provider: 'copilotapi',
           model: 'gpt-4o'
         }

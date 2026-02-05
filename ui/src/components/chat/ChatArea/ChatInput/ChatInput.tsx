@@ -9,6 +9,9 @@ import { useQueryState } from 'nuqs'
 import Icon from '@/components/ui/icon'
 import Tooltip from '@/components/ui/tooltip'
 import { getStatusAPI } from '@/api/os'
+
+import Highlight, { defaultProps } from 'prism-react-renderer'
+import theme from 'prism-react-renderer/themes/github'
 import {
   Dialog,
   DialogContent,
@@ -68,37 +71,77 @@ const ChatInput = () => {
   const [isRunningTool, setIsRunningTool] = useState<boolean>(false)
   const [toolError, setToolError] = useState<string | null>(null)
 
-  // Simple JSON syntax highlighting (minimal, no deps)
-  function escapeHtml(unsafe: string) {
-    return unsafe
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-  }
-
-  function highlightJson(jsonStr: string) {
-    try {
-      const obj = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr
-      const pretty = JSON.stringify(obj, null, 2)
-      const escaped = escapeHtml(pretty)
-      // Wrap keys, strings, numbers, booleans, null
-      return escaped
-        .replace(/(\"(.*?)\")(?=\s*:)/g, '<span class="text-indigo-400">$1</span>')
-        .replace(/:(\s*)(\".*?\")/g, ':$1<span class="text-emerald-400">$2</span>')
-        .replace(/:(\s*)(-?\d+(?:\.\d+)?)/g, ':$1<span class="text-orange-400">$2</span>')
-        .replace(/\b(true|false|null)\b/g, '<span class="text-purple-400">$1</span>')
-    } catch (e) {
-      // Not valid JSON, just escape and return raw
-      return escapeHtml(jsonStr)
-    }
-  }
-
   function copyOutput() {
     if (!toolOutput) return
     navigator.clipboard.writeText(toolOutput).then(() => {
-      // small toast or visual cue could be added; for now console
-      console.log('Tool output copied to clipboard')
+      toast.success('Copied tool output to clipboard')
     })
+  }
+
+  async function handleRunTool() {
+    if (!selectedTool) return
+    if (!validateInputs()) return
+    setToolOutput('')
+    setIsRunningTool(true
+    )
+    try {
+      const body: { tool: string; params: Record<string, unknown> } = { tool: selectedTool, params: {} }
+      if (selectedTool === 'read_file') body.params.path = toolInput.path
+      if (selectedTool === 'write_file') {
+        body.params.path = toolInput.path
+        body.params.content = toolInput.content ?? ''
+      }
+      if (selectedTool === 'list_files') body.params.glob = toolInput.glob
+      if (selectedTool === 'list_dir') body.params.path = toolInput.path
+      if (selectedTool === 'grep_search') {
+        body.params.query = toolInput.query
+        if (toolInput.include) body.params.include_pattern = toolInput.include
+      }
+      if (selectedTool === 'run_command') body.params.command = toolInput.command
+
+      try {
+        setToolError(null)
+        const res = await fetch('/api/toolbox', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        })
+
+        const txt = await res.text()
+        const ct = res.headers.get('content-type') || ''
+
+        if (!ct.includes('application/json')) {
+          setToolOutput(txt)
+        } else {
+          try {
+            const json = JSON.parse(txt)
+            setToolOutput(JSON.stringify(json, null, 2))
+          } catch {
+            setToolOutput(txt)
+          }
+        }
+
+        if (!res.ok) {
+          try {
+            const maybe = JSON.parse(txt)
+            setToolError(String(maybe.error ?? `Tool returned ${res.status}`))
+          } catch {
+            setToolError(`Tool returned ${res.status}`)
+          }
+        }
+      } catch (err: unknown) {
+        const message =
+          typeof err === 'object' && err !== null && 'message' in err
+            ? String((err as { message?: unknown }).message)
+            : String(err)
+        setToolOutput(message)
+      } finally {
+        setIsRunningTool(false)
+      }
+    } catch (err) {
+      setToolError(String(err))
+      setIsRunningTool(false)
+    }
   }
 
   function validateInputs(): boolean {
@@ -140,7 +183,7 @@ const ChatInput = () => {
       try {
         // test regex
         new RegExp(q)
-      } catch (e) {
+      } catch {
         setToolError('Invalid regex')
         return false
       }
@@ -191,22 +234,27 @@ const ChatInput = () => {
         headers['Authorization'] = `Bearer ${authToken}`
       }
 
+      console.log('Fetching models from /api/copilot/v1/models with headers:', headers);
+
       fetch('/api/copilot/v1/models', { headers })
         .then(async (res) => {
-          if (!res.ok) throw new Error(`models fetch failed: ${res.status}`)
-          const ct = res.headers.get('content-type') || ''
+          console.log('Response status:', res.status);
+          if (!res.ok) throw new Error(`models fetch failed: ${res.status}`);
+          const ct = res.headers.get('content-type') || '';
+          console.log('Response content-type:', ct);
           if (!ct.includes('application/json')) {
-            const txt = await res.text()
-            console.error('Models endpoint returned non-JSON:', txt)
-            throw new Error('Models endpoint returned non-JSON')
+            const txt = await res.text();
+            console.error('Models endpoint returned non-JSON:', txt);
+            throw new Error('Models endpoint returned non-JSON');
           }
-          return res.json()
+          return res.json();
         })
         .then((data) => {
-          const models = data.data.map((m: { id: string }) => m.id)
-          setAvailableModels(models)
+          console.log('Fetched models data:', data);
+          const models = data.data.map((m: { id: string }) => m.id);
+          setAvailableModels(models);
           if (!selectedModel && models.length > 0) {
-            setSelectedModel(models[0])
+            setSelectedModel(models[0]);
           }
         })
         .catch((err) => console.error('Failed to fetch models:', err))
@@ -383,6 +431,40 @@ const ChatInput = () => {
     }
   }
 
+  // Simple JSON syntax highlighting (minimal, no deps)
+  function escapeHtml(unsafe: string) {
+    return unsafe
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+  }
+
+  function highlightJson(jsonStr: string) {
+    try {
+      const obj = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr
+      const pretty = JSON.stringify(obj, null, 2)
+      const escaped = escapeHtml(pretty)
+      // Wrap keys, strings, numbers, booleans, null
+      return escaped
+        .replace(/(\"(.*?)\")(?=\s*:)/g, '<span class="text-indigo-400">$1</span>')
+        .replace(/:(\s*)(\".*?\")/g, ':$1<span class="text-emerald-400">$2</span>')
+        .replace(/:(\s*)(-?\d+(?:\.\d+)?)/g, ':$1<span class="text-orange-400">$2</span>')
+        .replace(/\b(true|false|null)\b/g, '<span class="text-purple-400">$1</span>')
+    } catch (e) {
+      // Not valid JSON, just escape and return raw
+      return escapeHtml(jsonStr)
+    }
+  }
+
+  // Function to decode HTML entities
+  function decodeHtml(encoded: string): string {
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = encoded;
+    return textarea.value;
+  }
+
+
+
   return (
     <div className="relative mx-auto mb-1 flex w-full max-w-2xl items-end justify-center gap-x-2 font-geist">
       <Dialog open={isAgentDialogOpen} onOpenChange={setIsAgentDialogOpen}>
@@ -534,6 +616,15 @@ const ChatInput = () => {
                 )}
 
                 {selectedTool === 'write_file' && (
+                  <textarea
+                    className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
+                    placeholder="path"
+                    value={toolInput.content ?? ''}
+                    onChange={(e) => setToolInput((s) => ({ ...s, content: e.target.value }))}
+                  />
+                )}
+
+                {selectedTool === 'write_file' && (
                   <input
                     className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
                     placeholder="path"
@@ -588,69 +679,15 @@ const ChatInput = () => {
 
                 <Button
                   size="sm"
-                  onClick={async () => {
-                    if (!selectedTool) return
-                    setToolOutput('')
-                    setIsRunningTool(true)
-                    try {
-                      const body: { tool: string; params: Record<string, unknown> } = { tool: selectedTool, params: {} }
-                      if (selectedTool === 'read_file') body.params.path = toolInput.path
-                      if (selectedTool === 'write_file') {
-                        body.params.path = toolInput.path
-                        body.params.content = toolInput.content ?? ''
-                      }
-                      if (selectedTool === 'list_files') body.params.glob = toolInput.glob
-                      if (selectedTool === 'list_dir') body.params.path = toolInput.path
-                      if (selectedTool === 'grep_search') {
-                        body.params.query = toolInput.query
-                        if (toolInput.include) body.params.include_pattern = toolInput.include
-                      }
-                      if (selectedTool === 'run_command') body.params.command = toolInput.command
-
-                      try {
-                        setToolError(null)
-                        const res = await fetch('/api/toolbox', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify(body)
-                        })
-
-                        const txt = await res.text()
-                        const ct = res.headers.get('content-type') || ''
-
-                        if (!ct.includes('application/json')) {
-                          setToolOutput(txt)
-                        } else {
-                          try {
-                            const json = JSON.parse(txt)
-                            setToolOutput(JSON.stringify(json, null, 2))
-                          } catch {
-                            setToolOutput(txt)
-                          }
-                        }
-
-                        if (!res.ok) {
-                          try {
-                            const maybe = JSON.parse(txt)
-                            setToolError(String(maybe.error ?? `Tool returned ${res.status}`))
-                          } catch {
-                            setToolError(`Tool returned ${res.status}`)
-                          }
-                        }
-                      } catch (err: unknown) {
-                        const message =
-                          typeof err === 'object' && err !== null && 'message' in err
-                            ? String((err as { message?: unknown }).message)
-                            : String(err)
-                        setToolOutput(message)
-                      } finally {
-                        setIsRunningTool(false)
-                      }
-                    }}
+                  onClick={handleRunTool}
                   disabled={!selectedTool || isRunningTool}
                 >
                   Run
                 </Button>
+
+                <script>
+                  {/* noop to satisfy jsx parsing in older parser (removed at build) */}
+                </script>
               </div>
 
               <div className="mt-3">
@@ -672,13 +709,27 @@ const ChatInput = () => {
                     <div className="mb-2 rounded border border-red-400 bg-red-50 p-2 text-xs text-red-700">{toolError}</div>
                   )}
 
-                  <pre className="max-h-44 overflow-auto rounded border bg-muted p-2 text-xs">
+                  <div className="max-h-44 overflow-auto rounded border bg-muted p-2 text-xs">
                     {toolOutput ? (
-                      <code className="whitespace-pre" dangerouslySetInnerHTML={{ __html: highlightJson(toolOutput) }} />
+                      <Highlight {...defaultProps} code={toolOutput} language={(() => {
+                        try { JSON.parse(toolOutput); return 'json' } catch { return 'bash' }
+                      })()} theme={theme}>
+                        {({ className, style, tokens, getLineProps, getTokenProps }) => (
+                          <pre className={`${className} whitespace-pre m-0`} style={style}>
+                            {tokens.map((line, i) => (
+                              <div key={i} {...getLineProps({ line, key: i })}>
+                                {line.map((token, key) => (
+                                  <span key={key} {...getTokenProps({ token, key })} />
+                                ))}
+                              </div>
+                            ))}
+                          </pre>
+                        )}
+                      </Highlight>
                     ) : (
                       'No output'
                     )}
-                  </pre>
+                  </div>
                 </div>
               </div>
             </div>

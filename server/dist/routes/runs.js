@@ -7,7 +7,9 @@ function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 function writeChunk(replyRaw, chunk) {
-    replyRaw.write(JSON.stringify(chunk));
+    // Ensure chunks are newline-delimited so downstream stream parsers
+    // can split and parse individual JSON objects incrementally.
+    replyRaw.write(JSON.stringify(chunk) + '\n');
 }
 function requireEnv(name) {
     const v = process.env[name];
@@ -68,6 +70,7 @@ export async function registerRunRoutes(app, store) {
             body: JSON.stringify({
                 input: {
                     message,
+                    session_id: created.sessionId,
                     provider: 'copilotapi',
                     model: 'gpt-4o'
                 }

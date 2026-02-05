@@ -1,4 +1,8 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
+import path from 'path';
+import { fileURLToPath } from 'url';
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, '../.env') })
 
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
@@ -68,6 +72,11 @@ async function main() {
   await registerRunRoutes(app, store)
   // Register the auth routes
   await app.register(authRoutes)
+  // Register toolbox routes for UI-driven tools (internal)
+  const { registerToolboxRoutes } = await import('./routes/toolbox.js')
+  await registerToolboxRoutes(app)
+
+  console.log('RUNNER_URL:', process.env.RUNNER_URL);
 
   await app.listen({ port: PORT, host: '0.0.0.0' })
 }

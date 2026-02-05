@@ -66,6 +66,7 @@ async function writeFileCmd(p, text) {
 
 async function listFilesCmd(pattern) {
   try {
+    const glob = require('glob')
     const files = glob.sync(pattern, { cwd: process.cwd() })
     for (const f of files) console.log(f)
     return 0
@@ -90,10 +91,15 @@ async function grepSearchCmd(query, includePattern) {
   try {
     let cmd = `grep -R -n "${query.replace(/"/g, '\\"')}" . | head -n 200`
     if (includePattern) cmd = `grep -R -n --include="${includePattern}" "${query.replace(/"/g, '\\"')}" . | head -n 200`
-    const { stdout } = await exec(cmd, { maxBuffer: 1024 * 1024 })
+    const { stdout } = await exec(cmd, { maxBuffer: 2 * 1024 * 1024 }) // 2MB buffer
     console.log(stdout)
     return 0
   } catch (err) {
+    // grep returns exit code 1 when no matches found, which is not an error
+    if (err.code === 1) {
+      console.log('(no matches found)')
+      return 0
+    }
     if (err.stdout) console.log(err.stdout)
     console.error('grep-search error:', err.message)
     return 2
@@ -157,14 +163,18 @@ async function runCommandCmd(command, opts = { yes: false }) {
     return 3
   }
   try {
-    const { stdout, stderr } = await exec(command, { timeout: 15000, maxBuffer: 1024 * 1024 })
-    process.stdout.write(stdout || '')
-    process.stderr.write(stderr || '')
+    const { stdout, stderr } = await exec(command, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }) // 30s timeout, 10MB buffer
+    if (stdout) process.stdout.write(stdout)
+    if (stderr) process.stderr.write(stderr)
     return 0
   } catch (err) {
     if (err.stdout) process.stdout.write(err.stdout)
     if (err.stderr) process.stderr.write(err.stderr)
-    console.error('run-command failed:', err.message)
+    if (err.code && err.code !== 0) {
+      console.error(`run-command failed with exit code ${err.code}:`, err.message)
+    } else {
+      console.error('run-command failed:', err.message)
+    }
     return 2
   }
 }
