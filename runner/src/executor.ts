@@ -13,6 +13,7 @@ import { exec as execCb } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { RunnerEvent, RunnerEventType, JobStore, JobStatus } from './db.js'
 import { BridgeClient, createBridgeClientFromEnv } from './bridge.js'
+import { runCoderAgent } from './agent.js'
 import type { FastifyReply } from 'fastify'
 
 const execAsync = promisify(execCb)
@@ -32,6 +33,7 @@ export interface JobInput {
   tools?: string[]
   provider?: string
   model?: string
+  session_id?: string
 }
 
 type ToolCall = {
@@ -157,7 +159,7 @@ async function handleListFilesTool(ctx: JobContext, globPattern: string) {
         output: `Found ${entries.length} file(s)`
       })
       await emitEvent(ctx, 'tool.end', { tool: 'list_files', success: true })
-      return { files: entries.map((e) => e.path) }
+      return { files: entries.map((e: any) => e.path) }
     }
 
     // Fallback: use glob package
@@ -631,18 +633,71 @@ async function executeWithCopilotApi(ctx: JobContext): Promise<void> {
         const command = typeof args.command === 'string' ? args.command : ''
         if (!command) {
           result = { error: 'Missing command' }
-        } else if (looksLikeNaturalLanguageCommand(command)) {
-          const message = 'Refused to run: command looks like natural language rather than a shell command.'
-          await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message })
-          await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
-          result = { error: message }
-        } else if (isDangerousCommand(command)) {
-          const message = 'Refused to run: command matches disallowed or unsafe patterns.'
-          await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message })
-          await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
-          result = { error: message }
         } else {
-          result = await handleRunCommandTool(ctx, command)
+          // Load allowlist (cached) and enforce
+          const allowedPath = new URL('../..', import.meta.url)
+            .pathname.replace(/\/runner\/(?:\.\.)?$/, '') // fallback no-op
+          // Helper to read config file safely
+          async function loadAllowlist(): Promise<string[]> {
+            try {
+              const cfgPath = new URL('../../config/allowed-commands.json', import.meta.url).pathname
+              const content = await (await import('node:fs/promises')).readFile(cfgPath, 'utf8')
+              return JSON.parse(content) as string[]
+            } catch {
+              return []
+            }
+          }
+
+          function matchesAllowlist(cmd: string, allowed: string[]) {
+            if (!allowed || allowed.length === 0) return false
+            const trimmed = cmd.trim()
+            for (const a of allowed) {
+              const pick = a.trim()
+              if (trimmed === pick) return true
+              if (trimmed.startsWith(pick + ' ')) return true
+            }
+            return false
+          }
+
+          const allowed = await loadAllowlist()
+          if (!matchesAllowlist(command, allowed)) {
+            const message = 'Refused to run: command not on the allowlist.'
+            console.warn(`[Runner] Refused run_command: ${command}`)
+            await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message })
+            await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
+            // Audit log
+            try {
+              const logLine = `${nowIso()} ${ctx.jobId} REFUSE allowlist ${command}\n`
+              await (await import('node:fs/promises')).appendFile(process.cwd() + '/logs/command-refusals.log', logLine, 'utf8')
+            } catch (e) {
+              /* ignore logging errors */
+            }
+            result = { error: message }
+          } else if (looksLikeNaturalLanguageCommand(command)) {
+            const message = 'Refused to run: command looks like natural language rather than a shell command.'
+            await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message })
+            await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
+            try {
+              const logLine = `${nowIso()} ${ctx.jobId} REFUSE natural_language ${command}\n`
+              await (await import('node:fs/promises')).appendFile(process.cwd() + '/logs/command-refusals.log', logLine, 'utf8')
+            } catch (e) {
+              /* ignore logging errors */
+            }
+            result = { error: message }
+          } else if (isDangerousCommand(command)) {
+            const message = 'Refused to run: command matches disallowed or unsafe patterns.'
+            await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message })
+            await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
+            try {
+              const logLine = `${nowIso()} ${ctx.jobId} REFUSE dangerous ${command}\n`
+              await (await import('node:fs/promises')).appendFile(process.cwd() + '/logs/command-refusals.log', logLine, 'utf8')
+            } catch (e) {
+              /* ignore logging errors */
+            }
+            result = { error: message }
+          } else {
+            result = await handleRunCommandTool(ctx, command)
+          }
         }
       }
 
@@ -691,8 +746,8 @@ export async function executeJob(
 
     // Execute based on provider
     if (input.provider === 'copilotapi') {
-      console.log(`[Runner] Using CopilotAPI for job ${jobId}`)
-      await executeWithCopilotApi(ctx)
+      console.log(`[Runner] Using Coder Agent for job ${jobId}`)
+      await runCoderAgent(ctx)
     } else if (bridge) {
       console.log(`[Runner] Using bridge client for job ${jobId}`)
       try {

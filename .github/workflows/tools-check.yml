@@ -26,3 +26,8 @@ jobs:
         run: npm run check:tools
         env:
           CI: true
+
+      - name: Run toolbox smoke checks
+        run: npm run toolbox:smoke
+        env:
+          CI: true
