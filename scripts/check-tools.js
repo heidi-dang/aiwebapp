@@ -169,6 +169,39 @@ async function run() {
     await fail(`vscode task: could not read .vscode/tasks.json: ${err}`)
   }
 
+  // toolbox HTTP proxy checks (non-fatal if server not running)
+  try {
+    // read_file invalid path should return 400 or 403
+    const readCmd = "curl -s -X POST http://localhost:3001/internal/toolbox -H 'Content-Type: application/json' -d '{\"tool\":\"read_file\",\"params\":{\"path\":\"../secret.txt\"}}' -w '%{http_code}' -o /dev/null"
+    const { stdout: rcode } = await exec(readCmd, { timeout: 5000 })
+    const rc = rcode.trim() || ''
+    if (rc === '400' || rc === '403' || rc === '404') {
+      await ok('toolbox proxy: read_file invalid path returned expected HTTP status')
+    } else if (rc === '') {
+      console.warn('toolbox proxy: server not reachable (skipping HTTP checks)')
+    } else {
+      console.warn('toolbox proxy: read_file invalid path returned', rc)
+    }
+  } catch (err) {
+    console.warn('toolbox proxy: read_file check failed (non-fatal):', err?.message ?? err)
+  }
+
+  try {
+    // run_command not allowlisted should return 403
+    const runCmd = "curl -s -X POST http://localhost:3001/internal/toolbox -H 'Content-Type: application/json' -d '{\"tool\":\"run_command\",\"params\":{\"command\":\"rm -rf /\"}}' -w '%{http_code}' -o /dev/null"
+    const { stdout: rcode2 } = await exec(runCmd, { timeout: 5000 })
+    const rc2 = rcode2.trim() || ''
+    if (rc2 === '403') {
+      await ok('toolbox proxy: run_command denied as expected')
+    } else if (rc2 === '') {
+      console.warn('toolbox proxy: server not reachable (skipping HTTP checks)')
+    } else {
+      console.warn('toolbox proxy: run_command check returned', rc2)
+    }
+  } catch (err) {
+    console.warn('toolbox proxy: run_command check failed (non-fatal):', err?.message ?? err)
+  }
+
   // everything done
   if (process.exitCode && process.exitCode !== 0) {
     console.error('\nSome checks failed. Review output above.')

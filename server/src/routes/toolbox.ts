@@ -43,20 +43,33 @@ export async function registerToolboxRoutes(app: FastifyInstance) {
     try {
       if (tool === 'read_file') {
         const path = String(params.path ?? '')
-        if (!path || path.includes('..')) {
+        if (!path || path.includes('..') || path.startsWith('/')) {
           reply.code(400)
           return { error: 'Invalid path' }
         }
-        const text = await fs.readFile(path, 'utf8')
-        return { success: true, result: { path, text } }
+        if (path.includes('.git') || path.includes('node_modules')) {
+          reply.code(403)
+          return { error: 'Refused to read suspicious path' }
+        }
+        try {
+          const text = await fs.readFile(path, 'utf8')
+          return { success: true, result: { path, text } }
+        } catch (err) {
+          reply.code(404)
+          return { error: 'File not found' }
+        }
       }
 
       if (tool === 'write_file') {
         const path = String(params.path ?? '')
         const content = String(params.content ?? '')
-        if (!path || path.includes('..')) {
+        if (!path || path.includes('..') || path.startsWith('/')) {
           reply.code(400)
           return { error: 'Invalid path' }
+        }
+        if (path.includes('.git') || path.includes('node_modules')) {
+          reply.code(403)
+          return { error: 'Refused to write suspicious path' }
         }
         await fs.writeFile(path, content, 'utf8')
         return { success: true, result: { path } }
