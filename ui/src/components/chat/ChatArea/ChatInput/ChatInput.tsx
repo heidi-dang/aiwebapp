@@ -66,6 +66,94 @@ const ChatInput = () => {
   const [toolInput, setToolInput] = useState<Record<string, string | undefined>>({})
   const [toolOutput, setToolOutput] = useState<string>('')
   const [isRunningTool, setIsRunningTool] = useState<boolean>(false)
+  const [toolError, setToolError] = useState<string | null>(null)
+
+  // Simple JSON syntax highlighting (minimal, no deps)
+  function escapeHtml(unsafe: string) {
+    return unsafe
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+  }
+
+  function highlightJson(jsonStr: string) {
+    try {
+      const obj = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr
+      const pretty = JSON.stringify(obj, null, 2)
+      const escaped = escapeHtml(pretty)
+      // Wrap keys, strings, numbers, booleans, null
+      return escaped
+        .replace(/(\"(.*?)\")(?=\s*:)/g, '<span class="text-indigo-400">$1</span>')
+        .replace(/:(\s*)(\".*?\")/g, ':$1<span class="text-emerald-400">$2</span>')
+        .replace(/:(\s*)(-?\d+(?:\.\d+)?)/g, ':$1<span class="text-orange-400">$2</span>')
+        .replace(/\b(true|false|null)\b/g, '<span class="text-purple-400">$1</span>')
+    } catch (e) {
+      // Not valid JSON, just escape and return raw
+      return escapeHtml(jsonStr)
+    }
+  }
+
+  function copyOutput() {
+    if (!toolOutput) return
+    navigator.clipboard.writeText(toolOutput).then(() => {
+      // small toast or visual cue could be added; for now console
+      console.log('Tool output copied to clipboard')
+    })
+  }
+
+  function validateInputs(): boolean {
+    setToolError(null)
+    if (!selectedTool) {
+      setToolError('No tool selected')
+      return false
+    }
+    if (selectedTool === 'read_file' || selectedTool === 'write_file' || selectedTool === 'list_dir') {
+      const p = toolInput.path ?? ''
+      if (!p) {
+        setToolError('Path is required')
+        return false
+      }
+      if (p.includes('..')) {
+        setToolError('Path may not contain ..')
+        return false
+      }
+    }
+    if (selectedTool === 'write_file') {
+      if (!toolInput.content) {
+        setToolError('Content is required for write_file')
+        return false
+      }
+    }
+    if (selectedTool === 'list_files') {
+      const g = toolInput.glob ?? ''
+      if (!g) {
+        setToolError('Glob pattern required')
+        return false
+      }
+    }
+    if (selectedTool === 'grep_search') {
+      const q = toolInput.query ?? ''
+      if (!q) {
+        setToolError('Query is required')
+        return false
+      }
+      try {
+        // test regex
+        new RegExp(q)
+      } catch (e) {
+        setToolError('Invalid regex')
+        return false
+      }
+    }
+    if (selectedTool === 'run_command') {
+      const c = toolInput.command ?? ''
+      if (!c) {
+        setToolError('Command required')
+        return false
+      }
+    }
+    return true
+  }
 
   // Derive AI API base from /api/config if env is missing or localhost
   useEffect(() => {
@@ -519,23 +607,46 @@ const ChatInput = () => {
                       }
                       if (selectedTool === 'run_command') body.params.command = toolInput.command
 
-                      const res = await fetch('/api/toolbox', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(body)
-                      })
-                      const data = await res.json()
-                      setToolOutput(JSON.stringify(data, null, 2))
-                    } catch (err: unknown) {
-                      const message =
-                        typeof err === 'object' && err !== null && 'message' in err
-                          ? String((err as { message?: unknown }).message)
-                          : String(err)
-                      setToolOutput(message)
-                    } finally {
-                      setIsRunningTool(false)
-                    }
-                  }}
+                      try {
+                        setToolError(null)
+                        const res = await fetch('/api/toolbox', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(body)
+                        })
+
+                        const txt = await res.text()
+                        const ct = res.headers.get('content-type') || ''
+
+                        if (!ct.includes('application/json')) {
+                          setToolOutput(txt)
+                        } else {
+                          try {
+                            const json = JSON.parse(txt)
+                            setToolOutput(JSON.stringify(json, null, 2))
+                          } catch {
+                            setToolOutput(txt)
+                          }
+                        }
+
+                        if (!res.ok) {
+                          try {
+                            const maybe = JSON.parse(txt)
+                            setToolError(String(maybe.error ?? `Tool returned ${res.status}`))
+                          } catch {
+                            setToolError(`Tool returned ${res.status}`)
+                          }
+                        }
+                      } catch (err: unknown) {
+                        const message =
+                          typeof err === 'object' && err !== null && 'message' in err
+                            ? String((err as { message?: unknown }).message)
+                            : String(err)
+                        setToolOutput(message)
+                      } finally {
+                        setIsRunningTool(false)
+                      }
+                    }}
                   disabled={!selectedTool || isRunningTool}
                 >
                   Run
@@ -543,8 +654,32 @@ const ChatInput = () => {
               </div>
 
               <div className="mt-3">
-                <label className="block text-xs text-muted-foreground">Output</label>
-                <pre className="max-h-40 overflow-auto rounded border bg-muted p-2 text-xs">{toolOutput || 'No output'}</pre>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs text-muted-foreground">Output</label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="text-xs text-muted-foreground hover:text-primary"
+                      onClick={() => copyOutput()}
+                      type="button"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-2">
+                  {toolError && (
+                    <div className="mb-2 rounded border border-red-400 bg-red-50 p-2 text-xs text-red-700">{toolError}</div>
+                  )}
+
+                  <pre className="max-h-44 overflow-auto rounded border bg-muted p-2 text-xs">
+                    {toolOutput ? (
+                      <code className="whitespace-pre" dangerouslySetInnerHTML={{ __html: highlightJson(toolOutput) }} />
+                    ) : (
+                      'No output'
+                    )}
+                  </pre>
+                </div>
               </div>
             </div>
           </div>
