@@ -10,7 +10,11 @@
     "start": "concurrently -k -n server,runner,ui -c blue,magenta,green \"npm --prefix server start\" \"npm --prefix runner start\" \"npm --prefix ui start\"",
     "smoke": "npm --prefix server run smoke && npm --prefix runner run smoke && npm --prefix ui run smoke",
     "lint": "npm --prefix ui run lint",
-    "check:tools": "node scripts/check-tools.js"
+    "check:tools": "node scripts/check-tools.js",
+    "toolbox": "node scripts/toolbox.js",
+    "toolbox:smoke": "npm run toolbox -- smoke",
+    "toolbox:list": "npm run toolbox -- list-files 'ui/src/**'",
+    "toolbox:grep": "npm run toolbox -- grep-search 'run_command' --include 'runner/**'"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

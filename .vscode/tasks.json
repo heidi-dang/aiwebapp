@@ -10,6 +10,24 @@
         "kind": "test",
         "isDefault": true
       }
+    },
+    {
+      "label": "Toolbox: List files",
+      "type": "shell",
+      "command": "npm run toolbox:list",
+      "problemMatcher": []
+    },
+    {
+      "label": "Toolbox: Grep search",
+      "type": "shell",
+      "command": "npm run toolbox:grep",
+      "problemMatcher": []
+    },
+    {
+      "label": "Toolbox: Smoke",
+      "type": "shell",
+      "command": "npm run toolbox:smoke",
+      "problemMatcher": []
     }
   ]
 }

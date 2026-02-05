@@ -1,0 +1,192 @@
+#!/usr/bin/env node
+/* Simple developer toolbox CLI
+ * Usage: node scripts/toolbox.js <command> [args]
+ */
+const fs = require('fs').promises
+const { exec: execCb } = require('child_process')
+const { promisify } = require('util')
+const glob = require('glob')
+const path = require('path')
+const exec = promisify(execCb)
+
+function help() {
+  console.log(`Toolbox - developer utilities
+
+Usage:
+  toolbox <command> [args]
+
+Commands:
+  read-file <path>            Read a file and print to stdout
+  write-file <path> <text>    Write text to a file (overwrites)
+  list-files <glob>           List files matching glob
+  list-dir <path>             List directory contents
+  grep-search <query> [--include <glob>]   Search for text across files
+  run-command <command>       Run a shell command (safety checks)
+  smoke                       Run smoke checks to verify tools
+  help                        Show this help
+`)
+}
+
+function looksLikeNaturalLanguageCommand(command) {
+  if (/\b(run|execute|start|stop|open|close|list|show|find)\b\s+(the|a|an)\b/i.test(command)) {
+    return true
+  }
+  if (/^[A-Za-z ,]+$/.test(command) && command.trim().split(/\s+/).length > 3) {
+    return true
+  }
+  return false
+}
+
+function isDangerousCommand(command) {
+  const lowered = command.toLowerCase()
+  return /(^|\s)(rm\s+-rf|sudo\b|shutdown\b|reboot\b|mkfs\b|dd\s+if=|:\(\)\s*{\s*:|:;};:|:\s*>\s*\/|>\s*\/)/.test(lowered)
+}
+
+async function readFileCmd(p) {
+  try {
+    const txt = await fs.readFile(p, 'utf8')
+    console.log(txt)
+    return 0
+  } catch (err) {
+    console.error('read-file error:', err.message)
+    return 2
+  }
+}
+
+async function writeFileCmd(p, text) {
+  try {
+    await fs.writeFile(p, text, 'utf8')
+    console.log(`Wrote ${text.length} bytes to ${p}`)
+    return 0
+  } catch (err) {
+    console.error('write-file error:', err.message)
+    return 2
+  }
+}
+
+async function listFilesCmd(pattern) {
+  try {
+    const files = glob.sync(pattern, { cwd: process.cwd() })
+    for (const f of files) console.log(f)
+    return 0
+  } catch (err) {
+    console.error('list-files error:', err.message)
+    return 2
+  }
+}
+
+async function listDirCmd(p) {
+  try {
+    const entries = await fs.readdir(p, { withFileTypes: true })
+    for (const e of entries) console.log(`${e.isDirectory() ? 'd' : 'f'} ${e.name}`)
+    return 0
+  } catch (err) {
+    console.error('list-dir error:', err.message)
+    return 2
+  }
+}
+
+async function grepSearchCmd(query, includePattern) {
+  try {
+    let cmd = `grep -R -n "${query.replace(/"/g, '\\"')}" . | head -n 200`
+    if (includePattern) cmd = `grep -R -n --include="${includePattern}" "${query.replace(/"/g, '\\"')}" . | head -n 200`
+    const { stdout } = await exec(cmd, { maxBuffer: 1024 * 1024 })
+    console.log(stdout)
+    return 0
+  } catch (err) {
+    if (err.stdout) console.log(err.stdout)
+    console.error('grep-search error:', err.message)
+    return 2
+  }
+}
+
+async function runCommandCmd(command) {
+  if (!command) {
+    console.error('run-command: missing command')
+    return 2
+  }
+  if (looksLikeNaturalLanguageCommand(command)) {
+    console.error('Refusing to run: looks like natural language rather than shell command')
+    return 3
+  }
+  if (isDangerousCommand(command)) {
+    console.error('Refusing to run: command matches disallowed or unsafe patterns')
+    return 3
+  }
+  try {
+    const { stdout, stderr } = await exec(command, { timeout: 15000, maxBuffer: 1024 * 1024 })
+    process.stdout.write(stdout || '')
+    process.stderr.write(stderr || '')
+    return 0
+  } catch (err) {
+    if (err.stdout) process.stdout.write(err.stdout)
+    if (err.stderr) process.stderr.write(err.stderr)
+    console.error('run-command failed:', err.message)
+    return 2
+  }
+}
+
+async function smokeCmd() {
+  console.log('Running toolbox smoke checks...')
+  let ok = true
+
+  const rc1 = await readFileCmd('README.md')
+  if (rc1 !== 0) ok = false
+
+  const rc2 = await listFilesCmd('ui/src/**')
+  if (rc2 !== 0) ok = false
+
+  const rc3 = await grepSearchCmd('run_command', 'runner/**')
+  if (rc3 !== 0) ok = false
+
+  const rc4 = await runCommandCmd('echo toolbox-smoke')
+  if (rc4 !== 0) ok = false
+
+  if (ok) {
+    console.log('toolbox smoke: all good')
+    return 0
+  } else {
+    console.error('toolbox smoke: some checks failed')
+    return 1
+  }
+}
+
+async function main() {
+  const args = process.argv.slice(2)
+  const cmd = args[0]
+  if (!cmd || cmd === 'help') return help()
+
+  if (cmd === 'read-file') {
+    const p = args[1]
+    process.exit(await readFileCmd(p))
+  } else if (cmd === 'write-file') {
+    const p = args[1]
+    const text = args.slice(2).join(' ')
+    process.exit(await writeFileCmd(p, text))
+  } else if (cmd === 'list-files') {
+    const pattern = args[1] || '**/*'
+    process.exit(await listFilesCmd(pattern))
+  } else if (cmd === 'list-dir') {
+    const p = args[1] || '.'
+    process.exit(await listDirCmd(p))
+  } else if (cmd === 'grep-search') {
+    const query = args[1]
+    const includeIdx = args.indexOf('--include')
+    const includePattern = includeIdx !== -1 ? args[includeIdx + 1] : undefined
+    process.exit(await grepSearchCmd(query, includePattern))
+  } else if (cmd === 'run-command') {
+    const command = args.slice(1).join(' ')
+    process.exit(await runCommandCmd(command))
+  } else if (cmd === 'smoke') {
+    process.exit(await smokeCmd())
+  } else {
+    console.error('Unknown command:', cmd)
+    help()
+    process.exit(2)
+  }
+}
+
+main().catch((err) => {
+  console.error('toolbox error:', err)
+  process.exit(2)
+})

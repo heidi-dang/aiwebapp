@@ -197,6 +197,46 @@ This script will:
 ```
 Starts all services in development mode with hot reloading enabled.
 
+### Toolbox (developer utilities)
+A lightweight CLI for common development tasks. It exposes convenience commands to read and write files, search, list files/dirs, run safe commands, and run a smoke test to verify the environment.
+
+Usage examples:
+
+- Read a file:
+
+  ```bash
+  npm run toolbox -- read-file README.md
+  ```
+
+- List files in the UI source:
+
+  ```bash
+  npm run toolbox:list
+  ```
+
+- Grep for a symbol in the runner code:
+
+  ```bash
+  npm run toolbox:grep
+  ```
+
+- Run a simple command (the toolbox refuses obvious natural-language phrases and dangerous commands):
+
+  ```bash
+  npm run toolbox -- run-command "ls -la"
+  ```
+
+- Run a smoke check (verifies the most important toolbox operations):
+
+  ```bash
+  npm run toolbox:smoke
+  ```
+
+Security Notes
+
+- `run-command` performs simple heuristics and a blacklist to avoid executing natural language or obviously dangerous shell commands (e.g., `rm -rf`, `sudo`). Use caution when running arbitrary commands.
+- Use `.env.local` and other ignored env files for local overrides (do not commit secrets).
+
 ### Production Deployment
 ```bash
 ./production.sh
