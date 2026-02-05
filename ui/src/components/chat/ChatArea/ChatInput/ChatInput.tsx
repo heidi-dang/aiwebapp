@@ -61,6 +61,12 @@ const ChatInput = () => {
   const [aiApiBase, setAiApiBase] = useState(envAiApiUrl)
   const [apiBase, setApiBase] = useState<string | null>(null)
 
+  // Tools UI state
+  const [selectedTool, setSelectedTool] = useState<string>('')
+  const [toolInput, setToolInput] = useState<Record<string, string | undefined>>({})
+  const [toolOutput, setToolOutput] = useState<string>('')
+  const [isRunningTool, setIsRunningTool] = useState<boolean>(false)
+
   // Derive AI API base from /api/config if env is missing or localhost
   useEffect(() => {
     if (aiApiBase && !looksLocal(aiApiBase) && apiBase) return
@@ -393,26 +399,155 @@ const ChatInput = () => {
               Tool calls seen in the current chat session.
             </DialogDescription>
           </DialogHeader>
-          {toolCalls.length === 0 ? (
-            <div className="text-muted-foreground text-sm">
-              No tool calls yet.
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {toolCalls.map((tc, idx) => (
-                <div
-                  key={
-                    tc.tool_call_id || `${tc.tool_name}-${tc.created_at}-${idx}`
-                  }
-                  className="cursor-default rounded-full bg-accent px-2 py-1.5 text-xs"
+          <div className="space-y-3">
+            {toolCalls.length === 0 ? (
+              <div className="text-muted-foreground text-sm">No tool calls yet.</div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {toolCalls.map((tc, idx) => (
+                  <div
+                    key={
+                      tc.tool_call_id || `${tc.tool_name}-${tc.created_at}-${idx}`
+                    }
+                    className="cursor-default rounded-full bg-accent px-2 py-1.5 text-xs"
+                  >
+                    <p className="font-dmmono uppercase text-primary/80">
+                      {tc.tool_name}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="border-t pt-3">
+              <h3 className="mb-2 text-sm font-medium">Run a tool</h3>
+              <div className="flex items-center gap-2">
+                <select
+                  className="rounded border bg-primary px-2 py-1 text-sm"
+                  value={selectedTool}
+                  onChange={(e) => setSelectedTool(e.target.value)}
                 >
-                  <p className="font-dmmono uppercase text-primary/80">
-                    {tc.tool_name}
-                  </p>
-                </div>
-              ))}
+                  <option value="">-- Select tool --</option>
+                  <option value="read_file">read_file</option>
+                  <option value="write_file">write_file</option>
+                  <option value="list_files">list_files</option>
+                  <option value="list_dir">list_dir</option>
+                  <option value="grep_search">grep_search</option>
+                  <option value="run_command">run_command</option>
+                </select>
+
+                {selectedTool === 'read_file' && (
+                  <input
+                    className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
+                    placeholder="path (e.g. ui/src/app/page.tsx)"
+                    value={toolInput.path ?? ''}
+                    onChange={(e) => setToolInput((s) => ({ ...s, path: e.target.value }))}
+                  />
+                )}
+
+                {selectedTool === 'write_file' && (
+                  <input
+                    className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
+                    placeholder="path"
+                    value={toolInput.path ?? ''}
+                    onChange={(e) => setToolInput((s) => ({ ...s, path: e.target.value }))}
+                  />
+                )}
+
+                {selectedTool === 'list_files' && (
+                  <input
+                    className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
+                    placeholder="glob (e.g. ui/src/**)"
+                    value={toolInput.glob ?? ''}
+                    onChange={(e) => setToolInput((s) => ({ ...s, glob: e.target.value }))}
+                  />
+                )}
+
+                {selectedTool === 'list_dir' && (
+                  <input
+                    className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
+                    placeholder="path (e.g. ui/src)"
+                    value={toolInput.path ?? ''}
+                    onChange={(e) => setToolInput((s) => ({ ...s, path: e.target.value }))}
+                  />
+                )}
+
+                {selectedTool === 'grep_search' && (
+                  <>
+                    <input
+                      className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
+                      placeholder="query (regex)"
+                      value={toolInput.query ?? ''}
+                      onChange={(e) => setToolInput((s) => ({ ...s, query: e.target.value }))}
+                    />
+                    <input
+                      className="w-48 rounded border bg-primary px-2 py-1 text-sm"
+                      placeholder="include pattern (optional)"
+                      value={toolInput.include ?? ''}
+                      onChange={(e) => setToolInput((s) => ({ ...s, include: e.target.value }))}
+                    />
+                  </>
+                )}
+
+                {selectedTool === 'run_command' && (
+                  <input
+                    className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
+                    placeholder="command (e.g. ls -la)"
+                    value={toolInput.command ?? ''}
+                    onChange={(e) => setToolInput((s) => ({ ...s, command: e.target.value }))}
+                  />
+                )}
+
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    if (!selectedTool) return
+                    setToolOutput('')
+                    setIsRunningTool(true)
+                    try {
+                      const body: { tool: string; params: Record<string, unknown> } = { tool: selectedTool, params: {} }
+                      if (selectedTool === 'read_file') body.params.path = toolInput.path
+                      if (selectedTool === 'write_file') {
+                        body.params.path = toolInput.path
+                        body.params.content = toolInput.content ?? ''
+                      }
+                      if (selectedTool === 'list_files') body.params.glob = toolInput.glob
+                      if (selectedTool === 'list_dir') body.params.path = toolInput.path
+                      if (selectedTool === 'grep_search') {
+                        body.params.query = toolInput.query
+                        if (toolInput.include) body.params.include_pattern = toolInput.include
+                      }
+                      if (selectedTool === 'run_command') body.params.command = toolInput.command
+
+                      const res = await fetch('/api/toolbox', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                      })
+                      const data = await res.json()
+                      setToolOutput(JSON.stringify(data, null, 2))
+                    } catch (err: unknown) {
+                      const message =
+                        typeof err === 'object' && err !== null && 'message' in err
+                          ? String((err as { message?: unknown }).message)
+                          : String(err)
+                      setToolOutput(message)
+                    } finally {
+                      setIsRunningTool(false)
+                    }
+                  }}
+                  disabled={!selectedTool || isRunningTool}
+                >
+                  Run
+                </Button>
+              </div>
+
+              <div className="mt-3">
+                <label className="block text-xs text-muted-foreground">Output</label>
+                <pre className="max-h-40 overflow-auto rounded border bg-muted p-2 text-xs">{toolOutput || 'No output'}</pre>
+              </div>
             </div>
-          )}
+          </div>
         </DialogContent>
       </Dialog>
 
