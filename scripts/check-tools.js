@@ -84,6 +84,28 @@ async function run() {
     await fail(`run_in_terminal: command execution failed: ${err}`)
   }
 
+  // Toolbox run-command allowlist checks
+  try {
+    // Known allowed command should succeed
+    await exec("npm run toolbox -- run-command 'echo hello' --silent")
+    await ok('toolbox run-command: allowed command executed')
+  } catch (err) {
+    await fail('toolbox run-command: allowed command failed')
+  }
+
+  try {
+    // Natural language should be refused (will print refusal message)
+    await exec("npm run toolbox -- run-command 'run the tests'", { timeout: 5000 })
+    await fail('toolbox run-command: natural-language input unexpectedly ran')
+  } catch (err) {
+    const out = (err && (err.stdout || err.stderr || '')).toString().toLowerCase()
+    if (out.includes('refusing to run') || out.includes('aborted by user') || out.includes('command not in allowlist')) {
+      await ok('toolbox run-command: natural-language command was refused (expected)')
+    } else {
+      await fail('toolbox run-command: natural-language command did not return expected refusal')
+    }
+  }
+
   // get_changed_files: git status --porcelain
   try {
     const { stdout } = await exec('git status --porcelain')

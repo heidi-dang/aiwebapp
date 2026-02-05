@@ -100,11 +100,54 @@ async function grepSearchCmd(query, includePattern) {
   }
 }
 
-async function runCommandCmd(command) {
+async function runCommandCmd(command, opts = { yes: false }) {
   if (!command) {
     console.error('run-command: missing command')
     return 2
   }
+
+  // Load allowlist
+  let allowed = []
+  try {
+    const cfg = await fs.readFile(path.join(process.cwd(), 'config', 'allowed-commands.json'), 'utf8')
+    allowed = JSON.parse(cfg)
+  } catch (err) {
+    // ignore - will treat as empty allowlist
+  }
+
+  function matchesAllowlist(cmd, allowedList) {
+    if (!allowedList || allowedList.length === 0) return false
+    const trimmed = cmd.trim()
+    for (const a of allowedList) {
+      const pick = a.trim()
+      if (trimmed === pick) return true
+      if (trimmed.startsWith(pick + ' ')) return true
+    }
+    return false
+  }
+
+  const isAllowed = matchesAllowlist(command, allowed)
+  if (!isAllowed && !opts.yes) {
+    // prompt user
+    const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout })
+    const q = `Command not in allowlist. Are you sure you want to run: "${command}"? (y/N) `
+    const answer = await new Promise((resolve) => {
+      rl.question(q, (ans) => {
+        rl.close()
+        resolve(ans.trim().toLowerCase())
+      })
+      // optional timeout: 20s
+      setTimeout(() => {
+        rl.close()
+        resolve('')
+      }, 20000)
+    })
+    if (answer !== 'y' && answer !== 'yes') {
+      console.error('Aborted by user (not confirmed)')
+      return 3
+    }
+  }
+
   if (looksLikeNaturalLanguageCommand(command)) {
     console.error('Refusing to run: looks like natural language rather than shell command')
     return 3
@@ -175,8 +218,12 @@ async function main() {
     const includePattern = includeIdx !== -1 ? args[includeIdx + 1] : undefined
     process.exit(await grepSearchCmd(query, includePattern))
   } else if (cmd === 'run-command') {
+    // support optional --yes flag: toolbox run-command --yes <command>
+    const yesIdx = args.indexOf('--yes')
+    const yes = yesIdx !== -1
+    if (yes) args.splice(yesIdx, 1)
     const command = args.slice(1).join(' ')
-    process.exit(await runCommandCmd(command))
+    process.exit(await runCommandCmd(command, { yes }))
   } else if (cmd === 'smoke') {
     process.exit(await smokeCmd())
   } else {

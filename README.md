@@ -234,7 +234,9 @@ Usage examples:
 
 Security Notes
 
-- `run-command` performs simple heuristics and a blacklist to avoid executing natural language or obviously dangerous shell commands (e.g., `rm -rf`, `sudo`). Use caution when running arbitrary commands.
+- `run-command` performs simple heuristics and a blacklist to avoid executing natural language or obviously dangerous shell commands (e.g., `rm -rf`, `sudo`).
+- The runner enforces an **allowlist** (`config/allowed-commands.json`) for `run_command` invoked by automated runs — commands not on this list will be refused. This prevents LLM-driven or automated jobs from executing arbitrary shell commands.
+- The toolbox CLI will prompt for confirmation when trying to run a command that's not on the allowlist; pass `--yes` to bypass the prompt for CI or scripting.
 - Use `.env.local` and other ignored env files for local overrides (do not commit secrets).
 
 ### Production Deployment

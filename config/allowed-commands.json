@@ -1,0 +1,13 @@
+[
+  "ls",
+  "ls -la",
+  "cat",
+  "echo",
+  "git status",
+  "git rev-parse",
+  "git log",
+  "npm test",
+  "npm run",
+  "npm --prefix ui run lint",
+  "npm --prefix ui run typecheck"
+]
