@@ -101,12 +101,12 @@ fi
 # Default AI API URL should work for both local dev and remote clients.
 # If you don't have a tunnel/domain, override in ui/.env.local before running this script.
 AI_API_PUBLIC_URL=${existing_ai_api_url:-https://copilot.heidiai.com.au}
+AI_API_URL=${AI_API_PUBLIC_URL:-http://192.168.1.16:8080}
 echo "# Managed by hotreload-test.sh" > ui/.env.local
 echo "# Optional: UI auth token for AgentOS requests" >> ui/.env.local
 echo "# NEXT_PUBLIC_OS_SECURITY_KEY=your_token_here" >> ui/.env.local
 echo >> ui/.env.local
-echo "# Leave NEXT_PUBLIC_API_URL empty to use dynamic detection based on hostname" >> ui/.env.local
-echo "NEXT_PUBLIC_API_URL=" >> ui/.env.local
+echo "# API URL set to the actual server port" >> ui/.env.local
 echo "NEXT_PUBLIC_AI_API_URL=$AI_API_PUBLIC_URL" >> ui/.env.local
 echo >> ui/.env.local
 echo "RUNNER_URL=http://localhost:$RUNNER_PORT" >> ui/.env.local
@@ -142,7 +142,7 @@ run_with_ato() {
 }
 
 echo "Starting server (logs/server.log)..."
-SERVER_PID=$(run_with_ato "$LOG_DIR/server.log" "cd server && PORT=\"$SERVER_PORT\" npm run dev")
+SERVER_PID=$(run_with_ato "$LOG_DIR/server.log" "cd server && PORT=\"$SERVER_PORT\" RUNNER_URL=\"http://localhost:$RUNNER_PORT\" npm run dev")
 sleep 0.2
 
 echo "Starting UI (logs/ui.log)..."
@@ -151,7 +151,7 @@ UI_PID=$(run_with_ato "$LOG_DIR/ui.log" "cd ui && npm run dev")
 sleep 0.2
 
 echo "Starting runner (logs/runner.log)..."
-RUNNER_PID=$(run_with_ato "$LOG_DIR/runner.log" "cd runner && PORT=\"$RUNNER_PORT\" RUNNER_TOKEN=\"$RUNNER_TOKEN\" BRIDGE_URL=\"$BRIDGE_URL\" BRIDGE_TOKEN=\"$BRIDGE_TOKEN\" npm run dev")
+RUNNER_PID=$(run_with_ato "$LOG_DIR/runner.log" "cd runner && PORT=\"$RUNNER_PORT\" RUNNER_TOKEN=\"$RUNNER_TOKEN\" AI_API_URL=\"$AI_API_URL\" BRIDGE_URL=\"$BRIDGE_URL\" BRIDGE_TOKEN=\"$BRIDGE_TOKEN\" npm run dev")
 sleep 0.2
 
 echo "PIDs: server=$SERVER_PID ui=$UI_PID runner=$RUNNER_PID"

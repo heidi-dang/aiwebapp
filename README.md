@@ -151,6 +151,30 @@ The CopilotAPI Bridge only works locally by default. To access CopilotAPI models
    - Server API: http://localhost:3001 (or configured port)
    - Runner: http://localhost:3002 (or configured port)
 
+## Current Hot Reload Status (2026-02-06)
+
+- Executed `./hotreload-test.sh` locally to verify that all three services boot with the out-of-the-box configuration; no dependency reinstall was requested during this run.
+- Port scan selected the default assignments (UI 3000, Server 3001, Runner 3002) and each Fastify instance reported healthy `/health` responses.
+- Fresh logs live under `logs/server.log`, `logs/ui.log`, and `logs/runner.log`; `Ctrl+C` cleanly tears everything down because the script traps the signal and kills the child processes.
+- When the script rewrites `ui/.env.local` it now sets `NEXT_PUBLIC_API_URL` to the actual server port (e.g., `http://localhost:3001`) so the UI calls the correct endpoint, preventing NetworkErrors from port mismatches.
+- The script passes `RUNNER_URL` to the server and `AI_API_URL` (defaulting to `http://192.168.1.16:8080` per user feedback) to the runner for proper inter-service communication.
+- Updated server `/agents/:id/runs` route to call the runner's `/api/jobs` endpoint and proxy the SSE events back to the UI, instead of just echoing.
+
+```
+[Server] {"msg":"Server listening at http://127.0.0.1:3001"}
+[Runner] Using SQLite store: ./runner.db
+[Runner] {"msg":"Server listening at http://127.0.0.1:3002"}
+[UI]     ▲ Next.js 15.5.10 — Local: http://localhost:3000 (.env.local)
+[UI]     ✓ Starting...
+```
+
+To repeat the verification later:
+
+1. Kill any lingering dev processes: `pkill -f tsx && pkill -f "next dev"`
+2. From the repo root run `bash ./hotreload-test.sh` and press **Enter** to accept the default "skip dependency install" prompt.
+3. Watch the aggregated tail output; press **Ctrl+C** when you are done to trigger cleanup.
+4. Use `tail -n 40 logs/{server,ui,runner}.log` to review timestamps or share progress with the team.
+
 ### Production Deployment
 
 Use the production deployment script:

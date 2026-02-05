@@ -27,10 +27,6 @@ function deriveSubdomainUrl(subdomain: string, hostHeader: string | null) {
   return `https://${subdomain}.${hostname}`
 }
 
-function isLocalUrl(url: string): boolean {
-  return url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1')
-}
-
 export async function GET() {
   const headersList = await headers()
   // Check x-forwarded-host first (from Cloudflare tunnel), then fall back to host

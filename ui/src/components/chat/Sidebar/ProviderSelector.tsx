@@ -16,7 +16,7 @@ export function ProviderSelector() {
   return (
     <Select
       value={provider}
-      onValueChange={(value) => setProvider(value as 'bridge' | 'copilotapi')}
+      onValueChange={(value) => setProvider(value as 'copilotapi' | 'bridge')}
     >
       <SelectTrigger className="h-9 w-full rounded-xl border border-primary/15 bg-primaryAccent text-xs font-medium uppercase">
         <SelectValue />

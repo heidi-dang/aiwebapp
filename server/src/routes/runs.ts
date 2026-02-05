@@ -15,7 +15,15 @@ function writeChunk(replyRaw: NodeJS.WritableStream, chunk: StreamChunk) {
   replyRaw.write(JSON.stringify(chunk))
 }
 
+function requireEnv(name: string): string {
+  const v = process.env[name]
+  if (!v) throw new Error(`Missing required env var: ${name}`)
+  return v
+}
+
 export async function registerRunRoutes(app: FastifyInstance, store: Store) {
+  const RUNNER_URL = requireEnv('RUNNER_URL')
+  const RUNNER_TOKEN = process.env.RUNNER_TOKEN ?? 'change_me'
   app.post('/agents/:agentId/runs', async (req, reply) => {
     requireOptionalBearerAuth(req, reply)
     if (reply.sent) return
@@ -57,43 +65,113 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
     reply.raw.setHeader('Connection', 'keep-alive')
     reply.raw.flushHeaders()
 
-    const started: StreamChunk = {
-      event: RunEvent.RunStarted,
-      content_type: 'text',
-      created_at: nowSeconds(),
-      session_id: created.sessionId,
-      agent_id: agentId,
-      content: ''
-    }
-    writeChunk(reply.raw, started)
+    // Call runner to create job
+    const runnerRes = await fetch(`${RUNNER_URL}/api/jobs`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${RUNNER_TOKEN}`
+      },
+      body: JSON.stringify({
+        input: {
+          message,
+          provider: 'copilotapi',
+          model: 'gpt-4o'
+        }
+      })
+    })
 
-    const finalText = `Echo: ${message}`
-    let current = ''
-    const steps = Math.min(5, Math.max(2, Math.ceil(finalText.length / 12)))
-    for (let i = 1; i <= steps; i++) {
-      const sliceLen = Math.ceil((finalText.length * i) / steps)
-      current = finalText.slice(0, sliceLen)
-      const chunk: StreamChunk = {
-        event: RunEvent.RunContent,
-        content_type: 'text',
-        created_at: nowSeconds(),
-        session_id: created.sessionId,
-        agent_id: agentId,
-        content: current
+    if (!runnerRes.ok) {
+      const text = await runnerRes.text()
+      reply.code(500)
+      return { detail: `Runner error: ${runnerRes.status} ${text}` }
+    }
+
+    const job = await runnerRes.json()
+    const jobId = job.id
+
+    // Stream events from runner
+    const eventsRes = await fetch(`${RUNNER_URL}/api/jobs/${jobId}/events`, {
+      headers: {
+        'Authorization': `Bearer ${RUNNER_TOKEN}`
       }
-      writeChunk(reply.raw, chunk)
-      await sleep(60)
+    })
+
+    if (!eventsRes.ok) {
+      const text = await eventsRes.text()
+      reply.code(500)
+      return { detail: `Events error: ${eventsRes.status} ${text}` }
     }
 
-    const completed: StreamChunk = {
-      event: RunEvent.RunCompleted,
-      content_type: 'text',
-      created_at: nowSeconds(),
-      session_id: created.sessionId,
-      agent_id: agentId,
-      content: finalText
+    const reader = eventsRes.body?.getReader()
+    if (!reader) {
+      reply.code(500)
+      return { detail: 'No reader for events' }
     }
-    writeChunk(reply.raw, completed)
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let finalContent = ''
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6)
+            try {
+              const event = JSON.parse(data)
+              let chunk: StreamChunk | null = null
+
+              if (event.type === 'job.started') {
+                chunk = {
+                  event: RunEvent.RunStarted,
+                  content_type: 'text',
+                  created_at: nowSeconds(),
+                  session_id: created.sessionId,
+                  agent_id: agentId,
+                  content: ''
+                }
+              } else if (event.type === 'tool.output' && typeof event.data?.output === 'string') {
+                const output = event.data.output
+                finalContent += output
+                chunk = {
+                  event: RunEvent.RunContent,
+                  content_type: 'text',
+                  created_at: nowSeconds(),
+                  session_id: created.sessionId,
+                  agent_id: agentId,
+                  content: output
+                }
+              } else if (event.type === 'done') {
+                chunk = {
+                  event: RunEvent.RunCompleted,
+                  content_type: 'text',
+                  created_at: nowSeconds(),
+                  session_id: created.sessionId,
+                  agent_id: agentId,
+                  content: finalContent
+                }
+              }
+
+              if (chunk) {
+                writeChunk(reply.raw, chunk)
+              }
+            } catch (e) {
+              // ignore parse errors
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
 
     await store.appendRun({
       dbId: agent.db_id,
@@ -102,8 +180,8 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       sessionId: created.sessionId,
       run: {
         run_input: message,
-        content: finalText,
-        created_at: completed.created_at
+        content: finalContent,
+        created_at: nowSeconds()
       }
     })
 

@@ -92,12 +92,12 @@ const ChatInput = () => {
   // Fetch available models when provider is copilotapi
   useEffect(() => {
     if (provider === 'copilotapi') {
-      if (!aiApiBase || looksLocal(aiApiBase)) {
-        console.error('AI API base URL is missing or local; skipping models fetch')
-        return
+      const headers: HeadersInit = {}
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`
       }
 
-      fetch(`${aiApiBase}/v1/models`)
+      fetch('/api/copilot/v1/models', { headers })
         .then(async (res) => {
           if (!res.ok) throw new Error(`models fetch failed: ${res.status}`)
           const ct = res.headers.get('content-type') || ''
@@ -117,7 +117,7 @@ const ChatInput = () => {
         })
         .catch((err) => console.error('Failed to fetch models:', err))
     }
-  }, [provider, setAvailableModels, setSelectedModel, selectedModel, aiApiBase])
+  }, [provider, setAvailableModels, setSelectedModel, selectedModel, aiApiBase, authToken])
 
   const checkCopilotHealth = useCallback(async () => {
     setIsCopilotChecking(true)
@@ -211,9 +211,8 @@ const ChatInput = () => {
           applyRunnerEvent(evt)
         },
         onDone: () => {
-          const unsub = useStore.getState().runUi[jobId]?.unsubscribe
-          unsub?.()
-          useStore.getState().setRunUnsubscribe(jobId, undefined)
+          unsubscribe()
+          setRunUnsubscribe(jobId, undefined)
         },
         onError: (err) => {
           toast.error(
@@ -247,7 +246,11 @@ const ChatInput = () => {
         }
       ])
 
-      const { jobId } = await createJob({ message: currentMessage, provider })
+      const { jobId } = await createJob({
+        message: currentMessage,
+        provider,
+        model: selectedModel
+      })
 
       initRun(jobId)
       setMessages((prev) => [
@@ -267,9 +270,8 @@ const ChatInput = () => {
           applyRunnerEvent(evt)
         },
         onDone: () => {
-          const unsub = useStore.getState().runUi[jobId]?.unsubscribe
-          unsub?.()
-          useStore.getState().setRunUnsubscribe(jobId, undefined)
+          unsubscribe()
+          setRunUnsubscribe(jobId, undefined)
         },
         onError: (err) => {
           toast.error(

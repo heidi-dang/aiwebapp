@@ -9,7 +9,15 @@ function sleep(ms) {
 function writeChunk(replyRaw, chunk) {
     replyRaw.write(JSON.stringify(chunk));
 }
+function requireEnv(name) {
+    const v = process.env[name];
+    if (!v)
+        throw new Error(`Missing required env var: ${name}`);
+    return v;
+}
 export async function registerRunRoutes(app, store) {
+    const RUNNER_URL = requireEnv('RUNNER_URL');
+    const RUNNER_TOKEN = process.env.RUNNER_TOKEN ?? 'change_me';
     app.post('/agents/:agentId/runs', async (req, reply) => {
         requireOptionalBearerAuth(req, reply);
         if (reply.sent)
@@ -50,41 +58,107 @@ export async function registerRunRoutes(app, store) {
         reply.raw.setHeader('Cache-Control', 'no-cache');
         reply.raw.setHeader('Connection', 'keep-alive');
         reply.raw.flushHeaders();
-        const started = {
-            event: RunEvent.RunStarted,
-            content_type: 'text',
-            created_at: nowSeconds(),
-            session_id: created.sessionId,
-            agent_id: agentId,
-            content: ''
-        };
-        writeChunk(reply.raw, started);
-        const finalText = `Echo: ${message}`;
-        let current = '';
-        const steps = Math.min(5, Math.max(2, Math.ceil(finalText.length / 12)));
-        for (let i = 1; i <= steps; i++) {
-            const sliceLen = Math.ceil((finalText.length * i) / steps);
-            current = finalText.slice(0, sliceLen);
-            const chunk = {
-                event: RunEvent.RunContent,
-                content_type: 'text',
-                created_at: nowSeconds(),
-                session_id: created.sessionId,
-                agent_id: agentId,
-                content: current
-            };
-            writeChunk(reply.raw, chunk);
-            await sleep(60);
+        // Call runner to create job
+        const runnerRes = await fetch(`${RUNNER_URL}/api/jobs`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${RUNNER_TOKEN}`
+            },
+            body: JSON.stringify({
+                input: {
+                    message,
+                    provider: 'copilotapi',
+                    model: 'gpt-4o'
+                }
+            })
+        });
+        if (!runnerRes.ok) {
+            const text = await runnerRes.text();
+            reply.code(500);
+            return { detail: `Runner error: ${runnerRes.status} ${text}` };
         }
-        const completed = {
-            event: RunEvent.RunCompleted,
-            content_type: 'text',
-            created_at: nowSeconds(),
-            session_id: created.sessionId,
-            agent_id: agentId,
-            content: finalText
-        };
-        writeChunk(reply.raw, completed);
+        const job = await runnerRes.json();
+        const jobId = job.id;
+        // Stream events from runner
+        const eventsRes = await fetch(`${RUNNER_URL}/api/jobs/${jobId}/events`, {
+            headers: {
+                'Authorization': `Bearer ${RUNNER_TOKEN}`
+            }
+        });
+        if (!eventsRes.ok) {
+            const text = await eventsRes.text();
+            reply.code(500);
+            return { detail: `Events error: ${eventsRes.status} ${text}` };
+        }
+        const reader = eventsRes.body?.getReader();
+        if (!reader) {
+            reply.code(500);
+            return { detail: 'No reader for events' };
+        }
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalContent = '';
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done)
+                    break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6);
+                        try {
+                            const event = JSON.parse(data);
+                            let chunk = null;
+                            if (event.type === 'job.started') {
+                                chunk = {
+                                    event: RunEvent.RunStarted,
+                                    content_type: 'text',
+                                    created_at: nowSeconds(),
+                                    session_id: created.sessionId,
+                                    agent_id: agentId,
+                                    content: ''
+                                };
+                            }
+                            else if (event.type === 'tool.output' && typeof event.data?.output === 'string') {
+                                const output = event.data.output;
+                                finalContent += output;
+                                chunk = {
+                                    event: RunEvent.RunContent,
+                                    content_type: 'text',
+                                    created_at: nowSeconds(),
+                                    session_id: created.sessionId,
+                                    agent_id: agentId,
+                                    content: output
+                                };
+                            }
+                            else if (event.type === 'done') {
+                                chunk = {
+                                    event: RunEvent.RunCompleted,
+                                    content_type: 'text',
+                                    created_at: nowSeconds(),
+                                    session_id: created.sessionId,
+                                    agent_id: agentId,
+                                    content: finalContent
+                                };
+                            }
+                            if (chunk) {
+                                writeChunk(reply.raw, chunk);
+                            }
+                        }
+                        catch (e) {
+                            // ignore parse errors
+                        }
+                    }
+                }
+            }
+        }
+        finally {
+            reader.releaseLock();
+        }
         await store.appendRun({
             dbId: agent.db_id,
             entityType: 'agent',
@@ -92,8 +166,8 @@ export async function registerRunRoutes(app, store) {
             sessionId: created.sessionId,
             run: {
                 run_input: message,
-                content: finalText,
-                created_at: completed.created_at
+                content: finalContent,
+                created_at: nowSeconds()
             }
         });
         reply.raw.end();

@@ -5,7 +5,7 @@ import { useStore } from '@/store'
 import { cancelJob } from '@/lib/runner/client'
 import Icon from '@/components/ui/icon'
 import { Button } from '@/components/ui/button'
-import type { RunEvent, RunState } from '@/lib/runner/types'
+import type { RunState } from '@/lib/runner/types'
 
 function shortId(id: string) {
   return id.length <= 6 ? id : id.slice(-6)
