@@ -4,350 +4,473 @@ A comprehensive AI-powered web application for managing and interacting with aut
 
 ## Features
 
-- 🤖 **Agent Management**: Create, configure, and manage AI agents
-- 💬 **Interactive Chat Interface**: Real-time chat with streaming responses
-- 🏃 **Agent Runner Service**: Dedicated service for executing agent workflows
-- 📊 **Session Tracking**: Monitor and manage chat sessions
+- 🤖 **Agent Management**: Create, configure, and manage AI agents with custom system prompts
+- 💬 **Interactive Chat Interface**: Real-time chat with streaming responses and tool execution
+- 🏃 **Agent Runner Service**: Dedicated service for executing agent workflows and processing tasks
+- 📊 **Session Tracking**: Monitor and manage chat sessions with persistent history
 - 👥 **Team Collaboration**: Organize agents and sessions by teams
-- 🔄 **Real-time Updates**: Live streaming of agent responses and tool calls
-- 🎨 **Modern UI**: Built with Next.js, Tailwind CSS, and shadcn/ui components
+- 🔄 **Real-time Updates**: Live streaming of agent responses and tool calls via Server-Sent Events
+- 🎨 **Modern UI**: Built with Next.js 15, Tailwind CSS, and shadcn/ui components
 - 🗄️ **SQLite Database**: Lightweight, file-based database for data persistence
 - 🔒 **TypeScript**: Full type safety across the entire stack
+- 🚀 **Hot Reload Development**: Concurrent development servers with automatic port fallback
+- 🛠️ **Toolbox CLI**: Developer utilities for file operations, searching, and safe command execution
+- 🌐 **Copilot Integration**: Direct integration with GitHub Copilot via VSCode extension bridge
 
 ## Architecture
 
-This application consists of three main services:
+This application consists of three main services that communicate via HTTP APIs:
 
-- **Server** (`/server`): Fastify-based API server handling authentication, database operations, and API endpoints
-- **UI** (`/ui`): Next.js web application providing the user interface
-- **Runner** (`/runner`): Fastify service for executing agent workflows and processing tasks
+- **Server** (`/server`): Fastify-based API server handling authentication, database operations, CRUD for agents/sessions/teams, and API proxying
+- **UI** (`/ui`): Next.js web application providing the modern chat interface with real-time streaming
+- **Runner** (`/runner`): Fastify service for executing agent workflows, processing tool calls, and managing job queues
 
-## CopilotAPI Bridge Integration
+### Data Flow
 
-The application supports integration with GitHub Copilot via the CopilotAPI Bridge extension, providing access to advanced AI models.
-
-### Local Development Setup
-
-1. Install the CopilotAPI Bridge VS Code extension (already installed).
-2. The API server runs on `http://localhost:4000`.
-3. Configure environment variables in `ui/.env.local`:
-   ```
-   AI_API_URL=http://localhost:4000
-   AI_API_KEY=<your-api-key>
-   ```
-4. In the UI, select "CopilotAPI" provider for chat completions using Copilot models.
-
-### Remote Access Setup
-
-The CopilotAPI Bridge only works locally by default. To access CopilotAPI models when connecting from remote domains (like heidiai.com.au), set up a tunnel using either ngrok or Cloudflare Tunnel.
-
-#### Option 1: Using ngrok
-
-1. **Authenticate ngrok:**
-   ```bash
-   # Get token from https://dashboard.ngrok.com/get-started/your-authtoken
-   ngrok config add-authtoken YOUR_TOKEN_HERE
-   ```
-
-2. **Start the tunnel:**
-   ```bash
-   ./setup-tunnel.sh
-   ```
-   This creates a secure tunnel exposing `localhost:4000` to the internet.
-
-3. **Update environment variables:**
-   ```bash
-   ./update-env-with-tunnel.sh
-   ```
-   This automatically updates your `.env` files with the tunnel URL.
-
-#### Option 2: Using Cloudflare Tunnel (cloudflared)
-
-1. **Ensure cloudflared is installed and authenticated:**
-   ```bash
-   # Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/
-   cloudflared tunnel login
-   ```
-
-2. **Start the tunnel:**
-   ```bash
-   ./setup-cloudflared-tunnel.sh
-   ```
-   Choose between a named tunnel (with custom domain) or quick tunnel.
-
-3. **Update environment variables:**
-   ```bash
-   ./update-env-with-cloudflared.sh
-   ```
-   Enter your tunnel URL when prompted.
-
-#### Common Steps for Both Options
-
-4. **Restart services:**
-   ```bash
-   npm run dev
-   ```
-
-5. **Access remotely:**
-   - Your CopilotAPI models will now work from any domain
-   - The tunnel URL replaces `http://localhost:4000`
-   - Keep the tunnel running for remote access
-
-**Security Note:** Stop the tunnel when not needed to avoid exposing your CopilotAPI Bridge unnecessarily.
-
-### Providers
-
-- **Bridge**: Uses the custom VS Code extension bridge for file operations and agent workflows.
-- **CopilotAPI**: Uses the CopilotAPI Bridge for direct chat completions with OpenAI-compatible endpoints.
+```
+UI (Port 3000) ↔ Server (Port 3001) ↔ Runner (Port 3002)
+    ↑                                               ↑
+    └─────────────── Copilot API Bridge ────────────┘
+```
 
 ## Prerequisites
 
-- Node.js 20.x or later
-- npm or yarn package manager
-- Git
+- **Node.js 20.x or later** (required for all services)
+- **npm** or **yarn** package manager
+- **Git** for version control
+- **VSCode** with CopilotAPI Bridge extension (for Copilot integration)
+- **SQLite3** (automatically installed via npm)
 
 ## Quick Start
 
-### Development Setup
+### Development Environment
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/heidi-dang/aiwebapp.git
-   cd aiwebapp
-   ```
-
-2. **Install dependencies for all services:**
-   ```bash
-   # Install server dependencies
-   cd server && npm ci && cd ..
-
-   # Install UI dependencies
-   cd ui && npm ci && cd ..
-
-   # Install runner dependencies
-   cd runner && npm ci && cd ..
-   ```
-
-3. **Start development servers:**
-   ```bash
-   # Use the hot reload test script
-   ./hotreload-test.sh
-   ```
-
-   Or manually:
-   ```bash
-   # Terminal 1: Start server
-   cd server && npm run dev
-
-   # Terminal 2: Start UI
-   cd ui && npm run dev
-
-   # Terminal 3: Start runner
-   cd runner && npm run dev
-   ```
-
-4. **Access the application:**
-   - UI: http://localhost:3000
-   - Server API: http://localhost:3001 (or configured port)
-   - Runner: http://localhost:3002 (or configured port)
-
-## Current Hot Reload Status (2026-02-06)
-
-- Executed `./hotreload-test.sh` locally to verify that all three services boot with the out-of-the-box configuration; no dependency reinstall was requested during this run.
-- Port scan selected the default assignments (UI 3000, Server 3001, Runner 3002) and each Fastify instance reported healthy `/health` responses.
-- Fresh logs live under `logs/server.log`, `logs/ui.log`, and `logs/runner.log`; `Ctrl+C` cleanly tears everything down because the script traps the signal and kills the child processes.
-- When the script rewrites `ui/.env.local` it now sets `NEXT_PUBLIC_API_URL` to the actual server port (e.g., `http://localhost:3001`) so the UI calls the correct endpoint, preventing NetworkErrors from port mismatches.
-- The script passes `RUNNER_URL` to the server and `AI_API_URL` (defaulting to `http://192.168.1.16:8080` per user feedback) to the runner for proper inter-service communication.
-- Updated server `/agents/:id/runs` route to call the runner's `/api/jobs` endpoint and proxy the SSE events back to the UI, instead of just echoing.
-
-```
-[Server] {"msg":"Server listening at http://127.0.0.1:3001"}
-[Runner] Using SQLite store: ./runner.db
-[Runner] {"msg":"Server listening at http://127.0.0.1:3002"}
-[UI]     ▲ Next.js 15.5.10 — Local: http://localhost:3000 (.env.local)
-[UI]     ✓ Starting...
-```
-
-To repeat the verification later:
-
-1. Kill any lingering dev processes: `pkill -f tsx && pkill -f "next dev"`
-2. From the repo root run `bash ./hotreload-test.sh` and press **Enter** to accept the default "skip dependency install" prompt.
-3. Watch the aggregated tail output; press **Ctrl+C** when you are done to trigger cleanup.
-4. Use `tail -n 40 logs/{server,ui,runner}.log` to review timestamps or share progress with the team.
-
-### Production Deployment
-
-Use the production deployment script:
+The easiest way to get started is using the hot reload development script:
 
 ```bash
-./production.sh
+# Clone the repository
+git clone https://github.com/heidi-dang/aiwebapp.git
+cd aiwebapp
+
+# Start all services with hot reload
+./hotreload-test.sh
 ```
 
 This script will:
-- Build all services
-- Configure environment variables
-- Start production servers
-- Provide access URLs
+- ✅ Install dependencies for all services (optional prompt)
+- ✅ Find available ports (3000-3050 range with fallback)
+- ✅ Configure environment variables automatically
+- ✅ Start all three services concurrently
+- ✅ Set up logging and health checks
+- ✅ Provide access URLs
 
-## Development Scripts
+**Default Ports:**
+- UI: `http://localhost:3000`
+- Server: `http://localhost:3001`
+- Runner: `http://localhost:3002`
+
+### Manual Development Setup
+
+If you prefer manual setup:
+
+```bash
+# Install dependencies
+npm run bootstrap
+
+# Initialize environment files
+npm run init:env
+
+# Start all services
+npm run dev
+```
+
+### Production Deployment
+
+For production deployment:
+
+```bash
+# Build and deploy
+./production.sh
+```
+
+This will build all services and start them in production mode.
+
+## CopilotAPI Integration
+
+### VSCode Extension Setup
+
+1. **Install the CopilotAPI Bridge Extension:**
+   - Open VSCode
+   - Go to Extensions (Ctrl+Shift+X)
+   - Search for "CopilotAPI Bridge"
+   - Install the extension by the author
+
+2. **Start the Bridge:**
+   - The extension will start a local server (default: `http://localhost:8080`)
+   - This provides OpenAI-compatible endpoints for Copilot models
+
+### Environment Configuration
+
+The application connects to Copilot through the bridge. Configure in `ui/.env.local`:
+
+```bash
+# Copilot API Bridge URL (local development)
+NEXT_PUBLIC_AI_API_URL=http://localhost:8080
+
+# For production/remote access, use tunnel URL
+NEXT_PUBLIC_AI_API_URL=https://your-tunnel-url.com
+```
+
+### Remote Access Setup
+
+For accessing Copilot models from remote domains (like production deployments), set up a tunnel:
+
+#### Option 1: ngrok Tunnel
+
+```bash
+# Install ngrok and authenticate
+npm install -g ngrok
+ngrok config add-authtoken YOUR_TOKEN
+
+# Start tunnel to Copilot bridge
+./setup-tunnel.sh
+
+# Update environment
+./update-env-with-tunnel.sh
+```
+
+#### Option 2: Cloudflare Tunnel
+
+```bash
+# Install cloudflared
+# Follow: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/
+
+# Authenticate
+cloudflared tunnel login
+
+# Start tunnel
+./setup-cloudflared-tunnel.sh
+
+# Update environment
+./update-env-with-cloudflared.sh
+```
+
+### Testing Copilot Connection
+
+```bash
+# Test bridge directly
+curl http://localhost:8080/v1/models
+
+# Test through UI proxy
+curl http://localhost:3000/api/copilot/v1/models
+```
+
+## Environment Configuration
+
+### Development Environment Variables
+
+#### Server (`server/.env`)
+```bash
+# Server configuration
+PORT=3001
+CORS_ORIGIN=http://localhost:3000
+
+# Database
+DB_PATH=./server.db
+
+# Runner communication
+RUNNER_URL=http://localhost:3002
+
+# Optional: Authentication
+AUTH_TOKEN=your_server_token
+```
+
+#### UI (`ui/.env.local`)
+```bash
+# API endpoints
+NEXT_PUBLIC_API_URL=http://localhost:3001
+RUNNER_URL=http://localhost:3002
+RUNNER_TOKEN=test_runner_token_123
+
+# Copilot integration
+NEXT_PUBLIC_AI_API_URL=http://localhost:8080
+
+# Optional: OS integration
+NEXT_PUBLIC_OS_SECURITY_KEY=your_os_token
+```
+
+#### Runner (`runner/.env`)
+```bash
+# Runner configuration
+PORT=3002
+CORS_ORIGIN=http://localhost:3000
+
+# Authentication
+RUNNER_TOKEN=test_runner_token_123
+
+# AI API (Copilot bridge)
+AI_API_URL=http://localhost:8080
+
+# Database
+RUNNER_DB=./runner.db
+RUNNER_PERSIST=true
+
+# Optional: VSCode bridge integration
+BRIDGE_URL=http://127.0.0.1:3210
+BRIDGE_TOKEN=your_bridge_token
+```
+
+### Production Environment Variables
+
+For production, update the URLs to your actual domain:
+
+```bash
+# ui/.env.local
+NEXT_PUBLIC_API_URL=https://yourdomain.com/api
+RUNNER_URL=https://yourdomain.com/runner
+NEXT_PUBLIC_AI_API_URL=https://your-copilot-tunnel.com
+
+# server/.env
+CORS_ORIGIN=https://yourdomain.com
+RUNNER_URL=https://yourdomain.com/runner
+
+# runner/.env
+AI_API_URL=https://your-copilot-tunnel.com
+```
+
+## Development Workflow
 
 ### Hot Reload Development
+
+The `hotreload-test.sh` script provides the optimal development experience:
+
 ```bash
 ./hotreload-test.sh
 ```
-Starts all services in development mode with hot reloading enabled.
 
-### Toolbox (developer utilities)
-A lightweight CLI for common development tasks. It exposes convenience commands to read and write files, search, list files/dirs, run safe commands, and run a smoke test to verify the environment.
+**Features:**
+- Automatic port detection (3000-3050 range)
+- Concurrent service startup
+- Live log tailing with colored output
+- Health checks for all services
+- Automatic environment configuration
+- Clean shutdown on Ctrl+C
 
-Usage examples:
+**Log Output:**
+```
+[Server] {"level":30,"time":1770345175510,"msg":"Server listening at http://127.0.0.1:3001"}
+[Runner] Using SQLite store: ./runner.db
+[UI]     ▲ Next.js 15.5.10 — Local: http://localhost:3000
+```
 
-- Read a file:
+### Development Scripts
 
-  ```bash
-  npm run toolbox -- read-file README.md
-  ```
+```bash
+# Install all dependencies
+npm run bootstrap
 
-- List files in the UI source:
+# Initialize environment files
+npm run init:env
 
-  ```bash
-  npm run toolbox:list
-  ```
+# Start development servers
+npm run dev
 
-- Grep for a symbol in the runner code:
+# Build all services
+npm run build
 
-  ```bash
-  npm run toolbox:grep
-  ```
+# Run smoke tests
+npm run smoke
 
-- Run a simple command (the toolbox refuses obvious natural-language phrases and dangerous commands):
+# Lint UI code
+npm run lint
+```
 
-  ```bash
-  npm run toolbox -- run-command "ls -la"
-  ```
+### Toolbox CLI
 
-- Run a smoke check (verifies the most important toolbox operations):
+Developer utilities for common tasks:
 
-  ```bash
-  npm run toolbox:smoke
-  ```
+```bash
+# List files in UI source
+npm run toolbox:list
 
-Security Notes
+# Search for code patterns
+npm run toolbox:grep
 
-- `run-command` performs simple heuristics and a blacklist to avoid executing natural language or obviously dangerous shell commands (e.g., `rm -rf`, `sudo`).
-- The runner enforces an **allowlist** (`config/allowed-commands.json`) for `run_command` invoked by automated runs — commands not on this list will be refused. This prevents LLM-driven or automated jobs from executing arbitrary shell commands.
-- The toolbox CLI will prompt for confirmation when trying to run a command that's not on the allowlist; pass `--yes` to bypass the prompt for CI or scripting.
-- The runner appends refused commands to `logs/command-refusals.log` for audit — include job id, timestamp, reason, and command.
-- Use `.env.local` and other ignored env files for local overrides (do not commit secrets).
+# Run safe commands
+npm run toolbox -- run-command "ls -la"
 
-### Production Deployment
+# Smoke test toolbox
+npm run toolbox:smoke
+```
+
+**Security:** The toolbox enforces an allowlist for commands to prevent dangerous operations.
+
+## Production Deployment
+
+### Using Production Script
+
 ```bash
 ./production.sh
 ```
-Builds and deploys all services for production use.
 
-## Project Structure
+This script:
+- ✅ Installs dependencies
+- ✅ Builds all services
+- ✅ Sets up environment files
+- ✅ Starts production servers
+- ✅ Provides access URLs
 
+### Manual Production Setup
+
+```bash
+# Build all services
+npm run build
+
+# Start production servers
+npm run start
 ```
-aiwebapp/
-├── server/                 # Backend API server
-│   ├── src/
-│   │   ├── index.ts       # Main server file
-│   │   ├── routes/        # API route handlers
-│   │   ├── auth.ts        # Authentication logic
-│   │   ├── storage.ts     # Database operations
-│   │   └── types.ts       # Type definitions
-│   ├── package.json
-│   └── tsconfig.json
-├── ui/                     # Frontend Next.js application
-│   ├── src/
-│   │   ├── app/           # Next.js app router
-│   │   ├── components/    # React components
-│   │   ├── hooks/         # Custom React hooks
-│   │   ├── lib/           # Utility functions
-│   │   └── store.ts       # State management
-│   ├── package.json
-│   └── next.config.ts
-├── runner/                 # Agent execution service
-│   ├── src/
-│   │   └── index.ts       # Runner service
-│   ├── package.json
-│   └── tsconfig.json
-├── .dev/                   # Development documentation
-├── .github/
-│   └── workflows/         # CI/CD workflows
-├── .gitignore
-├── production.sh          # Production deployment script
-├── hotreload-test.sh      # Development startup script
-└── README.md
-```
+
+### Port Configuration
+
+**Development (hotreload-test.sh):**
+- UI: 3000 (fallback: 3000-3050)
+- Server: 3001 (fallback: 3001-3050)
+- Runner: 3002 (fallback: 3002-3050)
+
+**Production:**
+- Configure custom ports in environment variables
+- Ensure ports are available and not conflicting
 
 ## API Documentation
 
 ### Server Endpoints
 
-- `GET /health` - Health check
-- `GET /agents` - List agents
-- `POST /agents` - Create agent
-- `GET /sessions` - List sessions
-- `POST /sessions` - Create session
+#### Health & Status
+- `GET /health` - Service health check
+
+#### Agents
+- `GET /agents` - List all agents
+- `POST /agents` - Create new agent
+- `GET /agents/:id` - Get agent details
+- `PUT /agents/:id` - Update agent
+- `DELETE /agents/:id` - Delete agent
+
+#### Sessions
+- `GET /sessions` - List chat sessions
+- `POST /sessions` - Create new session
+- `GET /sessions/:id` - Get session details
+- `DELETE /sessions/:id` - Delete session
+
+#### Teams
 - `GET /teams` - List teams
-- `POST /teams` - Create team
-- `POST /runs` - Execute agent run
+- `POST /teams` - Create new team
+- `GET /teams/:id` - Get team details
+- `PUT /teams/:id` - Update team
+- `DELETE /teams/:id` - Delete team
+
+#### Runs (Agent Execution)
+- `POST /agents/:id/runs` - Execute agent workflow
+- `GET /runs/:id` - Get run status
+
+### Runner Endpoints
+
+#### Jobs
+- `GET /api/jobs` - List jobs
+- `POST /api/jobs` - Create job
+- `GET /api/jobs/:id` - Get job status
+- `POST /api/jobs/:id/start` - Start job execution
+
+#### Health
+- `GET /health` - Runner health check
 
 ### Authentication
 
-The application uses token-based authentication. Include the auth token in the `Authorization` header:
+Include Bearer token in Authorization header:
 
 ```
 Authorization: Bearer <your-token>
 ```
 
-## Configuration
+## Project Structure
 
-### Environment Variables
-
-Create `.env` files in each service directory:
-
-#### Server (.env)
 ```
-PORT=3001
-DATABASE_URL=./data.db
-JWT_SECRET=your-secret-key
+aiwebapp/
+├── server/                 # Backend API server (Port 3001)
+│   ├── src/
+│   │   ├── index.ts       # Main Fastify server
+│   │   ├── routes/        # API route handlers
+│   │   │   ├── agents.ts
+│   │   │   ├── sessions.ts
+│   │   │   ├── teams.ts
+│   │   │   ├── runs.ts
+│   │   │   └── health.ts
+│   │   ├── auth.ts        # Authentication logic
+│   │   ├── storage.ts     # SQLite database operations
+│   │   └── types.ts       # TypeScript definitions
+│   ├── .env              # Server environment
+│   ├── package.json
+│   └── tsconfig.json
+├── ui/                     # Frontend Next.js app (Port 3000)
+│   ├── src/
+│   │   ├── app/           # Next.js 15 app router
+│   │   │   ├── layout.tsx
+│   │   │   ├── page.tsx
+│   │   │   ├── globals.css
+│   │   │   └── api/       # API proxy routes
+│   │   ├── components/    # React components
+│   │   │   ├── chat/      # Chat interface
+│   │   │   ├── ui/        # Reusable UI components
+│   │   │   └── icons/     # Icon components
+│   │   ├── hooks/         # Custom React hooks
+│   │   ├── lib/           # Utilities and API clients
+│   │   ├── store.ts       # Zustand state management
+│   │   └── types/         # Type definitions
+│   ├── .env.local        # UI environment
+│   ├── next.config.ts
+│   ├── package.json
+│   └── tailwind.config.ts
+├── runner/                 # Agent execution service (Port 3002)
+│   ├── src/
+│   │   ├── index.ts       # Main runner server
+│   │   ├── db.ts          # Job storage and state
+│   │   ├── executor.ts    # Agent workflow execution
+│   │   ├── agent.ts       # Agent logic
+│   │   └── bridge.ts      # VSCode bridge integration
+│   ├── .env              # Runner environment
+│   ├── runner.db         # SQLite database
+│   ├── package.json
+│   └── tsconfig.json
+├── .dev/                   # Development documentation
+│   └── tasks/             # Task tracking
+├── .github/
+│   └── workflows/         # CI/CD pipelines
+├── scripts/               # Development utilities
+│   ├── check-tools.js
+│   └── toolbox.js
+├── config/                # Configuration files
+│   └── allowed-commands.json
+├── logs/                  # Development logs
+├── tmp/                   # Temporary files
+├── hotreload-test.sh     # Development startup script
+├── production.sh         # Production deployment script
+├── setup-tunnel.sh       # ngrok tunnel setup
+├── setup-cloudflared-tunnel.sh  # Cloudflare tunnel setup
+├── update-env-with-tunnel.sh    # Environment updates
+├── update-env-with-cloudflared.sh
+├── package.json          # Root package.json
+└── README.md
 ```
-
-#### UI (.env.local)
-```
-NEXT_PUBLIC_API_URL=http://localhost:3001
-NEXT_PUBLIC_RUNNER_URL=http://localhost:3002
-```
-
-#### Runner (.env)
-```
-PORT=3002
-SERVER_URL=http://localhost:3001
-```
-
-### Important: Environment files & Copilot API — do NOT edit committed env files ⚠️
-
-- **Do not modify or commit** environment files that are tracked in the repository. If you need local overrides, create or edit the service-local env files (for example, `ui/.env.local`, `server/.env`, `runner/.env`) — these files are listed in `.gitignore` and should not be committed.
-- The UI forwards Copilot API requests to the host defined by `NEXT_PUBLIC_AI_API_URL`. If that host is unreachable, the UI proxy will return a `502 Bad Gateway` (e.g., "models fetch failed: 502").
-- For local development with a locally running Copilot API, set `NEXT_PUBLIC_AI_API_URL` to the Copilot host (for example `http://localhost:8080`).
-- Quick debugging steps if you see a `502` when fetching models:
-  - Check the UI proxy response: `curl -i http://localhost:3000/api/copilot/v1/models`
-  - Check the Copilot API directly: `curl -i http://localhost:8080/v1/models`
-- If you need to share environment values, use `.env.example` or a secure channel; do not commit secrets to the repository.
-- If you want repository-managed env changes, open an issue and confirm before any automated edits are made.
 
 ## Development Guidelines
 
 ### Code Style
 
-- Use TypeScript for all new code
-- Follow ESLint and Prettier configurations
-- Use conventional commits for git messages
+- **TypeScript**: Strict mode enabled across all services
+- **ESLint + Prettier**: Automated code formatting and linting
+- **Conventional Commits**: Structured commit messages
+- **Component Architecture**: Modular, reusable React components
 
-### Testing
+### Testing Strategy
 
 ```bash
 # Server smoke tests
@@ -358,52 +481,107 @@ cd ui && npm run typecheck
 
 # UI linting
 cd ui && npm run lint
+
+# Full smoke test suite
+npm run smoke
 ```
 
-### Building
+### Database
+
+- **SQLite**: File-based database with automatic schema management
+- **Migrations**: Automatic table creation on startup
+- **Persistence**: Configurable data retention
+
+### Security Considerations
+
+- **Command Allowlist**: Runner enforces safe command execution
+- **Token Authentication**: Bearer token validation
+- **CORS Configuration**: Domain-specific access control
+- **Environment Isolation**: Separate configs for dev/prod
+
+## Troubleshooting
+
+### Common Issues
+
+#### Port Conflicts
+```bash
+# Check port usage
+lsof -i :3000 -i :3001 -i :3002
+
+# Kill conflicting processes
+pkill -f "node.*3000"
+```
+
+#### Copilot Connection Issues
+```bash
+# Test bridge connectivity
+curl http://localhost:8080/v1/models
+
+# Check UI proxy
+curl http://localhost:3000/api/copilot/v1/models
+```
+
+#### Database Issues
+```bash
+# Reset database
+rm server/server.db runner/runner.db
+# Restart services to recreate tables
+```
+
+#### Environment Problems
+```bash
+# Reinitialize environment
+npm run init:env
+
+# Check environment files
+ls -la */.env*
+```
+
+### Logs and Debugging
 
 ```bash
-# Build all services
-cd server && npm run build
-cd ../ui && npm run build
-cd ../runner && npm run build
+# View service logs
+tail -f logs/server.log
+tail -f logs/ui.log
+tail -f logs/runner.log
+
+# Check service health
+curl http://localhost:3001/health
+curl http://localhost:3002/health
 ```
 
 ## Contributing
 
+### Development Setup
+
 1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Make your changes and ensure tests pass
-4. Commit with conventional commits: `git commit -m "feat: add new feature"`
-5. Push to your branch: `git push origin feature/your-feature`
-6. Create a Pull Request
+2. Clone your fork: `git clone https://github.com/yourusername/aiwebapp.git`
+3. Set up development: `./hotreload-test.sh`
+4. Create feature branch: `git checkout -b feature/your-feature`
+5. Make changes and test
+6. Commit with conventional commits
+7. Push and create PR
 
-### Pull Request Checks
+### Pull Request Requirements
 
-All PRs must pass:
-- TypeScript compilation
-- ESLint checks
-- Build verification
-- Smoke tests
+- ✅ TypeScript compilation passes
+- ✅ ESLint checks pass
+- ✅ All smoke tests pass
+- ✅ Documentation updated
+- ✅ Environment variables documented
 
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Port fallback behavior
-
-When running the bundled `hotreload-test.sh`, the script will try to bind the default ports:
-
-- UI: 3000..3050 (starts at 3000)
-- Server: 3001..3050 (starts at 3001)
-- Runner: 3002..3050 (starts at 3002)
-
-If a default port is already in use, the script will increment to the next available port within the 3000–3050 range and start the service there. The chosen ports are printed when the script starts, and health checks use those actual ports. This helps avoid EADDRINUSE errors during local development.
-
 ## Support
 
-For questions or issues:
-- Create an issue on GitHub
-- Check the `.dev/` folder for development documentation
-- Review the autonomous agent guidelines in `.dev/autonomous-agent/`</content>
-<parameter name="filePath">/home/heidi/Desktop/aiwebapp/README.md
+- 📖 **Documentation**: Check `.dev/` folder for detailed guides
+- 🐛 **Issues**: Create GitHub issues for bugs and features
+- 💬 **Discussions**: Use GitHub discussions for questions
+- 📧 **Contact**: heidi@heidiai.com.au
+
+---
+
+**Last Updated**: February 6, 2026
+**Version**: 1.0.0
