@@ -1,5 +1,7 @@
 import { requireOptionalBearerAuth } from '../auth.js';
 import { RunEvent } from '../types.js';
+import multer from 'multer';
+const upload = multer();
 function nowSeconds() {
     return Math.floor(Date.now() / 1000);
 }
@@ -20,7 +22,7 @@ function requireEnv(name) {
 export async function registerRunRoutes(app, store) {
     const RUNNER_URL = requireEnv('RUNNER_URL');
     const RUNNER_TOKEN = process.env.RUNNER_TOKEN ?? 'change_me';
-    app.post('/agents/:agentId/runs', async (req, reply) => {
+    app.post('/agents/:agentId/runs', upload.none(), async (req, reply) => {
         requireOptionalBearerAuth(req, reply);
         if (reply.sent)
             return;
@@ -30,20 +32,8 @@ export async function registerRunRoutes(app, store) {
             reply.code(404);
             return { detail: 'Agent not found' };
         }
-        let message = '';
-        let sessionId = '';
-        for await (const part of req.parts()) {
-            if (part.type === 'field') {
-                if (part.fieldname === 'message')
-                    message = String(part.value ?? '');
-                if (part.fieldname === 'session_id')
-                    sessionId = String(part.value ?? '');
-            }
-            else {
-                // Drain any file streams (MVP ignores file uploads)
-                await part.toBuffer();
-            }
-        }
+        const message = req.body.message || '';
+        const sessionId = req.body.session_id || '';
         const created = await store.getOrCreateSession({
             dbId: agent.db_id,
             entityType: 'agent',
@@ -51,15 +41,6 @@ export async function registerRunRoutes(app, store) {
             sessionId,
             sessionName: message || 'New session'
         });
-        const origin = req.headers.origin;
-        if (origin) {
-            reply.raw.setHeader('Access-Control-Allow-Origin', origin);
-            reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
-        }
-        reply.raw.setHeader('Content-Type', 'application/json; charset=utf-8');
-        reply.raw.setHeader('Cache-Control', 'no-cache');
-        reply.raw.setHeader('Connection', 'keep-alive');
-        reply.raw.flushHeaders();
         // Call runner to create job
         const runnerRes = await fetch(`${RUNNER_URL}/api/jobs`, {
             method: 'POST',
@@ -71,8 +52,8 @@ export async function registerRunRoutes(app, store) {
                 input: {
                     message,
                     session_id: created.sessionId,
-                    provider: 'copilotapi',
-                    model: 'gpt-4o'
+                    provider: agent.model?.provider ?? 'mock',
+                    model: agent.model?.model ?? 'echo'
                 }
             })
         });
@@ -83,6 +64,17 @@ export async function registerRunRoutes(app, store) {
         }
         const job = await runnerRes.json();
         const jobId = job.id;
+        const startRes = await fetch(`${RUNNER_URL}/api/jobs/${encodeURIComponent(jobId)}/start`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${RUNNER_TOKEN}`
+            }
+        });
+        if (!startRes.ok) {
+            const text = await startRes.text();
+            reply.code(500);
+            return { detail: `Start error: ${startRes.status} ${text}` };
+        }
         // Stream events from runner
         const eventsRes = await fetch(`${RUNNER_URL}/api/jobs/${jobId}/events`, {
             headers: {
@@ -99,6 +91,16 @@ export async function registerRunRoutes(app, store) {
             reply.code(500);
             return { detail: 'No reader for events' };
         }
+        const origin = req.headers.origin;
+        if (origin) {
+            reply.raw.setHeader('Access-Control-Allow-Origin', origin);
+            reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
+        }
+        reply.raw.setHeader('Content-Type', 'application/json; charset=utf-8');
+        reply.raw.setHeader('Cache-Control', 'no-cache');
+        reply.raw.setHeader('Connection', 'keep-alive');
+        reply.hijack();
+        reply.raw.flushHeaders();
         const decoder = new TextDecoder();
         let buffer = '';
         let finalContent = '';
@@ -111,53 +113,55 @@ export async function registerRunRoutes(app, store) {
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
                 for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const data = line.slice(6);
-                        try {
-                            const event = JSON.parse(data);
-                            let chunk = null;
-                            if (event.type === 'job.started') {
-                                chunk = {
-                                    event: RunEvent.RunStarted,
-                                    content_type: 'text',
-                                    created_at: nowSeconds(),
-                                    session_id: created.sessionId,
-                                    agent_id: agentId,
-                                    content: ''
-                                };
-                            }
-                            else if (event.type === 'tool.output' && typeof event.data?.output === 'string') {
-                                const output = event.data.output;
-                                finalContent += output;
-                                chunk = {
-                                    event: RunEvent.RunContent,
-                                    content_type: 'text',
-                                    created_at: nowSeconds(),
-                                    session_id: created.sessionId,
-                                    agent_id: agentId,
-                                    content: output
-                                };
-                            }
-                            else if (event.type === 'done') {
-                                chunk = {
-                                    event: RunEvent.RunCompleted,
-                                    content_type: 'text',
-                                    created_at: nowSeconds(),
-                                    session_id: created.sessionId,
-                                    agent_id: agentId,
-                                    content: finalContent
-                                };
-                            }
-                            if (chunk) {
-                                writeChunk(reply.raw, chunk);
-                            }
+                    if (!line.startsWith('data: '))
+                        continue;
+                    const data = line.slice(6);
+                    try {
+                        const event = JSON.parse(data);
+                        let chunk = null;
+                        if (event.type === 'job.started') {
+                            chunk = {
+                                event: RunEvent.RunStarted,
+                                content_type: 'text',
+                                created_at: nowSeconds(),
+                                session_id: created.sessionId,
+                                agent_id: agentId,
+                                content: ''
+                            };
                         }
-                        catch (e) {
-                            // ignore parse errors
+                        else if (event.type === 'tool.output' && typeof event.data?.output === 'string') {
+                            const output = event.data.output;
+                            finalContent += output;
+                            chunk = {
+                                event: RunEvent.RunContent,
+                                content_type: 'text',
+                                created_at: nowSeconds(),
+                                session_id: created.sessionId,
+                                agent_id: agentId,
+                                content: output
+                            };
                         }
+                        else if (event.type === 'done') {
+                            chunk = {
+                                event: RunEvent.RunCompleted,
+                                content_type: 'text',
+                                created_at: nowSeconds(),
+                                session_id: created.sessionId,
+                                agent_id: agentId,
+                                content: finalContent
+                            };
+                        }
+                        if (chunk)
+                            writeChunk(reply.raw, chunk);
+                    }
+                    catch {
+                        // ignore parse errors
                     }
                 }
             }
+        }
+        catch {
+            // Avoid throwing after hijacking the response
         }
         finally {
             reader.releaseLock();
@@ -175,7 +179,7 @@ export async function registerRunRoutes(app, store) {
         });
         reply.raw.end();
     });
-    app.post('/teams/:teamId/runs', async (req, reply) => {
+    app.post('/teams/:teamId/runs', upload.none(), async (req, reply) => {
         requireOptionalBearerAuth(req, reply);
         if (reply.sent)
             return;
@@ -185,20 +189,8 @@ export async function registerRunRoutes(app, store) {
             reply.code(404);
             return { detail: 'Team not found' };
         }
-        let message = '';
-        let sessionId = '';
-        for await (const part of req.parts()) {
-            if (part.type === 'field') {
-                if (part.fieldname === 'message')
-                    message = String(part.value ?? '');
-                if (part.fieldname === 'session_id')
-                    sessionId = String(part.value ?? '');
-            }
-            else {
-                // Drain any file streams (MVP ignores file uploads)
-                await part.toBuffer();
-            }
-        }
+        const message = req.body.message || '';
+        const sessionId = req.body.session_id || '';
         const created = await store.getOrCreateSession({
             dbId: team.db_id,
             entityType: 'team',

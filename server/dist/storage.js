@@ -124,6 +124,22 @@ export class InMemoryStore {
     async getUserCount() {
         return this.users.length;
     }
+    async saveModelConfig(agentId, modelConfig) {
+        // No-op in InMemoryStore
+    }
+    async getModelConfig(agentId) {
+        return null;
+    }
+    async validateModelConfig(modelConfig) {
+        // Example validation logic, can be extended as needed
+        if (!modelConfig.provider || !modelConfig.model || !modelConfig.name) {
+            return false;
+        }
+        return true;
+    }
+    async deleteModelConfig(agentId) {
+        // No-op in InMemoryStore
+    }
 }
 export class SqliteStore {
     agents;
@@ -187,7 +203,16 @@ export class SqliteStore {
             '  created_at INTEGER NOT NULL,',
             '  last_login_at INTEGER',
             ');',
-            'CREATE INDEX IF NOT EXISTS users_email_idx ON users (email);'
+            'CREATE INDEX IF NOT EXISTS users_email_idx ON users (email);',
+            'CREATE TABLE IF NOT EXISTS agents (',
+            '  id TEXT PRIMARY KEY,',
+            '  name TEXT NOT NULL,',
+            '  db_id TEXT NOT NULL,',
+            '  model_provider TEXT NOT NULL,',
+            '  model_name TEXT NOT NULL,',
+            '  model TEXT NOT NULL',
+            ');',
+            'CREATE INDEX IF NOT EXISTS agents_name_idx ON agents (name);'
         ].join('\n'));
         return new SqliteStore(db);
     }
@@ -269,6 +294,43 @@ export class SqliteStore {
     async getUserCount() {
         const row = await this.db.get(`SELECT COUNT(*) as count FROM users`);
         return row?.count || 0;
+    }
+    async saveModelConfig(agentId, modelConfig) {
+        console.log('saveModelConfig called with:', { agentId, modelConfig });
+        try {
+            const query = `INSERT INTO agents (id, name, model, provider, apiKey, db_id) VALUES (?, ?, ?, ?, ?, ?)`;
+            const params = [agentId, modelConfig.name, modelConfig.model, modelConfig.provider, modelConfig.apiKey, modelConfig.db_id];
+            console.log('Executing query:', query, 'with params:', params);
+            await this.db.run(query, params);
+            console.log('Query executed successfully');
+        }
+        catch (error) {
+            console.error('Error in saveModelConfig:', error);
+            throw error;
+        }
+    }
+    async getModelConfig(agentId) {
+        console.log(`Fetching model config for agentId: ${agentId}`);
+        const query = `SELECT model FROM agents WHERE id = ?`;
+        console.log(`Executing query: ${query}`);
+        const row = await this.db.get(query, agentId);
+        console.log(`Fetched row:`, row);
+        return row ? JSON.parse(row.model) : null;
+    }
+    async validateModelConfig(modelConfig) {
+        console.log(`Validating model config:`, modelConfig);
+        // Example validation logic, can be extended as needed
+        if (!modelConfig.provider || !modelConfig.model || !modelConfig.name) {
+            console.log(`Validation failed: Missing required fields.`);
+            return false;
+        }
+        console.log(`Validation successful.`);
+        return true;
+    }
+    async deleteModelConfig(agentId) {
+        console.log(`Deleting model config for agentId: ${agentId}`);
+        const result = await this.db.run(`DELETE FROM agents WHERE id = ?`, agentId);
+        console.log(`Delete result:`, result);
     }
 }
 function safeJsonParse(value) {
