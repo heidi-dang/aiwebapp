@@ -39,7 +39,7 @@ async function main() {
   }
   if (!health.ok) throw new Error(`runner health failed: ${health.status}`)
 
-  const createRes = await req('/v1/jobs', {
+  const createRes = await req('/api/jobs', {
     method: 'POST',
     body: JSON.stringify({ input: { smoke: true }, timeout_ms: 2000 })
   })
@@ -47,12 +47,12 @@ async function main() {
   const created = await createRes.json()
   if (!created?.id) throw new Error('create job missing id')
 
-  const startRes = await req(`/v1/jobs/${encodeURIComponent(created.id)}/start`, {
+  const startRes = await req(`/api/jobs/${encodeURIComponent(created.id)}/start`, {
     method: 'POST'
   })
   if (!startRes.ok) throw new Error(`start job failed: ${startRes.status}`)
 
-  const getRes = await req(`/v1/jobs/${encodeURIComponent(created.id)}`, {
+  const getRes = await req(`/api/jobs/${encodeURIComponent(created.id)}`, {
     method: 'GET'
   })
   if (!getRes.ok) throw new Error(`get job failed: ${getRes.status}`)

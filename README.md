@@ -84,6 +84,29 @@ npm run init:env
 npm run dev
 ```
 
+### Shared Machine / Branch-Only Dev Ports
+
+If you are developing on a shared machine where default ports may already be in use, this branch includes an isolated dev mode that runs on a dedicated port set:
+
+```bash
+npm run dev:phase2
+```
+
+Ports used by `dev:phase2`:
+- UI: `http://localhost:3200`
+- Server: `http://localhost:3201`
+- Runner: `http://localhost:3202`
+
+Smoke tests for this port set:
+
+```bash
+npm run smoke:phase2
+```
+
+Important:
+- These `*:phase2` scripts are intended for local development convenience on shared machines.
+- The default scripts (`dev`, `start`, `smoke`) and production environment configuration remain unchanged and should follow the main branch defaults.
+
 ### Production Deployment
 
 For production deployment:

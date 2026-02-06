@@ -1,4 +1,4 @@
-import { AgentDetails, EntityType, RunRecord, SessionEntry, TeamDetails, User } from './types.js'
+import { AgentDetails, EntityType, RunRecord, SessionEntry, TeamDetails, User, ModelConfig } from './types.js'
 
 import sqlite3 from 'sqlite3'
 import { open, type Database } from 'sqlite'
@@ -56,6 +56,12 @@ export interface Store {
   getUserById(id: string): Promise<User | null>
   updateUserLastLogin(id: string): Promise<void>
   getUserCount(): Promise<number>
+
+  // Model configuration
+  saveModelConfig(agentId: string, modelConfig: ModelConfig): Promise<void>
+  getModelConfig(agentId: string): Promise<ModelConfig | null>
+  validateModelConfig(modelConfig: ModelConfig): Promise<boolean>
+  deleteModelConfig(agentId: string): Promise<void>
 }
 
 function makeSessionKey(args: {
@@ -240,6 +246,26 @@ export class InMemoryStore implements Store {
   async getUserCount(): Promise<number> {
     return this.users.length;
   }
+
+  async saveModelConfig(agentId: string, modelConfig: ModelConfig): Promise<void> {
+    // No-op in InMemoryStore
+  }
+
+  async getModelConfig(agentId: string): Promise<ModelConfig | null> {
+    return null
+  }
+
+  async validateModelConfig(modelConfig: ModelConfig): Promise<boolean> {
+    // Example validation logic, can be extended as needed
+    if (!modelConfig.provider || !modelConfig.model || !modelConfig.name) {
+      return false;
+    }
+    return true;
+  }
+
+  async deleteModelConfig(agentId: string): Promise<void> {
+    // No-op in InMemoryStore
+  }
 }
 
 export class SqliteStore implements Store {
@@ -311,7 +337,16 @@ export class SqliteStore implements Store {
         '  created_at INTEGER NOT NULL,',
         '  last_login_at INTEGER',
         ');',
-        'CREATE INDEX IF NOT EXISTS users_email_idx ON users (email);'
+        'CREATE INDEX IF NOT EXISTS users_email_idx ON users (email);',
+        'CREATE TABLE IF NOT EXISTS agents (',
+        '  id TEXT PRIMARY KEY,',
+        '  name TEXT NOT NULL,',
+        '  db_id TEXT NOT NULL,',
+        '  model_provider TEXT NOT NULL,',
+        '  model_name TEXT NOT NULL,',
+        '  model TEXT NOT NULL',
+        ');',
+        'CREATE INDEX IF NOT EXISTS agents_name_idx ON agents (name);'
       ].join('\n')
     )
 
@@ -508,6 +543,49 @@ export class SqliteStore implements Store {
   async getUserCount(): Promise<number> {
     const row = await this.db.get<{ count: number }>(`SELECT COUNT(*) as count FROM users`)
     return row?.count || 0
+  }
+
+  async saveModelConfig(agentId: string, modelConfig: ModelConfig): Promise<void> {
+    console.log('saveModelConfig called with:', { agentId, modelConfig });
+    try {
+        const query = `INSERT INTO agents (id, name, model, provider, apiKey, db_id) VALUES (?, ?, ?, ?, ?, ?)`;
+        const params = [agentId, modelConfig.name, modelConfig.model, modelConfig.provider, modelConfig.apiKey, modelConfig.db_id];
+        console.log('Executing query:', query, 'with params:', params);
+        await this.db.run(query, params);
+        console.log('Query executed successfully');
+    } catch (error) {
+        console.error('Error in saveModelConfig:', error);
+        throw error;
+    }
+  }
+
+  async getModelConfig(agentId: string): Promise<ModelConfig | null> {
+    console.log(`Fetching model config for agentId: ${agentId}`);
+    const query = `SELECT model FROM agents WHERE id = ?`;
+    console.log(`Executing query: ${query}`);
+    const row = await this.db.get(query, agentId);
+    console.log(`Fetched row:`, row);
+    return row ? JSON.parse(row.model) : null;
+  }
+
+  async validateModelConfig(modelConfig: ModelConfig): Promise<boolean> {
+    console.log(`Validating model config:`, modelConfig);
+    // Example validation logic, can be extended as needed
+    if (!modelConfig.provider || !modelConfig.model || !modelConfig.name) {
+      console.log(`Validation failed: Missing required fields.`);
+      return false;
+    }
+    console.log(`Validation successful.`);
+    return true;
+  }
+
+  async deleteModelConfig(agentId: string): Promise<void> {
+    console.log(`Deleting model config for agentId: ${agentId}`);
+    const result = await this.db.run(
+      `DELETE FROM agents WHERE id = ?`,
+      agentId
+    );
+    console.log(`Delete result:`, result);
   }
 }
 

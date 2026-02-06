@@ -8,7 +8,6 @@ import { createJob, startJob, streamJobEvents } from '@/lib/runner/client'
 import { useQueryState } from 'nuqs'
 import Icon from '@/components/ui/icon'
 import Tooltip from '@/components/ui/tooltip'
-import { getStatusAPI } from '@/api/os'
 
 import Highlight, { defaultProps } from 'prism-react-renderer'
 import theme from 'prism-react-renderer/themes/github'
@@ -57,10 +56,6 @@ const ChatInput = () => {
   const [copilotStatus, setCopilotStatus] = useState<'unknown' | 'up' | 'down'>(
     'unknown'
   )
-  const [copilotLatencyMs, setCopilotLatencyMs] = useState<number | null>(null)
-  const [copilotLastCheckedAt, setCopilotLastCheckedAt] = useState<Date | null>(
-    null
-  )
   const [isCopilotChecking, setIsCopilotChecking] = useState(false)
   const [isAgentDialogOpen, setIsAgentDialogOpen] = useState(false)
   const [isToolsDialogOpen, setIsToolsDialogOpen] = useState(false)
@@ -77,6 +72,11 @@ const ChatInput = () => {
   const [toolOutput, setToolOutput] = useState<string>('')
   const [isRunningTool, setIsRunningTool] = useState<boolean>(false)
   const [toolError, setToolError] = useState<string | null>(null)
+
+  const [copilotLatencyMs, setCopilotLatencyMs] = useState<number | null>(null)
+  const [copilotLastCheckedAt, setCopilotLastCheckedAt] = useState<Date | null>(
+    null
+  )
 
   function copyOutput() {
     if (!toolOutput) return
@@ -286,38 +286,37 @@ const ChatInput = () => {
     setSelectedModel,
     selectedModel,
     aiApiBase,
-    authToken
+    authToken,
+    mode
   ])
 
   const checkCopilotHealth = useCallback(async () => {
     setIsCopilotChecking(true)
-    const startedAt = Date.now()
+    const started = performance.now()
     try {
       const base =
         apiBase && !looksLocal(apiBase)
           ? apiBase
-          : !looksLocal(selectedEndpoint)
+          : looksLocal(selectedEndpoint)
             ? selectedEndpoint
             : null
 
       if (!base) {
         setCopilotStatus('down')
-        setCopilotLastCheckedAt(new Date())
         return
       }
 
-      const status = await getStatusAPI(base, authToken)
-      setCopilotLatencyMs(Date.now() - startedAt)
-      setCopilotLastCheckedAt(new Date())
-      setCopilotStatus(status === 200 ? 'up' : 'down')
-    } catch {
-      setCopilotLatencyMs(Date.now() - startedAt)
-      setCopilotLastCheckedAt(new Date())
+      const res = await fetch('/api/copilot/health', { cache: 'no-store' })
+      setCopilotStatus(res.ok ? 'up' : 'down')
+    } catch (error) {
+      console.error('Error checking Copilot health:', error)
       setCopilotStatus('down')
     } finally {
+      setCopilotLatencyMs(Math.round(performance.now() - started))
+      setCopilotLastCheckedAt(new Date())
       setIsCopilotChecking(false)
     }
-  }, [selectedEndpoint, authToken, apiBase])
+  }, [apiBase, selectedEndpoint])
 
   useEffect(() => {
     checkCopilotHealth()
@@ -412,7 +411,9 @@ const ChatInput = () => {
     setMessages,
     setRunUnsubscribe,
     provider,
-    selectedModel
+    selectedModel,
+    systemPromptCustom,
+    systemPromptMode
   ])
 
   const handleSubmit = async () => {

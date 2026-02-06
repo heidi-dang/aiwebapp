@@ -129,7 +129,7 @@ export function streamJobEvents(jobId: string, cb: StreamCallbacks) {
     es.addEventListener(t, handle as EventListener)
   }
 
-  es.onerror = (err) => {
+  es.onerror = () => {
     // EventSource errors are not very readable; surface something useful
     cb.onError?.(new Error('Runner SSE connection error (check runner logs)'))
   }

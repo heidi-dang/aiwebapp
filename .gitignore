@@ -11,15 +11,18 @@ server/node_modules
 ui/node_modules
 runner/node_modules
 node_modules
-package-lock.json
 runner/package-lock.json
 server/package-lock.json
 ui/package-lock.json
 
-
+server/dist
+runner/dist
+ui/.next
 logs
 hotreload.out
 *.db
+*.sqlite
+*.sqlite3
 
 # Debug and temporary files
 server/minimal-fastify-server.js

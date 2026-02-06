@@ -177,20 +177,15 @@ export default function RunCard({ jobId }: { jobId: string }) {
   }, [run?.startedAt, run?.finishedAt, now])
 
   // Derive structured view from events
-  const { planSteps, tools, errorMessage, planUpdateMessage } = useMemo(() => {
-    let planSteps: PlanStep[] = []
+  const { tools, errorMessage, planUpdateMessage } = useMemo(() => {
     const tools = new Map<string, ToolState>()
     let errorMessage: string | null = null
     let planUpdateMessage: string | null = null
 
-    if (!run) return { planSteps, tools, errorMessage, planUpdateMessage }
+    if (!run) return { tools, errorMessage, planUpdateMessage }
 
     for (const evt of run.events) {
       const payload = evt.payload as Record<string, unknown> | undefined
-
-      if (evt.type === 'plan' && payload?.steps) {
-        planSteps = payload.steps as PlanStep[]
-      }
 
       if (evt.type === 'plan.update' && payload?.message) {
         planUpdateMessage = payload.message as string
@@ -244,7 +239,7 @@ export default function RunCard({ jobId }: { jobId: string }) {
       }
     }
 
-    return { planSteps, tools, errorMessage, planUpdateMessage }
+    return { tools, errorMessage, planUpdateMessage }
   }, [run])
 
   // Approve-and-run flow: call server to add command to allowlist and execute it, then inject synthetic events
