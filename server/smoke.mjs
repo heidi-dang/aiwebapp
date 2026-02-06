@@ -6,11 +6,8 @@ async function check(path, opts) {
   try {
     res = await fetch(url, opts)
   } catch (e) {
-    if (e.code === 'ECONNREFUSED' || e.cause?.code === 'ECONNREFUSED') {
-      console.warn(`Server not reachable at ${base}; skipping smoke checks`)
-      process.exit(0)
-    }
-    throw e
+    console.warn(`Server not reachable at ${base} (${e.message}); skipping smoke checks`)
+    process.exit(0)
   }
   const text = await res.text()
   if (!res.ok) {

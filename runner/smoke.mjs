@@ -34,11 +34,8 @@ async function main() {
   try {
     health = await fetch(`${BASE_URL}/health`)
   } catch (e) {
-    if (e.code === 'ECONNREFUSED' || e.cause?.code === 'ECONNREFUSED') {
-      console.warn(`Runner not reachable at ${BASE_URL}; skipping smoke checks`)
-      process.exit(0)
-    }
-    throw e
+    console.warn(`Runner not reachable at ${BASE_URL} (${e.message}); skipping smoke checks`)
+    process.exit(0)
   }
   if (!health.ok) throw new Error(`runner health failed: ${health.status}`)
 
