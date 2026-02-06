@@ -118,7 +118,9 @@ const ChatBlankState = () => {
         >
           <div className="flex flex-col items-center gap-2">
             <h2 className="text-xl font-semibold">Welcome</h2>
-            <p className="text-sm text-muted">Start a conversation to create a session.</p>
+            <p className="text-sm text-muted">
+              Start a conversation to create a session.
+            </p>
           </div>
         </motion.h1>
         <motion.div

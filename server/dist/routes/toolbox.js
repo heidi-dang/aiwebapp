@@ -2,7 +2,7 @@ import { requireOptionalBearerAuth } from '../auth.js';
 import { promises as fs } from 'node:fs';
 import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
-import * as glob from 'glob';
+import glob from 'glob';
 const exec = promisify(execCb);
 function looksLikeNaturalLanguageCommand(command) {
     if (/\b(run|execute|start|stop|open|close|list|show|find)\b\s+(the|a|an)\b/i.test(command)) {
@@ -70,7 +70,14 @@ export async function registerToolboxRoutes(app) {
             }
             if (tool === 'list_files') {
                 const pattern = String(params.glob ?? '**/*');
-                const entries = await glob.glob(pattern, { cwd: process.cwd() });
+                const entries = await new Promise((resolve, reject) => {
+                    glob(pattern, { cwd: process.cwd() }, (err, matches) => {
+                        if (err)
+                            reject(err);
+                        else
+                            resolve(matches);
+                    });
+                });
                 return { success: true, result: { files: entries } };
             }
             if (tool === 'list_dir') {
@@ -114,6 +121,40 @@ export async function registerToolboxRoutes(app) {
                     return { file, line: lineNum, text };
                 }).filter(Boolean);
                 return { success: true, result: { query, matches } };
+            }
+            // Approve a command by adding it to the allowlist. This is a convenience to let a local user opt-in
+            // to a previously refused command. This will persist to config/allowed-commands.json (append if missing).
+            if (tool === 'approve_command') {
+                const command = String(params.command ?? '');
+                if (!command) {
+                    reply.code(400);
+                    return { error: 'Missing command' };
+                }
+                if (isDangerousCommand(command)) {
+                    reply.code(403);
+                    return { error: 'Refused: matches dangerous pattern' };
+                }
+                try {
+                    const cfgPath = new URL('../../config/allowed-commands.json', import.meta.url);
+                    let allowed = [];
+                    try {
+                        const current = await fs.readFile(cfgPath, 'utf8');
+                        allowed = JSON.parse(current);
+                    }
+                    catch (e) {
+                        // treat as empty list
+                    }
+                    if (!allowed.includes(command)) {
+                        allowed.push(command);
+                        await fs.writeFile(cfgPath, JSON.stringify(allowed, null, 2), 'utf8');
+                    }
+                    return { success: true, result: { command } };
+                }
+                catch (err) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    reply.code(500);
+                    return { error: message };
+                }
             }
             if (tool === 'run_command') {
                 const command = String(params.command ?? '');

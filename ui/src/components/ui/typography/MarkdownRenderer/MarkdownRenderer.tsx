@@ -30,15 +30,23 @@ function replaceToolLabelsOutsideCode(content: string) {
   const codeSplitRe = /(```[\s\S]*?```|`[^`]*`)/g
   const parts = content.split(codeSplitRe)
 
-  const wordRe = new RegExp(`\\b(${Object.keys(TOOL_LABEL_MAP).map(k => k.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')).join('|')})\\b`, 'gi')
+  const wordRe = new RegExp(
+    `\\b(${Object.keys(TOOL_LABEL_MAP)
+      .map((k) => k.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'))
+      .join('|')})\\b`,
+    'gi'
+  )
 
-  const replaceFn = (s: string) => s.replace(wordRe, (match) => {
-    // preserve original case where possible
-    const key = match.toLowerCase()
-    return TOOL_LABEL_MAP[key] ?? match
-  })
+  const replaceFn = (s: string) =>
+    s.replace(wordRe, (match) => {
+      // preserve original case where possible
+      const key = match.toLowerCase()
+      return TOOL_LABEL_MAP[key] ?? match
+    })
 
-  return parts.map((part) => (part && part.startsWith('`') ? part : replaceFn(part))).join('')
+  return parts
+    .map((part) => (part && part.startsWith('`') ? part : replaceFn(part)))
+    .join('')
 }
 
 const MarkdownRenderer: FC<MarkdownRendererProps> = ({
@@ -46,7 +54,10 @@ const MarkdownRenderer: FC<MarkdownRendererProps> = ({
   classname,
   inline = false
 }) => {
-  const content = typeof children === 'string' ? replaceToolLabelsOutsideCode(children) : children
+  const content =
+    typeof children === 'string'
+      ? replaceToolLabelsOutsideCode(children)
+      : children
 
   return (
     <ReactMarkdown

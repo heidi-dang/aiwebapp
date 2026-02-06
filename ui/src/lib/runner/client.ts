@@ -38,10 +38,13 @@ export async function createJob(input?: unknown, timeoutMs?: number) {
 }
 
 export async function startJob(jobId: string) {
-  const res = await fetch(base(`/api/jobs/${encodeURIComponent(jobId)}/start`), {
-    method: 'POST',
-    headers: getAuthHeaders()
-  })
+  const res = await fetch(
+    base(`/api/jobs/${encodeURIComponent(jobId)}/start`),
+    {
+      method: 'POST',
+      headers: getAuthHeaders()
+    }
+  )
 
   if (!res.ok) {
     throw new Error(`startJob failed: ${res.status}`)

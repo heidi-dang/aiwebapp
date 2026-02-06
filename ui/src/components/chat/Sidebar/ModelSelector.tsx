@@ -1,16 +1,16 @@
-'use client';
+'use client'
 
-import * as React from 'react';
+import * as React from 'react'
 import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem
-} from '@/components/ui/select';
-import { useStore } from '@/store';
-import Icon from '@/components/ui/icon';
-import { getProviderIcon } from '@/lib/modelProvider';
+} from '@/components/ui/select'
+import { useStore } from '@/store'
+import Icon from '@/components/ui/icon'
+import { getProviderIcon } from '@/lib/modelProvider'
 
 // Hard‑code any models you want to expose to users here.
 const models = [
@@ -23,11 +23,11 @@ const models = [
   'copilot-fast',
   'claude-sonnet-4',
   'claude-opus-4.5'
-];
+]
 
 export function ModelSelector() {
-  const selectedModel = useStore((state) => state.selectedModel);
-  const setSelectedModel = useStore((state) => state.setSelectedModel);
+  const selectedModel = useStore((state) => state.selectedModel)
+  const setSelectedModel = useStore((state) => state.setSelectedModel)
 
   return (
     <Select
@@ -39,7 +39,7 @@ export function ModelSelector() {
       </SelectTrigger>
       <SelectContent className="border-none bg-primaryAccent font-dmmono shadow-lg">
         {models.map((model) => {
-          const iconType = getProviderIcon(model) ?? 'open-ai';
+          const iconType = getProviderIcon(model) ?? 'open-ai'
           return (
             <SelectItem key={model} value={model} className="cursor-pointer">
               <div className="flex items-center gap-3 text-xs font-medium uppercase">
@@ -47,11 +47,11 @@ export function ModelSelector() {
                 {model}
               </div>
             </SelectItem>
-          );
+          )
         })}
       </SelectContent>
     </Select>
-  );
+  )
 }
 
-export default ModelSelector;
+export default ModelSelector

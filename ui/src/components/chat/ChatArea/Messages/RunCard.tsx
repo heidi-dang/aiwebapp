@@ -38,7 +38,7 @@ function formatToolLabel(name: string) {
     code_execution: 'Code execution',
     review: 'Review',
     iterate: 'Iterate',
-    finish: 'Finish',
+    finish: 'Finish'
   }
 
   if (map[name]) return map[name]
@@ -52,7 +52,7 @@ function formatToolLabel(name: string) {
 interface PlanStep {
   tool: string
   description: string
-} 
+}
 
 interface ToolState {
   name: string
@@ -62,9 +62,13 @@ interface ToolState {
   refusedReason?: string
 }
 
-
-
-function ToolTimeline({ tools, onApprove }: { tools: Map<string, ToolState>; onApprove?: (command: string) => Promise<void> }) {
+function ToolTimeline({
+  tools,
+  onApprove
+}: {
+  tools: Map<string, ToolState>
+  onApprove?: (command: string) => Promise<void>
+}) {
   return (
     <div className="space-y-2">
       {Array.from(tools.entries()).map(([name, tool]) => (
@@ -98,17 +102,26 @@ function ToolTimeline({ tools, onApprove }: { tools: Map<string, ToolState>; onA
           )}
 
           {tool.refusedCommand && (
-            <div data-testid="run-tool-refusal" className="mt-2 rounded-md border border-red-500/20 bg-red-500/5 p-3">
+            <div
+              data-testid="run-tool-refusal"
+              className="mt-2 rounded-md border border-red-500/20 bg-red-500/5 p-3"
+            >
               <div className="text-xs text-red-300">Refused to run:</div>
-              <div className="mt-1 font-mono text-sm">{tool.refusedCommand}</div>
+              <div className="mt-1 font-mono text-sm">
+                {tool.refusedCommand}
+              </div>
               {tool.refusedReason && (
-                <div className="mt-1 text-[11px] text-red-300">{tool.refusedReason}</div>
+                <div className="mt-1 text-[11px] text-red-300">
+                  {tool.refusedReason}
+                </div>
               )}
               <div className="mt-3 flex gap-2">
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => navigator.clipboard?.writeText(tool.refusedCommand ?? '')}
+                  onClick={() =>
+                    navigator.clipboard?.writeText(tool.refusedCommand ?? '')
+                  }
                 >
                   Copy Command
                 </Button>
@@ -216,7 +229,13 @@ export default function RunCard({ jobId }: { jobId: string }) {
           existing.refusedCommand = cmd
           existing.refusedReason = reason
         } else {
-          tools.set(toolName, { name: toolName, status: 'error', outputs: [], refusedCommand: cmd, refusedReason: reason })
+          tools.set(toolName, {
+            name: toolName,
+            status: 'error',
+            outputs: [],
+            refusedCommand: cmd,
+            refusedReason: reason
+          })
         }
       }
 
@@ -245,7 +264,8 @@ export default function RunCard({ jobId }: { jobId: string }) {
         body: JSON.stringify({ tool: 'run_command', params: { command } })
       })
       const runJson = await runRes.json()
-      const output = (runJson?.result?.stdout as string) ?? runJson?.error ?? '(no output)'
+      const output =
+        (runJson?.result?.stdout as string) ?? runJson?.error ?? '(no output)'
 
       // Inject events into store so the UI reflects execution result immediately
       const ev1: RunnerEvent = {
@@ -328,7 +348,7 @@ export default function RunCard({ jobId }: { jobId: string }) {
         </div>
       </div>
 
-          {/* Plan and replay/pause/resume UI removed per contract (no static PLAN, no replay/pause/resume controls) */}
+      {/* Plan and replay/pause/resume UI removed per contract (no static PLAN, no replay/pause/resume controls) */}
 
       {!isCollapsed && (
         <div className="mt-4 space-y-3">
@@ -351,7 +371,9 @@ export default function RunCard({ jobId }: { jobId: string }) {
                 <div className="h-2 w-2 animate-pulse rounded-full bg-blue-400" />
                 <span className="text-xs text-muted">Thinking...</span>
               </div>
-              <div className="mt-2 text-[11px] text-secondary">Agent is planning steps. Click to view workflow.</div>
+              <div className="mt-2 text-[11px] text-secondary">
+                Agent is planning steps. Click to view workflow.
+              </div>
             </div>
           )}
 
@@ -363,5 +385,3 @@ export default function RunCard({ jobId }: { jobId: string }) {
     </div>
   )
 }
-
-

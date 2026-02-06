@@ -29,6 +29,9 @@ async function main() {
         const message = error instanceof Error ? error.message : String(error);
         reply.code(500).send({ detail: message });
     });
+    app.addHook('onRequest', async (request) => {
+        app.log.info(`Incoming request: ${request.method} ${request.url}`);
+    });
     await app.register(cors, {
         origin: (origin, cb) => {
             const allowlist = new Set([
@@ -55,6 +58,7 @@ async function main() {
     const sqlitePath = process.env.SQLITE_PATH;
     const store = sqlitePath ? await SqliteStore.create(sqlitePath) : new InMemoryStore();
     await registerHealthRoutes(app);
+    app.log.info('Registering agent routes...');
     await registerAgentRoutes(app, store);
     await registerTeamRoutes(app, store);
     await registerSessionRoutes(app, store);

@@ -6,6 +6,7 @@ export async function registerAgentRoutes(app: FastifyInstance, store: Store) {
   app.get('/agents', async (req, reply) => {
     requireOptionalBearerAuth(req, reply)
     if (reply.sent) return
+    console.log('Agents data:', store.agents);
     return store.agents
   })
 }

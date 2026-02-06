@@ -10,10 +10,10 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/runner/:path*',
-        destination: `${runnerUrl}/:path*`,
-      },
+        destination: `${runnerUrl}/:path*`
+      }
     ]
-  },
+  }
 }
 
 export default nextConfig
