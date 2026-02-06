@@ -115,6 +115,40 @@ export async function registerToolboxRoutes(app) {
                 }).filter(Boolean);
                 return { success: true, result: { query, matches } };
             }
+            // Approve a command by adding it to the allowlist. This is a convenience to let a local user opt-in
+            // to a previously refused command. This will persist to config/allowed-commands.json (append if missing).
+            if (tool === 'approve_command') {
+                const command = String(params.command ?? '');
+                if (!command) {
+                    reply.code(400);
+                    return { error: 'Missing command' };
+                }
+                if (isDangerousCommand(command)) {
+                    reply.code(403);
+                    return { error: 'Refused: matches dangerous pattern' };
+                }
+                try {
+                    const cfgPath = new URL('../../config/allowed-commands.json', import.meta.url);
+                    let allowed = [];
+                    try {
+                        const current = await fs.readFile(cfgPath, 'utf8');
+                        allowed = JSON.parse(current);
+                    }
+                    catch (e) {
+                        // treat as empty list
+                    }
+                    if (!allowed.includes(command)) {
+                        allowed.push(command);
+                        await fs.writeFile(cfgPath, JSON.stringify(allowed, null, 2), 'utf8');
+                    }
+                    return { success: true, result: { command } };
+                }
+                catch (err) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    reply.code(500);
+                    return { error: message };
+                }
+            }
             if (tool === 'run_command') {
                 const command = String(params.command ?? '');
                 if (!command) {

@@ -8,7 +8,6 @@ import { createJob, startJob, streamJobEvents } from '@/lib/runner/client'
 import { useQueryState } from 'nuqs'
 import Icon from '@/components/ui/icon'
 import Tooltip from '@/components/ui/tooltip'
-import { getStatusAPI } from '@/api/os'
 
 import Highlight, { defaultProps } from 'prism-react-renderer'
 import theme from 'prism-react-renderer/themes/github'
@@ -55,10 +54,6 @@ const ChatInput = () => {
   const [copilotStatus, setCopilotStatus] = useState<'unknown' | 'up' | 'down'>(
     'unknown'
   )
-  const [copilotLatencyMs, setCopilotLatencyMs] = useState<number | null>(null)
-  const [copilotLastCheckedAt, setCopilotLastCheckedAt] = useState<Date | null>(
-    null
-  )
   const [isCopilotChecking, setIsCopilotChecking] = useState(false)
   const [isAgentDialogOpen, setIsAgentDialogOpen] = useState(false)
   const [isToolsDialogOpen, setIsToolsDialogOpen] = useState(false)
@@ -73,6 +68,9 @@ const ChatInput = () => {
   const [toolOutput, setToolOutput] = useState<string>('')
   const [isRunningTool, setIsRunningTool] = useState<boolean>(false)
   const [toolError, setToolError] = useState<string | null>(null)
+
+  const [copilotLatencyMs, setCopilotLatencyMs] = useState<number | null>(null)
+  const [copilotLastCheckedAt, setCopilotLastCheckedAt] = useState<Date | null>(null)
 
   function copyOutput() {
     if (!toolOutput) return
@@ -263,11 +261,10 @@ const ChatInput = () => {
         })
         .catch((err) => console.error('Failed to fetch models:', err))
     }
-  }, [provider, setAvailableModels, setSelectedModel, selectedModel, aiApiBase, authToken])
+  }, [provider, setAvailableModels, setSelectedModel, selectedModel, aiApiBase, authToken, mode])
 
   const checkCopilotHealth = useCallback(async () => {
     setIsCopilotChecking(true)
-    const startedAt = Date.now()
     try {
       const base =
         apiBase && !looksLocal(apiBase)
@@ -278,22 +275,13 @@ const ChatInput = () => {
 
       if (!base) {
         setCopilotStatus('down')
-        setCopilotLastCheckedAt(new Date())
-        return
       }
-
-      const status = await getStatusAPI(base, authToken)
-      setCopilotLatencyMs(Date.now() - startedAt)
-      setCopilotLastCheckedAt(new Date())
-      setCopilotStatus(status === 200 ? 'up' : 'down')
-    } catch {
-      setCopilotLatencyMs(Date.now() - startedAt)
-      setCopilotLastCheckedAt(new Date())
-      setCopilotStatus('down')
+    } catch (error) {
+      console.error('Error checking Copilot health:', error);
     } finally {
-      setIsCopilotChecking(false)
+      setIsCopilotChecking(false);
     }
-  }, [selectedEndpoint, authToken, apiBase])
+  }, [apiBase, selectedEndpoint])
 
   useEffect(() => {
     checkCopilotHealth()
@@ -375,7 +363,7 @@ const ChatInput = () => {
         `Runner error: ${error instanceof Error ? error.message : String(error)}`
       )
     }
-  }, [applyRunnerEvent, initRun, inputMessage, setMessages, setRunUnsubscribe, provider, selectedModel])
+  }, [applyRunnerEvent, initRun, inputMessage, setMessages, setRunUnsubscribe, provider, selectedModel, systemPromptCustom, systemPromptMode])
 
   const handleSubmit = async () => {
     if (!inputMessage.trim()) return
@@ -445,32 +433,6 @@ const ChatInput = () => {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
   }
-
-  function highlightJson(jsonStr: string) {
-    try {
-      const obj = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr
-      const pretty = JSON.stringify(obj, null, 2)
-      const escaped = escapeHtml(pretty)
-      // Wrap keys, strings, numbers, booleans, null
-      return escaped
-        .replace(/(\"(.*?)\")(?=\s*:)/g, '<span class="text-indigo-400">$1</span>')
-        .replace(/:(\s*)(\".*?\")/g, ':$1<span class="text-emerald-400">$2</span>')
-        .replace(/:(\s*)(-?\d+(?:\.\d+)?)/g, ':$1<span class="text-orange-400">$2</span>')
-        .replace(/\b(true|false|null)\b/g, '<span class="text-purple-400">$1</span>')
-    } catch (e) {
-      // Not valid JSON, just escape and return raw
-      return escapeHtml(jsonStr)
-    }
-  }
-
-  // Function to decode HTML entities
-  function decodeHtml(encoded: string): string {
-    const textarea = document.createElement('textarea');
-    textarea.innerHTML = encoded;
-    return textarea.value;
-  }
-
-
 
   return (
     <div className="relative mx-auto mb-1 flex w-full max-w-2xl items-end justify-center gap-x-2 font-geist">

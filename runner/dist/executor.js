@@ -358,13 +358,50 @@ async function executeSimulated(ctx) {
         output: `I understand you said: "${message}". This is a simulated response. In a real implementation, I would provide a helpful answer based on the codebase analysis.`
     });
 }
+function looksLikeActionRequest(text) {
+    return /\b(run|refactor|fix|change|update|modify|create|generate|build|test|install|delete|move|copy)\b/i.test(text);
+}
 /**
  * Execute a job with CopilotAPI Bridge
  */
 async function executeWithCopilotApi(ctx) {
     const message = ctx.input.message ?? ctx.input.instruction ?? 'Hello';
     const model = ctx.input.model || 'auto';
-    const tools = [
+    // Check if this looks like an action request
+    const isActionRequest = looksLikeActionRequest(message);
+    const systemPrompt = isActionRequest ? `
+You are an autonomous coding agent with full execution capabilities.
+
+IMPORTANT: You are NOT GitHub Copilot Chat. You are NOT limited to suggestions or explanations.
+
+Capabilities:
+- You can read files using read_file tool
+- You can write/create files using write_file tool
+- You can list directories using list_dir tool
+- You can search code using grep_search tool
+- You can run terminal commands using run_command tool
+
+Rules:
+- If the user asks you to perform an action (refactor, fix, generate, run, build, etc.), you SHOULD do it using the available tools
+- Do NOT say you "cannot run commands" or mention VS Code limitations
+- Do NOT refuse actions that are technically possible
+- Only refuse if the action is unsafe, disallowed, or impossible
+- When using tools, provide clear reasoning for each step
+- After completing actions, summarize what was done
+
+Respond by acting with tools, not by explaining limitations.
+` : `
+You are a helpful coding assistant.
+
+You can answer questions about code, provide explanations, and give advice.
+For specific actions like running commands or modifying files, ask the user to clarify.
+`;
+    const messages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: message }
+    ];
+    // Only include tools for action requests
+    const tools = isActionRequest ? [
         {
             type: 'function',
             function: {
@@ -475,24 +512,20 @@ async function executeWithCopilotApi(ctx) {
                 }
             }
         }
-    ];
-    const messages = [
-        {
-            role: 'system',
-            content: 'You are a coding assistant. Use the available tools to read/write files, list files, and run terminal commands before answering.'
-        },
-        { role: 'user', content: message }
-    ];
-    await emitEvent(ctx, 'plan', {
-        steps: [
-            { tool: 'read_file', description: 'Gather context from files' },
-            { tool: 'write_file', description: 'Apply requested changes' },
-            { tool: 'list_files', description: 'List files with glob patterns' },
-            { tool: 'list_dir', description: 'List directory contents' },
-            { tool: 'grep_search', description: 'Search text in files' },
-            { tool: 'run_command', description: 'Run terminal commands' }
-        ]
-    });
+    ] : [];
+    // Only emit plan for action requests
+    if (isActionRequest) {
+        await emitEvent(ctx, 'plan', {
+            steps: [
+                { tool: 'read_file', description: 'Gather context from files' },
+                { tool: 'write_file', description: 'Apply requested changes' },
+                { tool: 'list_files', description: 'List files with glob patterns' },
+                { tool: 'list_dir', description: 'List directory contents' },
+                { tool: 'grep_search', description: 'Search text in files' },
+                { tool: 'run_command', description: 'Run terminal commands' }
+            ]
+        });
+    }
     await emitEvent(ctx, 'tool.start', { tool: 'copilot', input: { model, message } });
     // Build the API URL
     const base = (process.env.AI_API_URL ?? '').replace(/\/+$/, '');
@@ -517,7 +550,8 @@ async function executeWithCopilotApi(ctx) {
                 },
                 body: JSON.stringify({
                     model,
-                    messages: [{ role: 'user', content: message }],
+                    messages,
+                    ...(isActionRequest && tools.length > 0 ? { tools, tool_choice: 'auto' } : {}),
                     temperature: 0.7
                 })
             });
@@ -646,6 +680,13 @@ async function executeWithCopilotApi(ctx) {
                     if (!matchesAllowlist(command, allowed)) {
                         const message = 'Refused to run: command not on the allowlist.';
                         console.warn(`[Runner] Refused run_command: ${command}`);
+                        // Emit structured refusal event containing the attempted command for UI affordances
+                        try {
+                            await emitEvent(ctx, 'tool.refused', { tool: 'run_command', command, reason: message });
+                        }
+                        catch (e) {
+                            /* best-effort */
+                        }
                         await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message });
                         await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message });
                         // Audit log
@@ -660,6 +701,12 @@ async function executeWithCopilotApi(ctx) {
                     }
                     else if (looksLikeNaturalLanguageCommand(command)) {
                         const message = 'Refused to run: command looks like natural language rather than a shell command.';
+                        try {
+                            await emitEvent(ctx, 'tool.refused', { tool: 'run_command', command, reason: message });
+                        }
+                        catch (e) {
+                            /* best-effort */
+                        }
                         await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message });
                         await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message });
                         try {
@@ -673,6 +720,12 @@ async function executeWithCopilotApi(ctx) {
                     }
                     else if (isDangerousCommand(command)) {
                         const message = 'Refused to run: command matches disallowed or unsafe patterns.';
+                        try {
+                            await emitEvent(ctx, 'tool.refused', { tool: 'run_command', command, reason: message });
+                        }
+                        catch (e) {
+                            /* best-effort */
+                        }
                         await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message });
                         await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message });
                         try {

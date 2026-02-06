@@ -1,7 +1,13 @@
 const base = (process.env.BASE_URL || process.argv[2] || 'http://localhost:3000').replace(/\/$/, '')
 
 async function main() {
-  const res = await fetch(`${base}/`)
+  let res
+  try {
+    res = await fetch(`${base}/`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`UI not reachable at ${base}/ (${msg}). Is the UI server running?`)
+  }
   if (!res.ok) {
     throw new Error(`GET ${base}/ -> ${res.status} ${await res.text()}`)
   }
