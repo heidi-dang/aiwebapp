@@ -2,7 +2,7 @@ import { requireOptionalBearerAuth } from '../auth.js';
 import { promises as fs } from 'node:fs';
 import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
-import { glob } from 'glob';
+import * as glob from 'glob';
 const exec = promisify(execCb);
 function looksLikeNaturalLanguageCommand(command) {
     if (/\b(run|execute|start|stop|open|close|list|show|find)\b\s+(the|a|an)\b/i.test(command)) {
@@ -70,11 +70,19 @@ export async function registerToolboxRoutes(app) {
             }
             if (tool === 'list_files') {
                 const pattern = String(params.glob ?? '**/*');
-                const entries = await glob(pattern, { cwd: process.cwd() });
+                const entries = await glob.glob(pattern, { cwd: process.cwd() });
                 return { success: true, result: { files: entries } };
             }
             if (tool === 'list_dir') {
                 const path = String(params.path ?? '.');
+                if (!path || path.includes('..') || path.startsWith('/')) {
+                    reply.code(400);
+                    return { error: 'Invalid path' };
+                }
+                if (path.includes('.git') || path.includes('node_modules')) {
+                    reply.code(403);
+                    return { error: 'Refused to list suspicious path' };
+                }
                 const entries = await fs.readdir(path, { withFileTypes: true });
                 const files = entries.map((e) => ({ name: e.name, type: e.isDirectory() ? 'directory' : 'file' }));
                 return { success: true, result: { path, files } };

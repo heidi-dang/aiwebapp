@@ -12,7 +12,6 @@ import { glob } from 'glob';
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createBridgeClientFromEnv } from './bridge.js';
-import { runCoderAgent } from './agent.js';
 const execAsync = promisify(execCb);
 function nowIso() {
     return new Date().toISOString();
@@ -353,13 +352,18 @@ async function executeSimulated(ctx) {
         'Generating response...',
         `Response: Echo - ${message}`
     ]);
+    // Emit final response as tool output for chat display
+    await emitEvent(ctx, 'tool.output', {
+        tool: 'generateResponse',
+        output: `I understand you said: "${message}". This is a simulated response. In a real implementation, I would provide a helpful answer based on the codebase analysis.`
+    });
 }
 /**
  * Execute a job with CopilotAPI Bridge
  */
 async function executeWithCopilotApi(ctx) {
     const message = ctx.input.message ?? ctx.input.instruction ?? 'Hello';
-    const model = ctx.input.model || 'gpt-4o';
+    const model = ctx.input.model || 'auto';
     const tools = [
         {
             type: 'function',
@@ -490,34 +494,87 @@ async function executeWithCopilotApi(ctx) {
         ]
     });
     await emitEvent(ctx, 'tool.start', { tool: 'copilot', input: { model, message } });
+    // Build the API URL
+    const base = (process.env.AI_API_URL ?? '').replace(/\/+$/, '');
+    const chatPath = process.env.AI_API_CHAT_PATH ?? '/v1/chat/completions';
+    const url = `${base}${chatPath.startsWith('/') ? '' : '/'}${chatPath}`;
+    const debug = process.env.RUNNER_DEBUG === '1';
+    if (debug) {
+        console.log('[CopilotAPI] base=', base);
+        console.log('[CopilotAPI] chatPath=', chatPath);
+        console.log('[CopilotAPI] url=', url);
+        console.log('[CopilotAPI] model=', model);
+    }
     for (let i = 0; i < 6; i++) {
-        const res = await fetch(`${process.env.AI_API_URL}/v1/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(process.env.AI_API_KEY && { 'X-API-Key': process.env.AI_API_KEY })
-            },
-            body: JSON.stringify({
-                model,
-                messages,
-                tools,
-                tool_choice: 'auto',
-                temperature: 0.2
-            })
-        });
-        if (!res.ok) {
-            throw new Error(`CopilotAPI request failed: ${res.status}`);
+        let res;
+        let raw = '';
+        try {
+            res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(process.env.AI_API_KEY ? { Authorization: `Bearer ${process.env.AI_API_KEY}` } : {})
+                },
+                body: JSON.stringify({
+                    model,
+                    messages: [{ role: 'user', content: message }],
+                    temperature: 0.7
+                })
+            });
+            // Read body ONCE
+            raw = await res.text();
+            if (debug) {
+                console.log('[CopilotAPI] status=', res.status);
+                console.log('[CopilotAPI] content-type=', res.headers.get('content-type'));
+                console.log('[CopilotAPI] body(head)=', raw.slice(0, 800));
+            }
+            // If not OK, include raw in error and exit
+            if (!res.ok) {
+                await emitEvent(ctx, 'error', {
+                    message: `CopilotAPI request failed: ${res.status}. ${raw.slice(0, 500)}`
+                });
+                await emitEvent(ctx, 'done', { status: 'error' });
+                return;
+            }
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (debug)
+                console.log('[CopilotAPI] fetch threw:', msg);
+            await emitEvent(ctx, 'error', {
+                message: `CopilotAPI fetch failed: ${msg}`
+            });
+            await emitEvent(ctx, 'done', { status: 'error' });
+            return;
         }
         const ct = res.headers.get('content-type') || '';
         if (!ct.includes('application/json')) {
-            const txt = await res.text();
-            throw new Error(`CopilotAPI returned non-JSON response: ${txt.slice(0, 500)}`);
+            await emitEvent(ctx, 'error', {
+                message: `CopilotAPI returned non-JSON response: ${raw.slice(0, 500)}`
+            });
+            await emitEvent(ctx, 'done', { status: 'error' });
+            return;
         }
-        const json = await res.json();
+        // Parse JSON from the same string (DON'T call res.json())
+        let json;
+        try {
+            json = JSON.parse(raw);
+        }
+        catch {
+            await emitEvent(ctx, 'error', {
+                message: `CopilotAPI returned invalid JSON: ${raw.slice(0, 500)}`
+            });
+            await emitEvent(ctx, 'done', { status: 'error' });
+            return;
+        }
         const choice = json.choices?.[0];
         const assistantMessage = choice?.message;
         if (!assistantMessage) {
-            throw new Error('CopilotAPI returned no message');
+            await emitEvent(ctx, 'error', {
+                message: 'CopilotAPI returned no message'
+            });
+            await emitEvent(ctx, 'done', { status: 'error' });
+            return;
         }
         messages.push(assistantMessage);
         const toolCalls = assistantMessage.tool_calls ?? [];
@@ -645,7 +702,11 @@ async function executeWithCopilotApi(ctx) {
         success: false,
         error: 'Exceeded tool-call iterations'
     });
-    throw new Error('Copilot tool loop exceeded iteration limit');
+    await emitEvent(ctx, 'error', {
+        message: 'Copilot tool loop exceeded iteration limit'
+    });
+    await emitEvent(ctx, 'done', { status: 'error' });
+    return;
 }
 /**
  * Main job executor
@@ -665,9 +726,17 @@ export async function executeJob(store, jobId, subscribers, input, onComplete) {
         await store.updateJobStatus(jobId, 'running', nowIso());
         await emitEvent(ctx, 'job.started', { input });
         // Execute based on provider
+        // When the provider is "copilotapi" we should call the Copilot API directly
+        // rather than using the internal CoderAgent. The CoderAgent is designed
+        // for autonomous coding tasks and exposes internal reasoning and tool calls,
+        // which leads to chat responses that are not conversational. By using
+        // executeWithCopilotApi, we relay the user message to the configured AI API
+        // (see `AI_API_URL` and `AI_API_KEY` in environment) and stream back
+        // natural language answers. For other providers we fall back to the bridge
+        // client if available, otherwise use the simulated executor.
         if (input.provider === 'copilotapi') {
-            console.log(`[Runner] Using Coder Agent for job ${jobId}`);
-            await runCoderAgent(ctx);
+            console.log(`[Runner] Using Copilot API for job ${jobId}`);
+            await executeWithCopilotApi(ctx);
         }
         else if (bridge) {
             console.log(`[Runner] Using bridge client for job ${jobId}`);

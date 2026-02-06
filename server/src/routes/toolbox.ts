@@ -83,6 +83,14 @@ export async function registerToolboxRoutes(app: FastifyInstance) {
 
       if (tool === 'list_dir') {
         const path = String(params.path ?? '.')
+        if (!path || path.includes('..') || path.startsWith('/')) {
+          reply.code(400)
+          return { error: 'Invalid path' }
+        }
+        if (path.includes('.git') || path.includes('node_modules')) {
+          reply.code(403)
+          return { error: 'Refused to list suspicious path' }
+        }
         const entries = await fs.readdir(path, { withFileTypes: true })
         const files = entries.map((e) => ({ name: e.name, type: e.isDirectory() ? 'directory' : 'file' }))
         return { success: true, result: { path, files } }

@@ -69,9 +69,18 @@ async function main() {
             reply.code(401).send({ detail: 'Unauthorized' });
         }
     });
+    app.addHook('onRequest', async (req) => {
+        console.log('Incoming request:', req.method, req.url);
+    });
     // Health check
-    app.get('/health', async () => {
+    app.get('/health', async (req, reply) => {
+        console.log('Health check endpoint hit');
         return { ok: true, persist: USE_SQLITE };
+    });
+    // Test endpoint
+    app.get('/test', async (req, reply) => {
+        console.log('Test endpoint hit');
+        return { message: 'Test endpoint is working' };
     });
     // List jobs
     app.get('/api/jobs', async (req) => {
@@ -268,6 +277,8 @@ async function main() {
     });
     await app.listen({ port: PORT, host: '0.0.0.0' });
     console.log(`Runner listening on port ${PORT}`);
+    console.log('Runner service is starting...');
+    console.log('Listening on:', { port: PORT, host: '0.0.0.0' });
 }
 main().catch((err) => {
     console.error(err);

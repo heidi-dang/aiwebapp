@@ -14,12 +14,15 @@ import { getProviderIcon } from '@/lib/modelProvider';
 
 // Hard‑code any models you want to expose to users here.
 const models = [
+  'auto',
   'gpt-4o',
-  'gpt-4',
-  'gpt-3.5-turbo',
+  'gpt-4o-mini',
+  'grok-code-fast-1',
+  'gpt-5',
+  'gpt-5-mini',
+  'copilot-fast',
   'claude-sonnet-4',
-  'claude-3-opus',
-  'mixtral-8x7b'
+  'claude-opus-4.5'
 ];
 
 export function ModelSelector() {
