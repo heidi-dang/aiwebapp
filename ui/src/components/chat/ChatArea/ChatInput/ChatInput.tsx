@@ -26,7 +26,9 @@ import { ModelSelector } from '@/components/chat/Sidebar/ModelSelector'
 const envAiApiUrl = process.env.NEXT_PUBLIC_AI_API_URL ?? ''
 
 function looksLocal(url: string) {
-  return url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1')
+  return (
+    url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1')
+  )
 }
 
 const ChatInput = () => {
@@ -64,13 +66,17 @@ const ChatInput = () => {
 
   // Tools UI state
   const [selectedTool, setSelectedTool] = useState<string>('')
-  const [toolInput, setToolInput] = useState<Record<string, string | undefined>>({})
+  const [toolInput, setToolInput] = useState<
+    Record<string, string | undefined>
+  >({})
   const [toolOutput, setToolOutput] = useState<string>('')
   const [isRunningTool, setIsRunningTool] = useState<boolean>(false)
   const [toolError, setToolError] = useState<string | null>(null)
 
   const [copilotLatencyMs, setCopilotLatencyMs] = useState<number | null>(null)
-  const [copilotLastCheckedAt, setCopilotLastCheckedAt] = useState<Date | null>(null)
+  const [copilotLastCheckedAt, setCopilotLastCheckedAt] = useState<Date | null>(
+    null
+  )
 
   function copyOutput() {
     if (!toolOutput) return
@@ -83,10 +89,12 @@ const ChatInput = () => {
     if (!selectedTool) return
     if (!validateInputs()) return
     setToolOutput('')
-    setIsRunningTool(true
-    )
+    setIsRunningTool(true)
     try {
-      const body: { tool: string; params: Record<string, unknown> } = { tool: selectedTool, params: {} }
+      const body: { tool: string; params: Record<string, unknown> } = {
+        tool: selectedTool,
+        params: {}
+      }
       if (selectedTool === 'read_file') body.params.path = toolInput.path
       if (selectedTool === 'write_file') {
         body.params.path = toolInput.path
@@ -98,7 +106,8 @@ const ChatInput = () => {
         body.params.query = toolInput.query
         if (toolInput.include) body.params.include_pattern = toolInput.include
       }
-      if (selectedTool === 'run_command') body.params.command = toolInput.command
+      if (selectedTool === 'run_command')
+        body.params.command = toolInput.command
 
       try {
         setToolError(null)
@@ -151,7 +160,11 @@ const ChatInput = () => {
       setToolError('No tool selected')
       return false
     }
-    if (selectedTool === 'read_file' || selectedTool === 'write_file' || selectedTool === 'list_dir') {
+    if (
+      selectedTool === 'read_file' ||
+      selectedTool === 'write_file' ||
+      selectedTool === 'list_dir'
+    ) {
       const p = toolInput.path ?? ''
       if (!p) {
         setToolError('Path is required')
@@ -236,50 +249,72 @@ const ChatInput = () => {
         headers['Authorization'] = `Bearer ${authToken}`
       }
 
-      console.log('Fetching models from /api/copilot/v1/models with headers:', headers);
+      console.log(
+        'Fetching models from /api/copilot/v1/models with headers:',
+        headers
+      )
 
       fetch('/api/copilot/v1/models', { headers })
         .then(async (res) => {
-          console.log('Response status:', res.status);
-          if (!res.ok) throw new Error(`models fetch failed: ${res.status}`);
-          const ct = res.headers.get('content-type') || '';
-          console.log('Response content-type:', ct);
+          console.log('Response status:', res.status)
+          if (!res.ok) throw new Error(`models fetch failed: ${res.status}`)
+          const ct = res.headers.get('content-type') || ''
+          console.log('Response content-type:', ct)
           if (!ct.includes('application/json')) {
-            const txt = await res.text();
-            console.error('Models endpoint returned non-JSON:', txt);
-            throw new Error('Models endpoint returned non-JSON');
+            const txt = await res.text()
+            console.error('Models endpoint returned non-JSON:', txt)
+            throw new Error('Models endpoint returned non-JSON')
           }
-          return res.json();
+          return res.json()
         })
         .then((data) => {
-          console.log('Fetched models data:', data);
-          const models = data.data.map((m: { id: string }) => m.id);
-          setAvailableModels(models);
-          if ((!selectedModel || selectedModel === 'auto') && models.length > 0) {
-            setSelectedModel(models[0]);
+          console.log('Fetched models data:', data)
+          const models = data.data.map((m: { id: string }) => m.id)
+          setAvailableModels(models)
+          if (
+            (!selectedModel || selectedModel === 'auto') &&
+            models.length > 0
+          ) {
+            setSelectedModel(models[0])
           }
         })
         .catch((err) => console.error('Failed to fetch models:', err))
     }
-  }, [provider, setAvailableModels, setSelectedModel, selectedModel, aiApiBase, authToken, mode])
+  }, [
+    provider,
+    setAvailableModels,
+    setSelectedModel,
+    selectedModel,
+    aiApiBase,
+    authToken,
+    mode
+  ])
 
   const checkCopilotHealth = useCallback(async () => {
     setIsCopilotChecking(true)
+    const started = performance.now()
     try {
       const base =
         apiBase && !looksLocal(apiBase)
           ? apiBase
-          : !looksLocal(selectedEndpoint)
+          : looksLocal(selectedEndpoint)
             ? selectedEndpoint
             : null
 
       if (!base) {
         setCopilotStatus('down')
+        return
       }
+
+      const res = await fetch('/api/copilot/health', { cache: 'no-store' })
+      setCopilotStatus(res.ok ? 'up' : 'down')
     } catch (error) {
-      console.error('Error checking Copilot health:', error);
+      console.error('Error checking Copilot health:', error)
+      setCopilotStatus('down')
     } finally {
-      setIsCopilotChecking(false);
+      setCopilotLatencyMs(Math.round(performance.now() - started))
+      setCopilotLastCheckedAt(new Date())
+      setIsCopilotChecking(false)
     }
   }, [apiBase, selectedEndpoint])
 
@@ -325,63 +360,8 @@ const ChatInput = () => {
         }
       ])
 
-      const system_prompt = systemPromptMode === 'custom' ? systemPromptCustom : systemPromptMode
-      const { jobId } = await createJob({ message: currentMessage, provider, model: selectedModel, system_prompt })
-
-      initRun(jobId)
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'agent',
-          content: '',
-          created_at: Math.floor(Date.now() / 1000),
-          extra_data: {
-            runner_job_id: jobId
-          }
-        }
-      ])
-
-      const unsubscribe = streamJobEvents(jobId, {
-        onEvent: (evt) => {
-          applyRunnerEvent(evt)
-        },
-        onDone: () => {
-          unsubscribe()
-          setRunUnsubscribe(jobId, undefined)
-        },
-        onError: (err) => {
-          toast.error(
-            `Runner stream error: ${err instanceof Error ? err.message : String(err)}`
-          )
-        }
-      })
-
-      setRunUnsubscribe(jobId, unsubscribe)
-      await startJob(jobId)
-    } catch (error) {
-      toast.error(
-        `Runner error: ${error instanceof Error ? error.message : String(error)}`
-      )
-    }
-  }, [applyRunnerEvent, initRun, inputMessage, setMessages, setRunUnsubscribe, provider, selectedModel, systemPromptCustom, systemPromptMode])
-
-  const handleSubmit = async () => {
-    if (!inputMessage.trim()) return
-
-    const currentMessage = inputMessage
-    setInputMessage('')
-
-    try {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'user',
-          content: currentMessage,
-          created_at: Math.floor(Date.now() / 1000)
-        }
-      ])
-
-      const system_prompt = systemPromptMode === 'custom' ? systemPromptCustom : systemPromptMode
+      const system_prompt =
+        systemPromptMode === 'custom' ? systemPromptCustom : systemPromptMode
       const { jobId } = await createJob({
         message: currentMessage,
         provider,
@@ -424,14 +404,78 @@ const ChatInput = () => {
         `Runner error: ${error instanceof Error ? error.message : String(error)}`
       )
     }
-  }
+  }, [
+    applyRunnerEvent,
+    initRun,
+    inputMessage,
+    setMessages,
+    setRunUnsubscribe,
+    provider,
+    selectedModel,
+    systemPromptCustom,
+    systemPromptMode
+  ])
 
-  // Simple JSON syntax highlighting (minimal, no deps)
-  function escapeHtml(unsafe: string) {
-    return unsafe
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
+  const handleSubmit = async () => {
+    if (!inputMessage.trim()) return
+
+    const currentMessage = inputMessage
+    setInputMessage('')
+
+    try {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'user',
+          content: currentMessage,
+          created_at: Math.floor(Date.now() / 1000)
+        }
+      ])
+
+      const system_prompt =
+        systemPromptMode === 'custom' ? systemPromptCustom : systemPromptMode
+      const { jobId } = await createJob({
+        message: currentMessage,
+        provider,
+        model: selectedModel,
+        system_prompt
+      })
+
+      initRun(jobId)
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'agent',
+          content: '',
+          created_at: Math.floor(Date.now() / 1000),
+          extra_data: {
+            runner_job_id: jobId
+          }
+        }
+      ])
+
+      const unsubscribe = streamJobEvents(jobId, {
+        onEvent: (evt) => {
+          applyRunnerEvent(evt)
+        },
+        onDone: () => {
+          unsubscribe()
+          setRunUnsubscribe(jobId, undefined)
+        },
+        onError: (err) => {
+          toast.error(
+            `Runner stream error: ${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+      })
+
+      setRunUnsubscribe(jobId, unsubscribe)
+      await startJob(jobId)
+    } catch (error) {
+      toast.error(
+        `Runner error: ${error instanceof Error ? error.message : String(error)}`
+      )
+    }
   }
 
   return (
@@ -540,13 +584,16 @@ const ChatInput = () => {
           </DialogHeader>
           <div className="space-y-3">
             {toolCalls.length === 0 ? (
-              <div className="text-muted-foreground text-sm">No tool calls yet.</div>
+              <div className="text-muted-foreground text-sm">
+                No tool calls yet.
+              </div>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {toolCalls.map((tc, idx) => (
                   <div
                     key={
-                      tc.tool_call_id || `${tc.tool_name}-${tc.created_at}-${idx}`
+                      tc.tool_call_id ||
+                      `${tc.tool_name}-${tc.created_at}-${idx}`
                     }
                     className="cursor-default rounded-full bg-accent px-2 py-1.5 text-xs"
                   >
@@ -580,7 +627,9 @@ const ChatInput = () => {
                     className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
                     placeholder="path (e.g. ui/src/app/page.tsx)"
                     value={toolInput.path ?? ''}
-                    onChange={(e) => setToolInput((s) => ({ ...s, path: e.target.value }))}
+                    onChange={(e) =>
+                      setToolInput((s) => ({ ...s, path: e.target.value }))
+                    }
                   />
                 )}
 
@@ -589,7 +638,9 @@ const ChatInput = () => {
                     className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
                     placeholder="path"
                     value={toolInput.content ?? ''}
-                    onChange={(e) => setToolInput((s) => ({ ...s, content: e.target.value }))}
+                    onChange={(e) =>
+                      setToolInput((s) => ({ ...s, content: e.target.value }))
+                    }
                   />
                 )}
 
@@ -598,7 +649,9 @@ const ChatInput = () => {
                     className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
                     placeholder="path"
                     value={toolInput.path ?? ''}
-                    onChange={(e) => setToolInput((s) => ({ ...s, path: e.target.value }))}
+                    onChange={(e) =>
+                      setToolInput((s) => ({ ...s, path: e.target.value }))
+                    }
                   />
                 )}
 
@@ -607,7 +660,9 @@ const ChatInput = () => {
                     className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
                     placeholder="glob (e.g. ui/src/**)"
                     value={toolInput.glob ?? ''}
-                    onChange={(e) => setToolInput((s) => ({ ...s, glob: e.target.value }))}
+                    onChange={(e) =>
+                      setToolInput((s) => ({ ...s, glob: e.target.value }))
+                    }
                   />
                 )}
 
@@ -616,7 +671,9 @@ const ChatInput = () => {
                     className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
                     placeholder="path (e.g. ui/src)"
                     value={toolInput.path ?? ''}
-                    onChange={(e) => setToolInput((s) => ({ ...s, path: e.target.value }))}
+                    onChange={(e) =>
+                      setToolInput((s) => ({ ...s, path: e.target.value }))
+                    }
                   />
                 )}
 
@@ -626,13 +683,17 @@ const ChatInput = () => {
                       className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
                       placeholder="query (regex)"
                       value={toolInput.query ?? ''}
-                      onChange={(e) => setToolInput((s) => ({ ...s, query: e.target.value }))}
+                      onChange={(e) =>
+                        setToolInput((s) => ({ ...s, query: e.target.value }))
+                      }
                     />
                     <input
                       className="w-48 rounded border bg-primary px-2 py-1 text-sm"
                       placeholder="include pattern (optional)"
                       value={toolInput.include ?? ''}
-                      onChange={(e) => setToolInput((s) => ({ ...s, include: e.target.value }))}
+                      onChange={(e) =>
+                        setToolInput((s) => ({ ...s, include: e.target.value }))
+                      }
                     />
                   </>
                 )}
@@ -642,7 +703,9 @@ const ChatInput = () => {
                     className="flex-1 rounded border bg-primary px-2 py-1 text-sm"
                     placeholder="command (e.g. ls -la)"
                     value={toolInput.command ?? ''}
-                    onChange={(e) => setToolInput((s) => ({ ...s, command: e.target.value }))}
+                    onChange={(e) =>
+                      setToolInput((s) => ({ ...s, command: e.target.value }))
+                    }
                   />
                 )}
 
@@ -661,10 +724,12 @@ const ChatInput = () => {
 
               <div className="mt-3">
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs text-muted-foreground">Output</label>
+                  <label className="text-muted-foreground block text-xs">
+                    Output
+                  </label>
                   <div className="flex items-center gap-2">
                     <button
-                      className="text-xs text-muted-foreground hover:text-primary"
+                      className="text-muted-foreground text-xs hover:text-primary"
                       onClick={() => copyOutput()}
                       type="button"
                     >
@@ -675,20 +740,44 @@ const ChatInput = () => {
 
                 <div className="mt-2">
                   {toolError && (
-                    <div className="mb-2 rounded border border-red-400 bg-red-50 p-2 text-xs text-red-700">{toolError}</div>
+                    <div className="mb-2 rounded border border-red-400 bg-red-50 p-2 text-xs text-red-700">
+                      {toolError}
+                    </div>
                   )}
 
                   <div className="max-h-44 overflow-auto rounded border bg-muted p-2 text-xs">
                     {toolOutput ? (
-                      <Highlight {...defaultProps} code={toolOutput} language={(() => {
-                        try { JSON.parse(toolOutput); return 'json' } catch { return 'bash' }
-                      })()} theme={theme}>
-                        {({ className, style, tokens, getLineProps, getTokenProps }) => (
-                          <pre className={`${className} whitespace-pre m-0`} style={style}>
+                      <Highlight
+                        {...defaultProps}
+                        code={toolOutput}
+                        language={(() => {
+                          try {
+                            JSON.parse(toolOutput)
+                            return 'json'
+                          } catch {
+                            return 'bash'
+                          }
+                        })()}
+                        theme={theme}
+                      >
+                        {({
+                          className,
+                          style,
+                          tokens,
+                          getLineProps,
+                          getTokenProps
+                        }) => (
+                          <pre
+                            className={`${className} m-0 whitespace-pre`}
+                            style={style}
+                          >
                             {tokens.map((line, i) => (
                               <div key={i} {...getLineProps({ line, key: i })}>
                                 {line.map((token, key) => (
-                                  <span key={key} {...getTokenProps({ token, key })} />
+                                  <span
+                                    key={key}
+                                    {...getTokenProps({ token, key })}
+                                  />
                                 ))}
                               </div>
                             ))}

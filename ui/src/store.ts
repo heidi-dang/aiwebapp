@@ -118,9 +118,11 @@ export const useStore = create<Store>()(
       setProvider: (provider) => set(() => ({ provider })),
       // System prompt defaults (agent mode only)
       systemPromptMode: 'default',
-      setSystemPromptMode: (systemPromptMode) => set(() => ({ systemPromptMode })),
+      setSystemPromptMode: (systemPromptMode) =>
+        set(() => ({ systemPromptMode })),
       systemPromptCustom: '',
-      setSystemPromptCustom: (systemPromptCustom) => set(() => ({ systemPromptCustom })),
+      setSystemPromptCustom: (systemPromptCustom) =>
+        set(() => ({ systemPromptCustom })),
       sessionsData: null,
       setSessionsData: (sessionsData) =>
         set((state) => ({

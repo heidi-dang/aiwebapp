@@ -93,9 +93,9 @@ npm run dev:phase2
 ```
 
 Ports used by `dev:phase2`:
-- UI: `http://localhost:3100`
-- Server: `http://localhost:3101`
-- Runner: `http://localhost:3102`
+- UI: `http://localhost:3200`
+- Server: `http://localhost:3201`
+- Runner: `http://localhost:3202`
 
 Smoke tests for this port set:
 

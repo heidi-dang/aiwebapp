@@ -31,7 +31,8 @@ async function getCopilotBaseUrl() {
   const headersList = await headers()
   const forwardedHost = headersList.get('x-forwarded-host')
   const hostHeader = forwardedHost || headersList.get('host')
-  const isLocal = hostHeader?.includes('localhost') || hostHeader?.includes('127.0.0.1')
+  const isLocal =
+    hostHeader?.includes('localhost') || hostHeader?.includes('127.0.0.1')
 
   const derivedAiApiUrl = isLocal
     ? 'http://localhost:8080'

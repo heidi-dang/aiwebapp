@@ -51,19 +51,30 @@ async function proxyRequest(request: NextRequest, path: string[]) {
       method: request.method,
       headers: {
         ...Object.fromEntries(request.headers.entries()),
-        'Authorization': `Bearer ${runnerToken}`,
+        Authorization: `Bearer ${runnerToken}`,
         // Remove host header to avoid conflicts
-        'host': new URL(runnerUrl).host,
+        host: new URL(runnerUrl).host
       },
-      body: request.method !== 'GET' && request.method !== 'HEAD'
-        ? await request.arrayBuffer()
-        : undefined,
+      body:
+        request.method !== 'GET' && request.method !== 'HEAD'
+          ? await request.arrayBuffer()
+          : undefined
     })
 
     const responseHeaders = new Headers()
     response.headers.forEach((value, key) => {
       // Skip certain headers that Next.js handles
-      if (!['transfer-encoding', 'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailers'].includes(key.toLowerCase())) {
+      if (
+        ![
+          'transfer-encoding',
+          'connection',
+          'keep-alive',
+          'proxy-authenticate',
+          'proxy-authorization',
+          'te',
+          'trailers'
+        ].includes(key.toLowerCase())
+      ) {
         responseHeaders.set(key, value)
       }
     })
@@ -71,7 +82,7 @@ async function proxyRequest(request: NextRequest, path: string[]) {
     return new NextResponse(response.body, {
       status: response.status,
       statusText: response.statusText,
-      headers: responseHeaders,
+      headers: responseHeaders
     })
   } catch (error) {
     console.error('Runner proxy error:', error)

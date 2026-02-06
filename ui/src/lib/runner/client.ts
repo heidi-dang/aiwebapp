@@ -38,10 +38,13 @@ export async function createJob(input?: unknown, timeoutMs?: number) {
 }
 
 export async function startJob(jobId: string) {
-  const res = await fetch(base(`/api/jobs/${encodeURIComponent(jobId)}/start`), {
-    method: 'POST',
-    headers: getAuthHeaders()
-  })
+  const res = await fetch(
+    base(`/api/jobs/${encodeURIComponent(jobId)}/start`),
+    {
+      method: 'POST',
+      headers: getAuthHeaders()
+    }
+  )
 
   if (!res.ok) {
     throw new Error(`startJob failed: ${res.status}`)
@@ -126,7 +129,7 @@ export function streamJobEvents(jobId: string, cb: StreamCallbacks) {
     es.addEventListener(t, handle as EventListener)
   }
 
-  es.onerror = (err) => {
+  es.onerror = () => {
     // EventSource errors are not very readable; surface something useful
     cb.onError?.(new Error('Runner SSE connection error (check runner logs)'))
   }

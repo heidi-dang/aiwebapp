@@ -32,10 +32,15 @@ export async function GET() {
   // Check x-forwarded-host first (from Cloudflare tunnel), then fall back to host
   const forwardedHost = headersList.get('x-forwarded-host')
   const hostHeader = forwardedHost || headersList.get('host')
-  const isLocal = hostHeader?.includes('localhost') || hostHeader?.includes('127.0.0.1')
+  const isLocal =
+    hostHeader?.includes('localhost') || hostHeader?.includes('127.0.0.1')
 
-  const derivedApiUrl = isLocal ? 'http://localhost:3001' : deriveSubdomainUrl('api', hostHeader)
-  const derivedAiApiUrl = isLocal ? 'http://localhost:8080' : deriveSubdomainUrl('copilot', hostHeader)
+  const derivedApiUrl = isLocal
+    ? 'http://localhost:3001'
+    : deriveSubdomainUrl('api', hostHeader)
+  const derivedAiApiUrl = isLocal
+    ? 'http://localhost:8080'
+    : deriveSubdomainUrl('copilot', hostHeader)
 
   const envApi = process.env.NEXT_PUBLIC_API_URL ?? ''
   const envAiApi = process.env.NEXT_PUBLIC_AI_API_URL ?? ''

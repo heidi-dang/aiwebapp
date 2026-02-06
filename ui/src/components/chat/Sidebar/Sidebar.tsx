@@ -223,7 +223,7 @@ const Sidebar = ({
     systemPromptMode,
     setSystemPromptMode,
     systemPromptCustom,
-    setSystemPromptCustom,
+    setSystemPromptCustom
   } = useStore()
   const [isMounted, setIsMounted] = useState(false)
   const [agentId] = useQueryState('agent')
@@ -325,12 +325,21 @@ const Sidebar = ({
                       {/* System Prompt menu - visible only in Agent mode */}
                       {isMounted && mode === 'agent' && (
                         <div className="mt-3 w-full">
-                          <div className="text-xs font-medium uppercase text-primary">System Prompt</div>
+                          <div className="text-xs font-medium uppercase text-primary">
+                            System Prompt
+                          </div>
                           <div className="mt-2 flex w-full gap-2">
                             <select
                               className="h-9 w-full rounded-xl border border-primary/15 bg-accent p-3 text-xs uppercase"
                               value={systemPromptMode}
-                              onChange={(e) => setSystemPromptMode(e.target.value as 'default' | 'strict' | 'custom')}
+                              onChange={(e) =>
+                                setSystemPromptMode(
+                                  e.target.value as
+                                    | 'default'
+                                    | 'strict'
+                                    | 'custom'
+                                )
+                              }
                             >
                               <option value="default">Default</option>
                               <option value="strict">Strict</option>
@@ -341,7 +350,9 @@ const Sidebar = ({
                           {systemPromptMode === 'custom' && (
                             <textarea
                               value={systemPromptCustom}
-                              onChange={(e) => setSystemPromptCustom(e.target.value)}
+                              onChange={(e) =>
+                                setSystemPromptCustom(e.target.value)
+                              }
                               placeholder="Custom system prompt"
                               className="mt-2 h-20 w-full rounded-xl border border-primary/15 bg-accent p-3 text-xs"
                             />

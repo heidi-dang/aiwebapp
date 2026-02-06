@@ -16,7 +16,11 @@ runner/package-lock.json
 server/package-lock.json
 ui/package-lock.json
 
-
+server/dist
+runner/dist
+ui/.next
 logs
 hotreload.out
 *.db
+*.sqlite
+*.sqlite3

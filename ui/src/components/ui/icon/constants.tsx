@@ -35,12 +35,11 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Plus,
   Trash,
   Play,
   AlertTriangle
 } from 'lucide-react'
-
-import { PlusIcon } from '@radix-ui/react-icons'
 
 export const ICONS: IconTypeMap = {
   'open-ai': OpenAILogo,
@@ -75,7 +74,7 @@ export const ICONS: IconTypeMap = {
   check: Check,
   'chevron-down': ChevronDown,
   'chevron-up': ChevronUp,
-  'plus-icon': PlusIcon,
+  'plus-icon': Plus,
   references: ReferencesIcon,
   trash: Trash,
   play: Play,

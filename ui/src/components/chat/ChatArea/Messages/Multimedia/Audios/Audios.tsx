@@ -52,7 +52,10 @@ AudioItem.displayName = 'AudioItem'
 const Audios = memo(({ audio }: { audio: AudioData[] }) => (
   <div className="flex flex-col gap-4">
     {audio.map((audio_item, index) => (
-      <AudioItem key={`${audio_item.id || 'audio'}-${index}`} audio={audio_item} />
+      <AudioItem
+        key={`${audio_item.id || 'audio'}-${index}`}
+        audio={audio_item}
+      />
     ))}
   </div>
 ))

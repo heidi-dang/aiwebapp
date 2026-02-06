@@ -74,3 +74,11 @@ export interface AuthTokens {
   refresh_token: string
   user: User
 }
+
+export interface ModelConfig {
+  name: string
+  model: string
+  provider: string
+  apiKey?: string
+  db_id?: string
+}
