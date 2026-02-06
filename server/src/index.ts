@@ -4,7 +4,6 @@ import { fileURLToPath } from 'url';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '../.env') })
 
-<<<<<<< HEAD
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import multipart from '@fastify/multipart'
@@ -19,9 +18,6 @@ import { registerRunRoutes } from './routes/runs.js'
 import authRoutes from './routes/auth.js'
 import memoryRoutes from './routes/memory.js'
 import knowledgeRoutes from './routes/knowledge.js'
-=======
-import express, { Request, Response } from 'express';
->>>>>>> main
 
 const PORT = Number(process.env.PORT ?? 7777)
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000'
@@ -35,22 +31,13 @@ const logFilePath = path.join(__dirname, '../../logs/server.log');
 const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
 
 async function main() {
-<<<<<<< HEAD
   const app = Fastify({
     logger: {
       stream: logStream,
       level: 'info',
     },
   })
-=======
-  const app = express();
->>>>>>> main
 
-  app.get('/health', (req: Request, res: Response) => {
-    res.json({ status: 'ok' });
-  });
-
-<<<<<<< HEAD
   await app.register(cors, {
     origin: (origin, cb) => {
       const allowlist = new Set([
@@ -99,11 +86,6 @@ async function main() {
   console.log('RUNNER_URL:', process.env.RUNNER_URL);
 
   await app.listen({ port: PORT, host: '0.0.0.0' })
-=======
-  app.listen(PORT, '127.0.0.1', () => {
-    console.log(`Express server listening on http://127.0.0.1:${PORT}`);
-  });
->>>>>>> main
 }
 
 main().catch((err) => {
