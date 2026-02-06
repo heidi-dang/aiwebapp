@@ -24,6 +24,8 @@ const AgentMessage = memo(({ message }: MessageProps) => {
   const { streamingErrorMessage } = useStore()
   let messageContent
   const runnerJobId = message.extra_data?.runner_job_id
+  const mode = useStore((s) => s.mode)
+
   if (message.streamingError) {
     messageContent = (
       <p className="text-destructive">
@@ -36,11 +38,24 @@ const AgentMessage = memo(({ message }: MessageProps) => {
       </p>
     )
   } else if (runnerJobId) {
-    messageContent = (
-      <div className="flex w-full flex-col gap-4">
-        <RunCard jobId={runnerJobId} />
-      </div>
-    )
+    // In chat mode we should not show RunCards or plan/tools — show plain content instead
+    if (mode === 'agent') {
+      messageContent = (
+        <div className="flex w-full flex-col gap-4">
+          <RunCard jobId={runnerJobId} />
+        </div>
+      )
+    } else {
+      messageContent = (
+        <div className="flex w-full flex-col gap-4">
+          {message.content ? (
+            <MarkdownRenderer>{message.content}</MarkdownRenderer>
+          ) : (
+            <div className="text-xs text-muted">Agent response</div>
+          )}
+        </div>
+      )
+    }
   } else if (message.content) {
     messageContent = (
       <div className="flex w-full flex-col gap-4">

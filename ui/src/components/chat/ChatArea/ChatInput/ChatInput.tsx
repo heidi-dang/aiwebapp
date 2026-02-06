@@ -39,12 +39,15 @@ const ChatInput = () => {
     setSelectedModel,
     setAvailableModels,
     provider,
+    mode,
     messages,
     setMessages,
     isStreaming,
     initRun,
     applyRunnerEvent,
-    setRunUnsubscribe
+    setRunUnsubscribe,
+    systemPromptMode,
+    systemPromptCustom
   } = useStore()
   const [selectedAgent] = useQueryState('agent')
   const [teamId] = useQueryState('team')
@@ -228,7 +231,8 @@ const ChatInput = () => {
 
   // Fetch available models when provider is copilotapi
   useEffect(() => {
-    if (provider === 'copilotapi') {
+    // Only fetch models when using Copilot provider AND in Agent mode
+    if (provider === 'copilotapi' && mode === 'agent') {
       const headers: HeadersInit = {}
       if (authToken) {
         headers['Authorization'] = `Bearer ${authToken}`
@@ -253,7 +257,7 @@ const ChatInput = () => {
           console.log('Fetched models data:', data);
           const models = data.data.map((m: { id: string }) => m.id);
           setAvailableModels(models);
-          if (!selectedModel && models.length > 0) {
+          if ((!selectedModel || selectedModel === 'auto') && models.length > 0) {
             setSelectedModel(models[0]);
           }
         })
@@ -333,7 +337,8 @@ const ChatInput = () => {
         }
       ])
 
-      const { jobId } = await createJob({ message: currentMessage, provider, model: selectedModel })
+      const system_prompt = systemPromptMode === 'custom' ? systemPromptCustom : systemPromptMode
+      const { jobId } = await createJob({ message: currentMessage, provider, model: selectedModel, system_prompt })
 
       initRun(jobId)
       setMessages((prev) => [
@@ -388,10 +393,12 @@ const ChatInput = () => {
         }
       ])
 
+      const system_prompt = systemPromptMode === 'custom' ? systemPromptCustom : systemPromptMode
       const { jobId } = await createJob({
         message: currentMessage,
         provider,
-        model: selectedModel
+        model: selectedModel,
+        system_prompt
       })
 
       initRun(jobId)
@@ -562,7 +569,7 @@ const ChatInput = () => {
       </Dialog>
 
       <Dialog open={isToolsDialogOpen} onOpenChange={setIsToolsDialogOpen}>
-        <DialogContent className="max-w-[520px]">
+        <DialogContent className="max-w-[520px] bg-primary text-primaryAccent">
           <DialogHeader>
             <DialogTitle>Tools</DialogTitle>
             <DialogDescription>
@@ -739,20 +746,38 @@ const ChatInput = () => {
 
       <div className="relative w-full">
         <div className="pointer-events-auto absolute bottom-2 left-2 z-10 flex items-center gap-x-1">
-          <Tooltip content="Run as job" side="top" delayDuration={300}>
-            <Button
-              type="button"
-              aria-label="Run message as job"
-              title="Run message as job"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 rounded-lg"
-              onClick={handleStartRunnerJob}
-              disabled={!inputMessage.trim() || isStreaming}
-            >
-              <Icon type="play" size="xs" />
-            </Button>
-          </Tooltip>
+          {mode === 'agent' && (
+            <>
+              <Tooltip content="Run as job" side="top" delayDuration={300}>
+                <Button
+                  type="button"
+                  aria-label="Run message as job"
+                  title="Run message as job"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-lg"
+                  onClick={handleStartRunnerJob}
+                  disabled={!inputMessage.trim() || isStreaming}
+                >
+                  <Icon type="play" size="xs" />
+                </Button>
+              </Tooltip>
+
+              <Button
+                type="button"
+                aria-label="Open tools"
+                title="Open tools"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-lg"
+                onClick={() => {
+                  setIsToolsDialogOpen(true)
+                }}
+              >
+                <Icon type="hammer" size="xs" />
+              </Button>
+            </>
+          )}
 
           <Button
             type="button"
@@ -766,20 +791,6 @@ const ChatInput = () => {
             }}
           >
             <Icon type="agent" size="xs" />
-          </Button>
-
-          <Button
-            type="button"
-            aria-label="Open tools"
-            title="Open tools"
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 rounded-lg"
-            onClick={() => {
-              setIsToolsDialogOpen(true)
-            }}
-          >
-            <Icon type="hammer" size="xs" />
           </Button>
 
           <Button

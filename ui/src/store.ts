@@ -52,6 +52,11 @@ interface Store {
   setMode: (mode: 'agent' | 'team') => void
   provider: 'bridge' | 'copilotapi'
   setProvider: (provider: 'bridge' | 'copilotapi') => void
+  // System prompt for agents
+  systemPromptMode: 'default' | 'strict' | 'custom'
+  setSystemPromptMode: (mode: 'default' | 'strict' | 'custom') => void
+  systemPromptCustom: string
+  setSystemPromptCustom: (prompt: string) => void
   sessionsData: SessionEntry[] | null
   setSessionsData: (
     sessionsData:
@@ -103,7 +108,7 @@ export const useStore = create<Store>()(
       setAgents: (agents) => set({ agents }),
       teams: [],
       setTeams: (teams) => set({ teams }),
-      selectedModel: '',
+      selectedModel: 'auto',
       setSelectedModel: (selectedModel) => set(() => ({ selectedModel })),
       availableModels: [],
       setAvailableModels: (availableModels) => set(() => ({ availableModels })),
@@ -111,6 +116,11 @@ export const useStore = create<Store>()(
       setMode: (mode) => set(() => ({ mode })),
       provider: 'bridge',
       setProvider: (provider) => set(() => ({ provider })),
+      // System prompt defaults (agent mode only)
+      systemPromptMode: 'default',
+      setSystemPromptMode: (systemPromptMode) => set(() => ({ systemPromptMode })),
+      systemPromptCustom: '',
+      setSystemPromptCustom: (systemPromptCustom) => set(() => ({ systemPromptCustom })),
       sessionsData: null,
       setSessionsData: (sessionsData) =>
         set((state) => ({
