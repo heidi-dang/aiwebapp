@@ -761,6 +761,12 @@ For specific actions like running commands or modifying files, ask the user to c
           if (!matchesAllowlist(command, allowed)) {
             const message = 'Refused to run: command not on the allowlist.'
             console.warn(`[Runner] Refused run_command: ${command}`)
+            // Emit structured refusal event containing the attempted command for UI affordances
+            try {
+              await emitEvent(ctx, 'tool.refused', { tool: 'run_command', command, reason: message })
+            } catch (e) {
+              /* best-effort */
+            }
             await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message })
             await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
             // Audit log
@@ -773,6 +779,11 @@ For specific actions like running commands or modifying files, ask the user to c
             result = { error: message }
           } else if (looksLikeNaturalLanguageCommand(command)) {
             const message = 'Refused to run: command looks like natural language rather than a shell command.'
+            try {
+              await emitEvent(ctx, 'tool.refused', { tool: 'run_command', command, reason: message })
+            } catch (e) {
+              /* best-effort */
+            }
             await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message })
             await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
             try {
@@ -784,6 +795,11 @@ For specific actions like running commands or modifying files, ask the user to c
             result = { error: message }
           } else if (isDangerousCommand(command)) {
             const message = 'Refused to run: command matches disallowed or unsafe patterns.'
+            try {
+              await emitEvent(ctx, 'tool.refused', { tool: 'run_command', command, reason: message })
+            } catch (e) {
+              /* best-effort */
+            }
             await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message })
             await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
             try {

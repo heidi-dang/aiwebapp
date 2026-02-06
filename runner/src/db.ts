@@ -15,6 +15,7 @@ export type RunnerEventType =
   | 'tool.start'
   | 'tool.output'
   | 'tool.end'
+  | 'tool.refused'
   | 'memory'
   | 'error'
   | 'done'

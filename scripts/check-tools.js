@@ -152,6 +152,25 @@ async function run() {
     console.warn('list_code_usages: grep failed (non-fatal):', err?.message ?? err)
   }
 
+  // UI checks: ensure new agent-run UI affordances exist
+  try {
+    const runCardPath = 'ui/src/components/chat/ChatArea/Messages/RunCard.tsx'
+    const runCardText = await fs.readFile(runCardPath, 'utf8')
+    if (runCardText.includes('data-testid="run-thinking"')) {
+      await ok('ui_check: found run-thinking test id')
+    } else {
+      await fail('ui_check: run-thinking test id missing')
+    }
+
+    if (runCardText.includes('data-testid="run-tool-refusal"')) {
+      await ok('ui_check: found run-tool-refusal test id')
+    } else {
+      await fail('ui_check: run-tool-refusal test id missing')
+    }
+  } catch (err) {
+    await fail(`ui_check: run-card file checks failed: ${err}`)
+  }
+
   // vscode task sanity check: ensure .vscode/tasks.json exists and contains our task
   try {
     const tasksRaw = await fs.readFile('.vscode/tasks.json', 'utf8')
@@ -205,7 +224,12 @@ async function run() {
   // contract1 invariants: must pass
   try {
     // Must have System Prompt UI
-    const { stdout: sys } = await exec("rg -n \"System Prompt\" ui/src || true")
+    let { stdout: sys } = await exec("rg -n \"System Prompt\" ui/src || true")
+    if (!sys.trim()) {
+      // fallback to grep if ripgrep not installed
+      const r = await exec('grep -n "System Prompt" -R ui/src || true')
+      sys = r.stdout
+    }
     if (!sys.trim()) {
       await fail('contract: System Prompt menu missing from ui/src')
     } else {
@@ -221,7 +245,11 @@ async function run() {
     }
 
     // send-inside-composer test id must exist
-    const { stdout: sendtest } = await exec("rg -n \"send-inside-composer\" ui/src || true")
+    let { stdout: sendtest } = await exec("rg -n \"send-inside-composer\" ui/src || true")
+    if (!sendtest.trim()) {
+      const r2 = await exec('grep -n "send-inside-composer" -R ui/src || true')
+      sendtest = r2.stdout
+    }
     if (!sendtest.trim()) {
       await fail('contract: send button inside composer (data-testid=send-inside-composer) missing')
     } else {

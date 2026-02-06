@@ -58,7 +58,7 @@ const MarkdownRenderer: FC<MarkdownRendererProps> = ({
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[rehypeRaw, rehypeSanitize]}
     >
-      {content as any}
+      {String(content)}
     </ReactMarkdown>
   )
 }

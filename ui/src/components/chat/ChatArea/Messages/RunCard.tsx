@@ -5,7 +5,7 @@ import { useStore } from '@/store'
 import { cancelJob } from '@/lib/runner/client'
 import Icon from '@/components/ui/icon'
 import { Button } from '@/components/ui/button'
-import type { RunState } from '@/lib/runner/types'
+import type { RunState, RunnerEvent } from '@/lib/runner/types'
 
 function shortId(id: string) {
   return id.length <= 6 ? id : id.slice(-6)
@@ -58,11 +58,13 @@ interface ToolState {
   name: string
   status: 'running' | 'done' | 'error'
   outputs: string[]
+  refusedCommand?: string
+  refusedReason?: string
 }
 
 
 
-function ToolTimeline({ tools }: { tools: Map<string, ToolState> }) {
+function ToolTimeline({ tools, onApprove }: { tools: Map<string, ToolState>; onApprove?: (command: string) => Promise<void> }) {
   return (
     <div className="space-y-2">
       {Array.from(tools.entries()).map(([name, tool]) => (
@@ -84,6 +86,7 @@ function ToolTimeline({ tools }: { tools: Map<string, ToolState> }) {
               {formatToolLabel(name)}
             </span>
           </div>
+
           {tool.outputs.length > 0 && (
             <div className="mt-2 max-h-32 overflow-y-auto rounded bg-background/50 p-2">
               {tool.outputs.map((output, i) => (
@@ -91,6 +94,35 @@ function ToolTimeline({ tools }: { tools: Map<string, ToolState> }) {
                   {output}
                 </div>
               ))}
+            </div>
+          )}
+
+          {tool.refusedCommand && (
+            <div data-testid="run-tool-refusal" className="mt-2 rounded-md border border-red-500/20 bg-red-500/5 p-3">
+              <div className="text-xs text-red-300">Refused to run:</div>
+              <div className="mt-1 font-mono text-sm">{tool.refusedCommand}</div>
+              {tool.refusedReason && (
+                <div className="mt-1 text-[11px] text-red-300">{tool.refusedReason}</div>
+              )}
+              <div className="mt-3 flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => navigator.clipboard?.writeText(tool.refusedCommand ?? '')}
+                >
+                  Copy Command
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    if (!tool.refusedCommand || !onApprove) return
+                    await onApprove(tool.refusedCommand)
+                  }}
+                  data-testid="run-allow-button"
+                >
+                  Allow & run
+                </Button>
+              </div>
             </div>
           )}
         </div>
@@ -174,6 +206,20 @@ export default function RunCard({ jobId }: { jobId: string }) {
         }
       }
 
+      // New: structured refusal events include the attempted command and reason
+      if (evt.type === 'tool.refused' && payload?.tool) {
+        const toolName = payload.tool as string
+        const cmd = (payload.command as string) || ''
+        const reason = (payload.reason as string) || ''
+        const existing = tools.get(toolName)
+        if (existing) {
+          existing.refusedCommand = cmd
+          existing.refusedReason = reason
+        } else {
+          tools.set(toolName, { name: toolName, status: 'error', outputs: [], refusedCommand: cmd, refusedReason: reason })
+        }
+      }
+
       if (evt.type === 'error' && payload?.message) {
         errorMessage = payload.message as string
       }
@@ -181,6 +227,48 @@ export default function RunCard({ jobId }: { jobId: string }) {
 
     return { planSteps, tools, errorMessage, planUpdateMessage }
   }, [run])
+
+  // Approve-and-run flow: call server to add command to allowlist and execute it, then inject synthetic events
+  async function handleApproveAndRun(command: string) {
+    try {
+      // Approve command (persist to allowlist)
+      await fetch('/api/toolbox', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'approve_command', params: { command } })
+      })
+
+      // Execute the command now
+      const runRes = await fetch('/api/toolbox', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'run_command', params: { command } })
+      })
+      const runJson = await runRes.json()
+      const output = (runJson?.result?.stdout as string) ?? runJson?.error ?? '(no output)'
+
+      // Inject events into store so the UI reflects execution result immediately
+      const ev1: RunnerEvent = {
+        id: `ui-synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'tool.output',
+        ts: new Date().toISOString(),
+        job_id: run.jobId,
+        data: { tool: 'run_command', output }
+      }
+      const ev2: RunnerEvent = {
+        id: `ui-synth-end-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'tool.end',
+        ts: new Date().toISOString(),
+        job_id: run.jobId,
+        data: { tool: 'run_command', success: true }
+      }
+
+      useStore.getState().applyRunnerEvent(ev1)
+      useStore.getState().applyRunnerEvent(ev2)
+    } catch (err) {
+      console.warn('approve and run failed', err)
+    }
+  }
 
   if (!run) return null
 
@@ -248,11 +336,26 @@ export default function RunCard({ jobId }: { jobId: string }) {
 
           {tools.size > 0 && (
             <div aria-live="polite">
-              <ToolTimeline tools={tools} />
+              <ToolTimeline tools={tools} onApprove={handleApproveAndRun} />
             </div>
           )}
 
-          {run.events.length === 0 && (
+          {run.events.length === 0 && run.status === 'running' && (
+            <div
+              data-testid="run-thinking"
+              role="button"
+              onClick={() => setRunCollapsed(run.jobId, false)}
+              className="cursor-pointer rounded-lg border border-primary/10 bg-background/50 p-3"
+            >
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-2 animate-pulse rounded-full bg-blue-400" />
+                <span className="text-xs text-muted">Thinking...</span>
+              </div>
+              <div className="mt-2 text-[11px] text-secondary">Agent is planning steps. Click to view workflow.</div>
+            </div>
+          )}
+
+          {run.events.length === 0 && run.status !== 'running' && (
             <div className="text-xs text-muted">Waiting for events...</div>
           )}
         </div>
