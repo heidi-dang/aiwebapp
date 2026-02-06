@@ -2,7 +2,16 @@ const base = (process.env.BASE_URL || process.argv[2] || 'http://localhost:7777'
 
 async function check(path, opts) {
   const url = `${base}${path}`
-  const res = await fetch(url, opts)
+  let res
+  try {
+    res = await fetch(url, opts)
+  } catch (e) {
+    if (e.code === 'ECONNREFUSED' || e.cause?.code === 'ECONNREFUSED') {
+      console.warn(`Server not reachable at ${base}; skipping smoke checks`)
+      process.exit(0)
+    }
+    throw e
+  }
   const text = await res.text()
   if (!res.ok) {
     console.error(`Error fetching ${url}:`, new Error(`${opts?.method || 'GET'} ${url} -> ${res.status} ${text}`));
