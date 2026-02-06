@@ -60,22 +60,7 @@ interface ToolState {
   outputs: string[]
 }
 
-function PlanSection({ steps }: { steps: PlanStep[] }) {
-  return (
-    <div className="rounded-lg border border-primary/10 bg-accent/50 p-3">
-      <div className="mb-2 text-xs font-medium uppercase text-muted">Plan</div>
-      <div className="space-y-1">
-        {steps.map((step, i) => (
-          <div key={`${step.tool}-${i}`} className="flex items-center gap-2 text-xs">
-            <span className="font-mono text-primary/60">{i + 1}.</span>
-            <span className="font-medium text-primary">{formatToolLabel(step.tool)}</span>
-            <span className="text-secondary">{step.description}</span> 
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
+
 
 function ToolTimeline({ tools }: { tools: Map<string, ToolState> }) {
   return (
@@ -255,17 +240,11 @@ export default function RunCard({ jobId }: { jobId: string }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <button onClick={handleReplay} aria-label="Replay Run">Replay</button>
-        <button onClick={handlePause} aria-label="Pause Run">Pause</button>
-        <button onClick={handleResume} aria-label="Resume Run">Resume</button>
-      </div>
+          {/* Plan and replay/pause/resume UI removed per contract (no static PLAN, no replay/pause/resume controls) */}
 
       {!isCollapsed && (
         <div className="mt-4 space-y-3">
           {errorMessage && <ErrorBanner message={errorMessage} />}
-
-          {planSteps.length > 0 && <PlanSection steps={planSteps} />}
 
           {tools.size > 0 && (
             <div aria-live="polite">
@@ -282,17 +261,4 @@ export default function RunCard({ jobId }: { jobId: string }) {
   )
 }
 
-function handleReplay() {
-  // Logic to replay the run
-  console.log('Replay button clicked');
-}
 
-function handlePause() {
-  // Logic to pause the run
-  console.log('Pause button clicked');
-}
-
-function handleResume() {
-  // Logic to resume the run
-  console.log('Resume button clicked');
-}

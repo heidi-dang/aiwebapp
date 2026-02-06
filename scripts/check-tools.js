@@ -202,6 +202,43 @@ async function run() {
     console.warn('toolbox proxy: run_command check failed (non-fatal):', err?.message ?? err)
   }
 
+  // contract1 invariants: must pass
+  try {
+    // Must have System Prompt UI
+    const { stdout: sys } = await exec("rg -n \"System Prompt\" ui/src || true")
+    if (!sys.trim()) {
+      await fail('contract: System Prompt menu missing from ui/src')
+    } else {
+      await ok('contract: System Prompt menu present')
+    }
+
+    // Forbidden strings must not exist
+    const { stdout: forbidden } = await exec("rg -n \"AgentOS|Agno Agent UI|This is an open-source Agno Agent UI|For the full experience, visit the AgentOS|Replay|Pause|Resume\" ui/src || true")
+    if (forbidden.trim()) {
+      await fail(`contract: forbidden UI strings found:\n${forbidden}`)
+    } else {
+      await ok('contract: forbidden UI strings not present')
+    }
+
+    // send-inside-composer test id must exist
+    const { stdout: sendtest } = await exec("rg -n \"send-inside-composer\" ui/src || true")
+    if (!sendtest.trim()) {
+      await fail('contract: send button inside composer (data-testid=send-inside-composer) missing')
+    } else {
+      await ok('contract: send button inside composer present')
+    }
+
+    // Ensure no PLAN sections remain (uppercase PLAN)
+    const { stdout: plancheck } = await exec("rg -n \"\bPLAN\b\" ui/src || true")
+    if (plancheck.trim()) {
+      await fail(`contract: PLAN occurrence found:\n${plancheck}`)
+    } else {
+      await ok('contract: no PLAN occurrences found')
+    }
+  } catch (err) {
+    await fail(`contract checks failed: ${err}`)
+  }
+
   // everything done
   if (process.exitCode && process.exitCode !== 0) {
     console.error('\nSome checks failed. Review output above.')

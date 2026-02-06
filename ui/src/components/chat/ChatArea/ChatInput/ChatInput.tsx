@@ -849,6 +849,7 @@ const ChatInput = () => {
         />
       </div>
       <Button
+        data-testid="send-inside-composer"
         onClick={handleSubmit}
         disabled={
           !(selectedAgent || teamId) || !inputMessage.trim() || isStreaming
