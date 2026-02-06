@@ -8,6 +8,15 @@ const memorySchema = z.object({
 });
 
 export default async function memoryRoutes(fastify: FastifyInstance) {
+  // List memory items
+  fastify.get(
+    "/memory",
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      // Simulate listing memory from the database
+      reply.send([]);
+    }
+  );
+
   fastify.post(
     "/memory",
     async (request: FastifyRequest, reply: FastifyReply) => {

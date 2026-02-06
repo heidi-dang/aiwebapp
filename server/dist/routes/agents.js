@@ -4,6 +4,7 @@ export async function registerAgentRoutes(app, store) {
         requireOptionalBearerAuth(req, reply);
         if (reply.sent)
             return;
+        console.log('Agents data:', store.agents);
         return store.agents;
     });
 }

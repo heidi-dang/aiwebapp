@@ -49,6 +49,11 @@ function formatToolLabel(name: string) {
     .replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1))
 }
 
+interface PlanStep {
+  tool: string
+  description: string
+}
+
 interface ToolState {
   name: string
   status: 'running' | 'done' | 'error'

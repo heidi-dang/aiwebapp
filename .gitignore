@@ -24,3 +24,6 @@ hotreload.out
 *.db
 *.sqlite
 *.sqlite3
+
+# Debug and temporary files
+server/minimal-fastify-server.js

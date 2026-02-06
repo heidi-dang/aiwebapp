@@ -478,6 +478,50 @@ const ChatInput = () => {
     }
   }
 
+  // Simple JSON syntax highlighting (minimal, no deps)
+  function escapeHtml(unsafe: string) {
+    return unsafe
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+  }
+
+  function highlightJson(jsonStr: string) {
+    try {
+      const obj = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr
+      const pretty = JSON.stringify(obj, null, 2)
+      const escaped = escapeHtml(pretty)
+      // Wrap keys, strings, numbers, booleans, null
+      return escaped
+        .replace(
+          /(\"(.*?)\")(?=\s*:)/g,
+          '<span class="text-indigo-400">$1</span>'
+        )
+        .replace(
+          /:(\s*)(\".*?\")/g,
+          ':$1<span class="text-emerald-400">$2</span>'
+        )
+        .replace(
+          /:(\s*)(-?\d+(?:\.\d+)?)/g,
+          ':$1<span class="text-orange-400">$2</span>'
+        )
+        .replace(
+          /\b(true|false|null)\b/g,
+          '<span class="text-purple-400">$1</span>'
+        )
+    } catch (e) {
+      // Not valid JSON, just escape and return raw
+      return escapeHtml(jsonStr)
+    }
+  }
+
+  // Function to decode HTML entities
+  function decodeHtml(encoded: string): string {
+    const textarea = document.createElement('textarea')
+    textarea.innerHTML = encoded
+    return textarea.value
+  }
+
   return (
     <div className="relative mx-auto mb-1 flex w-full max-w-2xl items-end justify-center gap-x-2 font-geist">
       <Dialog open={isAgentDialogOpen} onOpenChange={setIsAgentDialogOpen}>

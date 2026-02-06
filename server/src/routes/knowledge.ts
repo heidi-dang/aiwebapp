@@ -7,6 +7,12 @@ const knowledgeSchema = z.object({
 });
 
 async function knowledgeRoutes(fastify: FastifyInstance) {
+  // List knowledge items
+  fastify.get('/knowledge', async (request, reply) => {
+    // Simulate listing knowledge from the database
+    reply.send([]);
+  });
+
   // Route to add knowledge
   fastify.post('/knowledge', async (request, reply) => {
     const parsedBody = knowledgeSchema.safeParse(request.body);

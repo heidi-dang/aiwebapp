@@ -2,7 +2,7 @@ import { requireOptionalBearerAuth } from '../auth.js';
 import { promises as fs } from 'node:fs';
 import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
-import * as glob from 'glob';
+import glob from 'glob';
 const exec = promisify(execCb);
 function looksLikeNaturalLanguageCommand(command) {
     if (/\b(run|execute|start|stop|open|close|list|show|find)\b\s+(the|a|an)\b/i.test(command)) {
@@ -70,7 +70,14 @@ export async function registerToolboxRoutes(app) {
             }
             if (tool === 'list_files') {
                 const pattern = String(params.glob ?? '**/*');
-                const entries = await glob.glob(pattern, { cwd: process.cwd() });
+                const entries = await new Promise((resolve, reject) => {
+                    glob(pattern, { cwd: process.cwd() }, (err, matches) => {
+                        if (err)
+                            reject(err);
+                        else
+                            resolve(matches);
+                    });
+                });
                 return { success: true, result: { files: entries } };
             }
             if (tool === 'list_dir') {
