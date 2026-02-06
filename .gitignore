@@ -20,3 +20,6 @@ ui/package-lock.json
 logs
 hotreload.out
 *.db
+
+# Debug and temporary files
+server/minimal-fastify-server.js

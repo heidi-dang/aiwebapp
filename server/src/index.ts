@@ -35,51 +35,30 @@ async function main() {
     reply.code(500).send({ detail: message })
   })
 
+  // Temporarily disable CORS and multipart for debugging
+  // await app.register(cors);
+  // await app.register(multipart);
+
+  app.log.info('Verbose logging enabled for debugging.');
   app.addHook('onRequest', async (request) => {
     app.log.info(`Incoming request: ${request.method} ${request.url}`);
   });
 
-  await app.register(cors, {
-    origin: (origin, cb) => {
-      const allowlist = new Set([
-        CORS_ORIGIN,
-        'http://localhost:3000',
-        'http://localhost:3001',
-        ...EXTRA_ORIGINS
-      ])
-
-      if (!origin) {
-        cb(null, true)
-        return
-      }
-
-      cb(null, allowlist.has(origin))
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-  })
-
-  await app.register(multipart, {
-    limits: {
-      fieldSize: 1024 * 1024
-    }
-  })
-
   const sqlitePath = process.env.SQLITE_PATH
   const store: Store = sqlitePath ? await SqliteStore.create(sqlitePath) : new InMemoryStore()
 
-  await registerHealthRoutes(app)
-  app.log.info('Registering agent routes...');
-  await registerAgentRoutes(app, store)
-  await registerTeamRoutes(app, store)
-  await registerSessionRoutes(app, store)
-  await registerRunRoutes(app, store)
-  // Register the auth routes
-  await app.register(authRoutes)
-  // Register toolbox routes for UI-driven tools (internal)
-  const { registerToolboxRoutes } = await import('./routes/toolbox.js')
-  await registerToolboxRoutes(app)
+  // Temporarily register only the /health route for debugging
+  await registerHealthRoutes(app);
+  app.log.info('Only health route registered for debugging.');
+
+  // Comment out other route registrations
+  // await registerAgentRoutes(app, store);
+  // await registerTeamRoutes(app, store);
+  // await registerSessionRoutes(app, store);
+  // await registerRunRoutes(app, store);
+  // await app.register(authRoutes);
+  // const { registerToolboxRoutes } = await import('./routes/toolbox.js');
+  // await registerToolboxRoutes(app);
 
   console.log('RUNNER_URL:', process.env.RUNNER_URL);
 
