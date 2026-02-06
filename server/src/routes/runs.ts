@@ -2,6 +2,9 @@ import { FastifyInstance } from 'fastify'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { RunEvent, StreamChunk } from '../types.js'
+import multer from 'multer'
+
+const upload = multer()
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000)
@@ -26,7 +29,7 @@ function requireEnv(name: string): string {
 export async function registerRunRoutes(app: FastifyInstance, store: Store) {
   const RUNNER_URL = requireEnv('RUNNER_URL')
   const RUNNER_TOKEN = process.env.RUNNER_TOKEN ?? 'change_me'
-  app.post('/agents/:agentId/runs', async (req, reply) => {
+  app.post('/agents/:agentId/runs', upload.none(), async (req, reply) => {
     requireOptionalBearerAuth(req, reply)
     if (reply.sent) return
 
@@ -37,17 +40,8 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       return { detail: 'Agent not found' }
     }
 
-    let message = ''
-    let sessionId = ''
-    for await (const part of req.parts()) {
-      if (part.type === 'field') {
-        if (part.fieldname === 'message') message = String(part.value ?? '')
-        if (part.fieldname === 'session_id') sessionId = String(part.value ?? '')
-      } else {
-        // Drain any file streams (MVP ignores file uploads)
-        await part.toBuffer()
-      }
-    }
+    const message = (req.body as { message?: string }).message || ''
+    const sessionId = (req.body as { session_id?: string }).session_id || ''
 
     const created = await store.getOrCreateSession({
       dbId: agent.db_id,
@@ -204,7 +198,7 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
     reply.raw.end()
   })
 
-  app.post('/teams/:teamId/runs', async (req, reply) => {
+  app.post('/teams/:teamId/runs', upload.none(), async (req, reply) => {
     requireOptionalBearerAuth(req, reply)
     if (reply.sent) return
 
@@ -215,17 +209,8 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       return { detail: 'Team not found' }
     }
 
-    let message = ''
-    let sessionId = ''
-    for await (const part of req.parts()) {
-      if (part.type === 'field') {
-        if (part.fieldname === 'message') message = String(part.value ?? '')
-        if (part.fieldname === 'session_id') sessionId = String(part.value ?? '')
-      } else {
-        // Drain any file streams (MVP ignores file uploads)
-        await part.toBuffer()
-      }
-    }
+    const message = (req.body as { message?: string }).message || ''
+    const sessionId = (req.body as { session_id?: string }).session_id || ''
 
     const created = await store.getOrCreateSession({
       dbId: team.db_id,

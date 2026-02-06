@@ -19,7 +19,11 @@
     "toolbox:grep": "npm run toolbox -- grep-search 'run_command' --include 'runner/**'"
   },
   "devDependencies": {
+    "@types/body-parser": "^1.19.6",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/glob": "^8.1.0",
+    "@types/multer": "^2.0.0",
     "concurrently": "^9.1.2",
     "glob": "^13.0.1"
   }
