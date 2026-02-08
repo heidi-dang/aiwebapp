@@ -31,3 +31,14 @@ Hey, so we're adding support for running local LLMs via Ollama. This'll let us h
 - Update the docs and make sure everything's working smoothly.
 
 This should get us a solid local LLM setup. Let's start with Phase 1 and see how it goes. If anything comes up, we can adjust.
+
+## Follow-ups After PR#7 & PR#8 Merge
+- Port internal toolbox POST route to Express with the same security and allowlist checks as Fastify:
+  - Implement read_file, write_file, list_files, list_dir, grep_search, approve_command, run_command
+  - Keep newline-delimited JSON responses and validate inputs rigorously
+  - Route location: server/src/routes/toolbox.ts using Express
+- Reconcile social login storage with Express auth routes:
+  - Ensure User/SocialAccount methods in storage match server/src/routes/auth.ts expectations
+  - Verify schema creation/migrations and consistency for SQLite tables
+- Add ESLint import resolver in ui if import resolution issues surface:
+  - Configure typescript and node resolvers in ui/eslint.config.mjs to support '@/...' aliases

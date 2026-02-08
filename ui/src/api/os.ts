@@ -166,3 +166,26 @@ export const deleteTeamSessionAPI = async (
   }
   return response
 }
+
+export const setAgentBaseDirAPI = async (
+  base: string,
+  agentId: string,
+  baseDir: string,
+  authToken?: string
+): Promise<{ ok: boolean; base_dir?: string; error?: string; details?: string }> => {
+  try {
+    const response = await fetch(`${base}/agents/${encodeURIComponent(agentId)}/base-dir`, {
+      method: 'PUT',
+      headers: createHeaders(authToken),
+      body: JSON.stringify({ base_dir: baseDir })
+    })
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: 'Unknown error' }))
+      return { ok: false, error: err.error, details: err.details }
+    }
+    const data = await response.json()
+    return { ok: true, base_dir: data.base_dir }
+  } catch (e) {
+    return { ok: false, error: 'Network error', details: e instanceof Error ? e.message : String(e) }
+  }
+}

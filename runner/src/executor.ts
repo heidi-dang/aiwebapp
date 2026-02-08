@@ -36,6 +36,7 @@ export interface JobInput {
   model?: string
   session_id?: string
   team_agents?: Array<{id: string, provider?: string, model?: string}>
+  base_dir?: string
 }
 
 type ToolCall = {
@@ -99,9 +100,20 @@ function parseToolArgs(raw?: string): Record<string, unknown> {
 async function handleReadFileTool(ctx: JobContext, path: string) {
   await emitEvent(ctx, 'tool.start', { tool: 'read_file', input: { path } })
   try {
+    const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
+    const { resolve, isAbsolute, sep } = await import('node:path')
+    const resolvedPath = (() => {
+      const candidate = isAbsolute(path) ? path : resolve(baseDir, path)
+      const baseResolved = resolve(baseDir)
+      const normalizedCandidate = resolve(candidate)
+      if (normalizedCandidate !== baseResolved && !normalizedCandidate.startsWith(baseResolved + sep)) {
+        throw new Error('Access outside of base_dir is not allowed')
+      }
+      return normalizedCandidate
+    })()
     const res = ctx.bridge
-      ? await ctx.bridge.readFile(path)
-      : { path, text: await fs.readFile(path, 'utf8') }
+      ? await ctx.bridge.readFile(resolvedPath)
+      : { path: resolvedPath, text: await fs.readFile(resolvedPath, 'utf8') }
 
     await emitEvent(ctx, 'tool.output', {
       tool: 'read_file',
@@ -119,31 +131,42 @@ async function handleReadFileTool(ctx: JobContext, path: string) {
 async function handleWriteFileTool(ctx: JobContext, path: string, content: string) {
   await emitEvent(ctx, 'tool.start', { tool: 'write_file', input: { path } })
   try {
+    const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
+    const { resolve, isAbsolute, sep } = await import('node:path')
+    const resolvedPath = (() => {
+      const candidate = isAbsolute(path) ? path : resolve(baseDir, path)
+      const baseResolved = resolve(baseDir)
+      const normalizedCandidate = resolve(candidate)
+      if (normalizedCandidate !== baseResolved && !normalizedCandidate.startsWith(baseResolved + sep)) {
+        throw new Error('Access outside of base_dir is not allowed')
+      }
+      return normalizedCandidate
+    })()
     if (ctx.bridge) {
       let current = ''
       try {
-        const existing = await ctx.bridge.readFile(path)
+        const existing = await ctx.bridge.readFile(resolvedPath)
         current = existing.text
       } catch {
         current = ''
       }
       await ctx.bridge.applyEdits([
         {
-          path,
+          path: resolvedPath,
           range: { start: 0, end: current.length },
           text: content
         }
       ])
     } else {
-      await fs.writeFile(path, content, 'utf8')
+      await fs.writeFile(resolvedPath, content, 'utf8')
     }
 
     await emitEvent(ctx, 'tool.output', {
       tool: 'write_file',
-      output: `Wrote ${content.length} bytes to ${path}`
+      output: `Wrote ${content.length} bytes to ${resolvedPath}`
     })
     await emitEvent(ctx, 'tool.end', { tool: 'write_file', success: true })
-    return { path, bytes: content.length }
+    return { path: resolvedPath, bytes: content.length }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     await emitEvent(ctx, 'tool.end', { tool: 'write_file', success: false, error: message })
@@ -154,8 +177,9 @@ async function handleWriteFileTool(ctx: JobContext, path: string, content: strin
 async function handleListFilesTool(ctx: JobContext, globPattern: string) {
   await emitEvent(ctx, 'tool.start', { tool: 'list_files', input: { glob: globPattern } })
   try {
+    const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
     if (ctx.bridge) {
-      const entries = await ctx.bridge.listFiles(globPattern, 200)
+      const entries = await ctx.bridge.listFiles(`${globPattern}`, 200)
       await emitEvent(ctx, 'tool.output', {
         tool: 'list_files',
         output: `Found ${entries.length} file(s)`
@@ -165,7 +189,7 @@ async function handleListFilesTool(ctx: JobContext, globPattern: string) {
     }
 
     // Fallback: use glob package
-    const files = await glob(globPattern, { cwd: process.cwd() })
+    const files = await glob(globPattern, { cwd: baseDir })
     await emitEvent(ctx, 'tool.output', {
       tool: 'list_files',
       output: `Found ${files.length} file(s)`
@@ -226,7 +250,18 @@ function isDangerousCommand(command: string): boolean {
 async function handleListDirTool(ctx: JobContext, path: string) {
   await emitEvent(ctx, 'tool.start', { tool: 'list_dir', input: { path } })
   try {
-    const entries = await fs.readdir(path, { withFileTypes: true })
+    const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
+    const { resolve, isAbsolute, sep } = await import('node:path')
+    const target = (() => {
+      const candidate = isAbsolute(path) ? path : resolve(baseDir, path)
+      const baseResolved = resolve(baseDir)
+      const normalizedCandidate = resolve(candidate)
+      if (normalizedCandidate !== baseResolved && !normalizedCandidate.startsWith(baseResolved + sep)) {
+        throw new Error('Access outside of base_dir is not allowed')
+      }
+      return normalizedCandidate
+    })()
+    const entries = await fs.readdir(target, { withFileTypes: true })
     const files = entries.map(entry => ({
       name: entry.name,
       type: entry.isDirectory() ? 'directory' : 'file'
@@ -234,10 +269,10 @@ async function handleListDirTool(ctx: JobContext, path: string) {
 
     await emitEvent(ctx, 'tool.output', {
       tool: 'list_dir',
-      output: `Found ${files.length} items in ${path}`
+      output: `Found ${files.length} items in ${target}`
     })
     await emitEvent(ctx, 'tool.end', { tool: 'list_dir', success: true })
-    return { path, files }
+    return { path: target, files }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     await emitEvent(ctx, 'tool.end', { tool: 'list_dir', success: false, error: message })
@@ -248,6 +283,7 @@ async function handleListDirTool(ctx: JobContext, path: string) {
 async function handleGrepSearchTool(ctx: JobContext, query: string, includePattern?: string) {
   await emitEvent(ctx, 'tool.start', { tool: 'grep_search', input: { query, include_pattern: includePattern } })
   try {
+    const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
     let command = `grep -r -n "${query.replace(/"/g, '\\"')}" .`
     if (includePattern) {
       command += ` --include="${includePattern}"`
@@ -257,7 +293,7 @@ async function handleGrepSearchTool(ctx: JobContext, query: string, includePatte
     const { stdout } = await execAsync(command, {
       timeout: 10000,
       maxBuffer: 1024 * 1024,
-      cwd: process.cwd()
+      cwd: baseDir
     })
 
     const lines = stdout.trim().split('\n').filter(line => line.trim())

@@ -1,20 +1,13 @@
-'use client'
-
-import Icon from '@/components/ui/icon'
-import { useStore } from '@/store'
-import type { ChatMessage } from '@/types/os'
-import Videos from './Multimedia/Videos'
-import Images from './Multimedia/Images'
-import Audios from './Multimedia/Audios'
 import { memo } from 'react'
-import AgentThinkingLoader from './AgentThinkingLoader'
-import dynamic from 'next/dynamic'
-import RunCard from './RunCard'
-
-const MarkdownRenderer = dynamic(
-  () => import('@/components/ui/typography/MarkdownRenderer'),
-  { ssr: false }
-)
+import { useStore } from '@/store'
+import Icon from '@/components/ui/icon'
+import MarkdownRenderer from '@/components/chat/ChatArea/Messages/MarkdownRenderer'
+import Videos from '@/components/chat/ChatArea/Messages/Videos'
+import Images from '@/components/chat/ChatArea/Messages/Images'
+import Audios from '@/components/chat/ChatArea/Messages/Audios'
+import RunCard from '@/components/chat/ChatArea/Messages/RunCard'
+import AgentThinkingLoader from '@/components/chat/ChatArea/Messages/AgentThinkingLoader'
+import type { ChatMessage } from '@/types/os'
 
 interface MessageProps {
   message: ChatMessage
@@ -38,7 +31,6 @@ const AgentMessage = memo(({ message }: MessageProps) => {
       </p>
     )
   } else if (runnerJobId) {
-    // In chat mode we should not show RunCards or plan/tools — show plain content instead
     if (mode === 'agent') {
       messageContent = (
         <div className="flex w-full flex-col gap-4">
@@ -71,25 +63,6 @@ const AgentMessage = memo(({ message }: MessageProps) => {
         )}
       </div>
     )
-  } else if (message.response_audio) {
-    if (!message.response_audio.transcript) {
-      messageContent = (
-        <div className="mt-2 flex items-start">
-          <AgentThinkingLoader />
-        </div>
-      )
-    } else {
-      messageContent = (
-        <div className="flex w-full flex-col gap-4">
-          <MarkdownRenderer>
-            {message.response_audio.transcript}
-          </MarkdownRenderer>
-          {message.response_audio.content && message.response_audio && (
-            <Audios audio={[message.response_audio]} />
-          )}
-        </div>
-      )
-    }
   } else {
     messageContent = (
       <div className="mt-2">

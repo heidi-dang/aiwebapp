@@ -636,13 +636,13 @@ const ChatInput = () => {
                 {toolCalls.map((tc, idx) => (
                   <div
                     key={
-                      tc.tool_call_id ||
-                      `${tc.tool_name}-${tc.created_at}-${idx}`
+                      tc.id ||
+                      `${tc.function?.name || 'unknown'}-${idx}`
                     }
                     className="cursor-default rounded-full bg-accent px-2 py-1.5 text-xs"
                   >
                     <p className="font-dmmono uppercase text-primary/80">
-                      {tc.tool_name}
+                      {tc.function?.name || 'Unknown Tool'}
                     </p>
                   </div>
                 ))}

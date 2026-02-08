@@ -2,6 +2,7 @@
 import { Button } from '@/components/ui/button'
 import { ModeSelector } from '@/components/chat/Sidebar/ModeSelector'
 import { EntitySelector } from '@/components/chat/Sidebar/EntitySelector'
+import { AgentBaseDirSelector } from '@/components/chat/Sidebar/AgentBaseDirSelector'
 import useChatActions from '@/hooks/useChatActions'
 import { useStore } from '@/store'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -320,6 +321,16 @@ const Sidebar = ({
                       <EntitySelector />
                       {selectedModel && (agentId || teamId) && (
                         <ModelDisplay model={selectedModel} />
+                      )}
+
+                      {/* Agent base_dir selector - visible only in Agent mode when an agent is selected */}
+                      {isMounted && mode === 'agent' && agentId && (
+                        <div className="mt-3 w-full">
+                          <div className="text-xs font-medium uppercase text-primary">
+                            Folder
+                          </div>
+                          <AgentBaseDirSelector agentId={agentId} />
+                        </div>
                       )}
 
                       {/* System Prompt menu - visible only in Agent mode */}

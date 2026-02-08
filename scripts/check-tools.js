@@ -10,6 +10,71 @@ import path from 'path'
 
 const exec = promisify(execCb)
 
+async function execText(command) {
+  const { stdout } = await exec(command)
+  return stdout.toString()
+}
+
+async function execTextOrEmpty(command) {
+  try {
+    return await execText(command)
+  } catch {
+    return ''
+  }
+}
+
+async function commandExists(command) {
+  try {
+    await exec(command)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function findTextInFiles(rootDir, needle, opts = {}) {
+  const results = []
+  const maxMatches = opts.maxMatches ?? 20
+  const isRegex = Boolean(opts.regex)
+  const matcher = isRegex ? new RegExp(needle, 'i') : null
+
+  async function walk(dir) {
+    if (results.length >= maxMatches) return
+    let entries = []
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+
+    for (const entry of entries) {
+      if (results.length >= maxMatches) return
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist' || entry.name === '.next') continue
+        await walk(full)
+        continue
+      }
+
+      if (!entry.isFile()) continue
+      if (opts.extensions && !opts.extensions.some((ext) => entry.name.endsWith(ext))) continue
+
+      let text = ''
+      try {
+        text = await fs.readFile(full, 'utf8')
+      } catch {
+        continue
+      }
+
+      const hit = isRegex ? matcher.test(text) : text.includes(needle)
+      if (hit) results.push(full)
+    }
+  }
+
+  await walk(rootDir)
+  return results
+}
+
 async function ok(msg) {
   console.log('\x1b[32m[OK]\x1b[0m', msg)
 }
@@ -36,7 +101,7 @@ async function run() {
 
   // file_search: find ui src files (using git ls-files)
   try {
-    const { stdout } = await exec("git ls-files 'ui/src/**' || true")
+    const stdout = await execTextOrEmpty('git ls-files "ui/src/**"')
     const files = stdout.trim().split('\n').filter(Boolean)
     if (files.length > 0) {
       await ok('file_search: found ui/src files')
@@ -47,16 +112,23 @@ async function run() {
     await fail(`file_search: git ls-files failed: ${err}`)
   }
 
-  // grep_search: search for run_command in runner
+  // grep_search: search for run_command in runner (prefer rg)
   try {
-    const { stdout } = await exec('grep -n "run_command" runner -R | head -n 5')
-    if (stdout.trim()) {
+    const hasRg = await commandExists('rg --version')
+    let out = ''
+    if (hasRg) {
+      out = await execTextOrEmpty('rg -n "run_command" runner')
+    } else {
+      const hits = await findTextInFiles('runner', 'run_command', { maxMatches: 5 })
+      out = hits.join('\n')
+    }
+
+    if (out.trim()) {
       await ok('grep_search: found run_command occurrences')
     } else {
       await fail('grep_search: did not find run_command')
     }
   } catch (err) {
-    // grep returns non-zero if not found; capture stderr
     await fail(`grep_search: grep failed or no matches: ${err}`)
   }
 
@@ -90,7 +162,7 @@ async function run() {
   } else {
     try {
       // Known allowed command should succeed
-      await exec("npm run toolbox -- run-command 'echo hello' --silent")
+      await exec('npm run toolbox -- run-command "echo hello" --silent')
       await ok('toolbox run-command: allowed command executed')
     } catch (err) {
       await fail('toolbox run-command: allowed command failed')
@@ -98,10 +170,10 @@ async function run() {
 
     try {
       // Natural language should be refused (will print refusal message)
-      await exec("npm run toolbox -- run-command 'run the tests'", { timeout: 5000 })
+      await exec('npm run toolbox -- run-command "run the tests"', { timeout: 5000 })
       await fail('toolbox run-command: natural-language input unexpectedly ran')
     } catch (err) {
-      const out = (err && (err.stdout || err.stderr || '')).toString().toLowerCase()
+      const out = `${err?.stdout ?? ''}\n${err?.stderr ?? ''}\n${err?.message ?? ''}`.toLowerCase()
       if (out.includes('refusing to run') || out.includes('aborted by user') || out.includes('command not in allowlist')) {
         await ok('toolbox run-command: natural-language command was refused (expected)')
       } else {
@@ -149,8 +221,16 @@ async function run() {
 
   // list_code_usages: use grep to find occurrences of a symbol
   try {
-    const { stdout } = await exec('grep -R "executeJob" -n src runner server ui || true')
-    if (stdout.trim()) await ok('list_code_usages: found executeJob usage(s)')
+    const hasRg = await commandExists('rg --version')
+    let out = ''
+    if (hasRg) {
+      out = await execTextOrEmpty('rg -n "executeJob" src runner server ui')
+    } else {
+      const hits = await findTextInFiles('.', 'executeJob', { maxMatches: 20 })
+      out = hits.join('\n')
+    }
+
+    if (out.trim()) await ok('list_code_usages: found executeJob usage(s)')
     else console.warn('list_code_usages: no executeJob symbol found (non-fatal)')
   } catch (err) {
     console.warn('list_code_usages: grep failed (non-fatal):', err?.message ?? err)
@@ -228,11 +308,12 @@ async function run() {
   // contract1 invariants: must pass
   try {
     // Must have System Prompt UI
-    let { stdout: sys } = await exec("rg -n \"System Prompt\" ui/src || true")
+    const hasRg = await commandExists('rg --version')
+    let sys = ''
+    if (hasRg) sys = await execTextOrEmpty('rg -n "System Prompt" ui/src')
     if (!sys.trim()) {
-      // fallback to grep if ripgrep not installed
-      const r = await exec('grep -n "System Prompt" -R ui/src || true')
-      sys = r.stdout
+      const hits = await findTextInFiles(path.join('ui', 'src'), 'System Prompt', { maxMatches: 5 })
+      sys = hits.join('\n')
     }
     if (!sys.trim()) {
       await fail('contract: System Prompt menu missing from ui/src')
@@ -241,7 +322,9 @@ async function run() {
     }
 
     // Forbidden strings must not exist
-    const { stdout: forbidden } = await exec("rg -n \"AgentOS|Agno Agent UI|This is an open-source Agno Agent UI|For the full experience, visit the AgentOS|Replay|Pause|Resume\" ui/src || true")
+    const forbidden = hasRg
+      ? await execTextOrEmpty('rg -n "AgentOS|Agno Agent UI|This is an open-source Agno Agent UI|For the full experience, visit the AgentOS|Replay|Pause|Resume" ui/src')
+      : ''
     if (forbidden.trim()) {
       await fail(`contract: forbidden UI strings found:\n${forbidden}`)
     } else {
@@ -249,10 +332,11 @@ async function run() {
     }
 
     // send-inside-composer test id must exist
-    let { stdout: sendtest } = await exec("rg -n \"send-inside-composer\" ui/src || true")
+    let sendtest = ''
+    if (hasRg) sendtest = await execTextOrEmpty('rg -n "send-inside-composer" ui/src')
     if (!sendtest.trim()) {
-      const r2 = await exec('grep -n "send-inside-composer" -R ui/src || true')
-      sendtest = r2.stdout
+      const hits = await findTextInFiles(path.join('ui', 'src'), 'send-inside-composer', { maxMatches: 5 })
+      sendtest = hits.join('\n')
     }
     if (!sendtest.trim()) {
       await fail('contract: send button inside composer (data-testid=send-inside-composer) missing')
@@ -261,7 +345,7 @@ async function run() {
     }
 
     // Ensure no PLAN sections remain (uppercase PLAN)
-    const { stdout: plancheck } = await exec("rg -n \"\bPLAN\b\" ui/src || true")
+    const plancheck = hasRg ? await execTextOrEmpty('rg -n "\\bPLAN\\b" ui/src') : ''
     if (plancheck.trim()) {
       await fail(`contract: PLAN occurrence found:\n${plancheck}`)
     } else {

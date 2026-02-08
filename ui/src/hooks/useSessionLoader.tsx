@@ -100,15 +100,12 @@ const useSessionLoader = () => {
                     (acc: ToolCall[], msg: ReasoningMessage) => {
                       if (msg.role === 'tool') {
                         acc.push({
-                          role: msg.role,
-                          content: msg.content,
-                          tool_call_id: msg.tool_call_id ?? '',
-                          tool_name: msg.tool_name ?? '',
-                          tool_args: msg.tool_args ?? {},
-                          tool_call_error: msg.tool_call_error ?? false,
-                          metrics: msg.metrics ?? { time: 0 },
-                          created_at:
-                            msg.created_at ?? Math.floor(Date.now() / 1000)
+                          function: {
+                            name: msg.tool_name ?? '',
+                            arguments: JSON.stringify(msg.tool_args ?? {})
+                          },
+                          id: msg.tool_call_id ?? '',
+                          type: 'function'
                         })
                       }
                       return acc

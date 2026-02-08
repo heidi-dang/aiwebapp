@@ -6,13 +6,13 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node --enable-source-maps dist/index.js",
-    "build": "tsc -p tsconfig.json",
+    "build": "npx tsc -p tsconfig.json",
     "smoke": "node smoke.mjs",
     "lint": "echo \"(no lint configured)\""
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",
-    "dotenv": "^16.4.5",
+    "dotenv": "^16.6.1",
     "fastify": "^5.2.1",
     "glob": "^13.0.0",
     "sqlite": "^5.1.1",

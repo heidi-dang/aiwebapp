@@ -121,6 +121,62 @@ This script will:
 - Server: `http://localhost:3001`
 - Runner: `http://localhost:3002`
 
+### Registration Page (UI Port 3006)
+
+This branch includes a simple registration page:
+
+- **Register URL:** `http://localhost:3006/register`
+
+To run the UI on port 3006 (without changing the default dev scripts), use:
+
+```bash
+cd ui
+npm run dev:3006
+```
+
+### OAuth Social Login
+
+Social login is implemented on the server with these routes:
+
+- `GET /auth/oauth/:provider/start`
+- `GET /auth/oauth/:provider/callback`
+
+Providers:
+- `google`
+- `github`
+- `apple`
+- `microsoft`
+
+#### Required environment variables (server)
+
+Configure in `server/.env`:
+
+```bash
+# Needed when running behind a public URL / tunnel so redirect_uri matches exactly
+SERVER_PUBLIC_URL=http://localhost:7777
+
+# Recommended: secret used to sign/verify OAuth state
+OAUTH_STATE_SECRET=change_me
+
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
+MICROSOFT_CLIENT_ID=
+MICROSOFT_CLIENT_SECRET=
+
+APPLE_CLIENT_ID=
+APPLE_CLIENT_SECRET=
+```
+
+OAuth callback URL pattern (configure these in each provider dashboard):
+
+```
+{SERVER_PUBLIC_URL}/auth/oauth/{provider}/callback
+```
+
 ### Manual Development Setup
 
 If you prefer manual setup:
@@ -158,6 +214,26 @@ npm run smoke:phase2
 Important:
 - These `*:phase2` scripts are intended for local development convenience on shared machines.
 - The default scripts (`dev`, `start`, `smoke`) and production environment configuration remain unchanged and should follow the main branch defaults.
+
+### Branch-Only Dev Scripts (UI 3006)
+
+If you want to run the full stack while keeping the UI specifically on port 3006, use these additional scripts:
+
+```bash
+npm run dev:ui3006
+```
+
+Production-style start (UI on 3006):
+
+```bash
+npm run start:ui3006
+```
+
+Smoke tests for this port set:
+
+```bash
+npm run smoke:ui3006
+```
 
 ### Production Deployment
 
