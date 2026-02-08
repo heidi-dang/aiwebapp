@@ -26,3 +26,6 @@ hotreload.out
 
 # Debug and temporary files
 server/minimal-fastify-server.js
+
+# Trae IDE local files
+.trae/

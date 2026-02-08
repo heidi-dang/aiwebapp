@@ -1,20 +1,19 @@
 import { requireOptionalBearerAuth } from '../auth.js';
 export async function registerHealthRoutes(app) {
-    app.get('/', async (req, reply) => {
-        requireOptionalBearerAuth(req, reply);
-        if (reply.sent)
+    app.get('/', async (req, res) => {
+        requireOptionalBearerAuth(req, res);
+        if (res.headersSent)
             return;
-        return { status: 'ok' };
+        res.json({ status: 'ok' });
     });
-    app.get('/health', async (req, reply) => {
+    app.get('/health', async (req, res) => {
         // Temporarily bypass authentication for debugging
-        return { status: 'ok' };
+        res.json({ status: 'ok' });
     });
-    app.get('/favicon.ico', async (req, reply) => {
-        requireOptionalBearerAuth(req, reply);
-        if (reply.sent)
+    app.get('/favicon.ico', async (req, res) => {
+        requireOptionalBearerAuth(req, res);
+        if (res.headersSent)
             return;
-        reply.code(204);
-        return null;
+        res.status(204).end();
     });
 }

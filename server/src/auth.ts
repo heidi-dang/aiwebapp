@@ -1,8 +1,8 @@
-import { FastifyReply, FastifyRequest } from 'fastify'
+import { Request, Response } from 'express'
 
 export function requireOptionalBearerAuth(
-  req: FastifyRequest,
-  reply: FastifyReply
+  req: Request,
+  res: Response
 ): void {
   const securityKey = process.env.OS_SECURITY_KEY
   if (!securityKey) return
@@ -10,6 +10,6 @@ export function requireOptionalBearerAuth(
   const authHeader = req.headers.authorization
   const expected = `Bearer ${securityKey}`
   if (!authHeader || authHeader !== expected) {
-    reply.code(401).send({ detail: 'Unauthorized' })
+    res.status(401).json({ detail: 'Unauthorized' })
   }
 }

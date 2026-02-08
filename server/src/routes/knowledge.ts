@@ -1,62 +1,68 @@
-import { FastifyInstance } from 'fastify';
+
+import { Request, Response, Application } from 'express';
+import { Store } from '../storage.js';
+import { getEmbedding } from '../llm.js';
 import { z } from 'zod';
 
-const knowledgeSchema = z.object({
+const addDocSchema = z.object({
   title: z.string(),
   content: z.string(),
 });
 
-async function knowledgeRoutes(fastify: FastifyInstance) {
-  // List knowledge items
-  fastify.get('/knowledge', async (request, reply) => {
-    // Simulate listing knowledge from the database
-    reply.send([]);
-  });
+const searchSchema = z.object({
+  query: z.string(),
+  limit: z.number().optional().default(5)
+});
 
-  // Route to add knowledge
-  fastify.post('/knowledge', async (request, reply) => {
-    const parsedBody = knowledgeSchema.safeParse(request.body);
-    if (!parsedBody.success) {
-      return reply.status(400).send({ error: 'Invalid knowledge data', details: parsedBody.error.errors });
+export function registerKnowledgeRoutes(app: Application, store: Store) {
+  // Add document
+  app.post('/knowledge/documents', async (req: Request, res: Response) => {
+    const result = addDocSchema.safeParse(req.body);
+    if (!result.success) {
+      res.status(400).json({ error: 'Invalid input', details: result.error.errors });
+      return;
     }
 
-    const { title, content } = parsedBody.data;
+    const { title, content } = result.data;
 
-    // Simulate saving knowledge to the database
-    const knowledgeId = Math.random().toString(36).substring(2, 15); // Mock ID generation
-    reply.send({ id: knowledgeId, title, content });
+    try {
+      // 1. Save document
+      const docId = await store.addKnowledgeDocument(title, content);
+
+      // 2. Chunk content (simple splitting by newline or length for MVP)
+      const chunks = content.split('\n\n').filter(c => c.trim().length > 0);
+
+      // 3. Embed and save chunks
+      for (const chunk of chunks) {
+        if (chunk.trim().length < 10) continue; // Skip very short chunks
+        const embedding = await getEmbedding(chunk);
+        await store.addKnowledgeChunk(docId, chunk, embedding);
+      }
+
+      res.json({ id: docId, message: 'Document added and indexed' });
+    } catch (err: any) {
+      console.error('Failed to add document:', err);
+      res.status(500).json({ error: 'Internal server error', details: err.message });
+    }
   });
 
-  // Route to retrieve knowledge
-  fastify.get('/knowledge/:id', async (request, reply) => {
-    const { id } = request.params as { id: string };
-
-    // Simulate retrieving knowledge from the database
-    const knowledge = { id, title: 'Sample Title', content: 'Sample Content' };
-    reply.send(knowledge);
-  });
-
-  // Route to update knowledge
-  fastify.put('/knowledge/:id', async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const parsedBody = knowledgeSchema.safeParse(request.body);
-    if (!parsedBody.success) {
-      return reply.status(400).send({ error: 'Invalid knowledge data', details: parsedBody.error.errors });
+  // Search
+  app.post('/knowledge/search', async (req: Request, res: Response) => {
+    const result = searchSchema.safeParse(req.body);
+    if (!result.success) {
+      res.status(400).json({ error: 'Invalid input', details: result.error.errors });
+      return;
     }
 
-    const { title, content } = parsedBody.data;
+    const { query, limit } = result.data;
 
-    // Simulate updating knowledge in the database
-    reply.send({ id, title, content, updated: true });
-  });
-
-  // Route to delete knowledge
-  fastify.delete('/knowledge/:id', async (request, reply) => {
-    const { id } = request.params as { id: string };
-
-    // Simulate deleting knowledge from the database
-    reply.send({ id, deleted: true });
+    try {
+      const embedding = await getEmbedding(query);
+      const results = await store.searchKnowledge(embedding, limit);
+      res.json({ results });
+    } catch (err: any) {
+      console.error('Search failed:', err);
+      res.status(500).json({ error: 'Internal server error', details: err.message });
+    }
   });
 }
-
-export default knowledgeRoutes;

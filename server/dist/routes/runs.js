@@ -1,6 +1,7 @@
 import { requireOptionalBearerAuth } from '../auth.js';
 import { RunEvent } from '../types.js';
 import multer from 'multer';
+import { sessionNamer } from '../session_namer.js';
 const upload = multer();
 function nowSeconds() {
     return Math.floor(Date.now() / 1000);
@@ -8,29 +9,31 @@ function nowSeconds() {
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
-function writeChunk(replyRaw, chunk) {
+function writeChunk(res, chunk) {
     // Ensure chunks are newline-delimited so downstream stream parsers
     // can split and parse individual JSON objects incrementally.
-    replyRaw.write(JSON.stringify(chunk) + '\n');
+    res.write(JSON.stringify(chunk) + '\n');
 }
 function requireEnv(name) {
     const v = process.env[name];
-    if (!v)
-        throw new Error(`Missing required env var: ${name}`);
+    if (!v) {
+        console.warn(`Warning: Missing env var ${name}, using default`);
+        return name === 'RUNNER_URL' ? 'http://localhost:7778' : '';
+    }
     return v;
 }
 export async function registerRunRoutes(app, store) {
     const RUNNER_URL = requireEnv('RUNNER_URL');
     const RUNNER_TOKEN = process.env.RUNNER_TOKEN ?? 'change_me';
-    app.post('/agents/:agentId/runs', upload.none(), async (req, reply) => {
-        requireOptionalBearerAuth(req, reply);
-        if (reply.sent)
+    app.post('/agents/:agentId/runs', upload.none(), async (req, res) => {
+        requireOptionalBearerAuth(req, res);
+        if (res.headersSent)
             return;
         const { agentId } = req.params;
         const agent = store.agents.find((a) => a.id === agentId);
         if (!agent || !agent.db_id) {
-            reply.code(404);
-            return { detail: 'Agent not found' };
+            res.status(404).json({ detail: 'Agent not found' });
+            return;
         }
         const message = req.body.message || '';
         const sessionId = req.body.session_id || '';
@@ -41,6 +44,17 @@ export async function registerRunRoutes(app, store) {
             sessionId,
             sessionName: message || 'New session'
         });
+        // Generate session title if needed
+        if (message && await store.shouldGenerateName(created.sessionId)) {
+            try {
+                const title = await sessionNamer.generateTitle(message);
+                await store.updateSessionName(created.sessionId, title);
+                created.entry.session_name = title;
+            }
+            catch (error) {
+                console.warn('Failed to generate session title:', error);
+            }
+        }
         // Call runner to create job
         const runnerRes = await fetch(`${RUNNER_URL}/api/jobs`, {
             method: 'POST',
@@ -59,8 +73,8 @@ export async function registerRunRoutes(app, store) {
         });
         if (!runnerRes.ok) {
             const text = await runnerRes.text();
-            reply.code(500);
-            return { detail: `Runner error: ${runnerRes.status} ${text}` };
+            res.status(500).json({ detail: `Runner error: ${runnerRes.status} ${text}` });
+            return;
         }
         const job = await runnerRes.json();
         const jobId = job.id;
@@ -72,8 +86,8 @@ export async function registerRunRoutes(app, store) {
         });
         if (!startRes.ok) {
             const text = await startRes.text();
-            reply.code(500);
-            return { detail: `Start error: ${startRes.status} ${text}` };
+            res.status(500).json({ detail: `Start error: ${startRes.status} ${text}` });
+            return;
         }
         // Stream events from runner
         const eventsRes = await fetch(`${RUNNER_URL}/api/jobs/${jobId}/events`, {
@@ -83,24 +97,23 @@ export async function registerRunRoutes(app, store) {
         });
         if (!eventsRes.ok) {
             const text = await eventsRes.text();
-            reply.code(500);
-            return { detail: `Events error: ${eventsRes.status} ${text}` };
+            res.status(500).json({ detail: `Events error: ${eventsRes.status} ${text}` });
+            return;
         }
         const reader = eventsRes.body?.getReader();
         if (!reader) {
-            reply.code(500);
-            return { detail: 'No reader for events' };
+            res.status(500).json({ detail: 'No reader for events' });
+            return;
         }
         const origin = req.headers.origin;
         if (origin) {
-            reply.raw.setHeader('Access-Control-Allow-Origin', origin);
-            reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
+            res.setHeader('Access-Control-Allow-Origin', origin);
+            res.setHeader('Access-Control-Allow-Credentials', 'true');
         }
-        reply.raw.setHeader('Content-Type', 'application/json; charset=utf-8');
-        reply.raw.setHeader('Cache-Control', 'no-cache');
-        reply.raw.setHeader('Connection', 'keep-alive');
-        reply.hijack();
-        reply.raw.flushHeaders();
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
         const decoder = new TextDecoder();
         let buffer = '';
         let finalContent = '';
@@ -152,7 +165,7 @@ export async function registerRunRoutes(app, store) {
                             };
                         }
                         if (chunk)
-                            writeChunk(reply.raw, chunk);
+                            writeChunk(res, chunk);
                     }
                     catch {
                         // ignore parse errors
@@ -177,17 +190,17 @@ export async function registerRunRoutes(app, store) {
                 created_at: nowSeconds()
             }
         });
-        reply.raw.end();
+        res.end();
     });
-    app.post('/teams/:teamId/runs', upload.none(), async (req, reply) => {
-        requireOptionalBearerAuth(req, reply);
-        if (reply.sent)
+    app.post('/teams/:teamId/runs', upload.none(), async (req, res) => {
+        requireOptionalBearerAuth(req, res);
+        if (res.headersSent)
             return;
         const { teamId } = req.params;
         const team = store.teams.find((t) => t.id === teamId);
         if (!team || !team.db_id) {
-            reply.code(404);
-            return { detail: 'Team not found' };
+            res.status(404).json({ detail: 'Team not found' });
+            return;
         }
         const message = req.body.message || '';
         const sessionId = req.body.session_id || '';
@@ -198,15 +211,28 @@ export async function registerRunRoutes(app, store) {
             sessionId,
             sessionName: message || 'New session'
         });
+        // Generate session title if needed
+        if (message && await store.shouldGenerateName(created.sessionId)) {
+            try {
+                const title = await sessionNamer.generateTitle(message);
+                await store.updateSessionName(created.sessionId, title);
+                created.entry.session_name = title;
+            }
+            catch (error) {
+                console.warn('Failed to generate session title:', error);
+            }
+        }
+        // Create job ID for team run
+        const jobId = `team_${teamId}_${Date.now()}`;
         const origin = req.headers.origin;
         if (origin) {
-            reply.raw.setHeader('Access-Control-Allow-Origin', origin);
-            reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
+            res.setHeader('Access-Control-Allow-Origin', origin);
+            res.setHeader('Access-Control-Allow-Credentials', 'true');
         }
-        reply.raw.setHeader('Content-Type', 'application/json; charset=utf-8');
-        reply.raw.setHeader('Cache-Control', 'no-cache');
-        reply.raw.setHeader('Connection', 'keep-alive');
-        reply.raw.flushHeaders();
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
         const started = {
             event: RunEvent.TeamRunStarted,
             content_type: 'text',
@@ -215,7 +241,7 @@ export async function registerRunRoutes(app, store) {
             team_id: teamId,
             content: ''
         };
-        writeChunk(reply.raw, started);
+        writeChunk(res, started);
         const finalText = `Echo: ${message}`;
         let current = '';
         const steps = Math.min(5, Math.max(2, Math.ceil(finalText.length / 12)));
@@ -230,7 +256,7 @@ export async function registerRunRoutes(app, store) {
                 team_id: teamId,
                 content: current
             };
-            writeChunk(reply.raw, chunk);
+            writeChunk(res, chunk);
             await sleep(60);
         }
         const completed = {
@@ -241,7 +267,7 @@ export async function registerRunRoutes(app, store) {
             team_id: teamId,
             content: finalText
         };
-        writeChunk(reply.raw, completed);
+        writeChunk(res, completed);
         await store.appendRun({
             dbId: team.db_id,
             entityType: 'team',
@@ -253,6 +279,6 @@ export async function registerRunRoutes(app, store) {
                 created_at: completed.created_at
             }
         });
-        reply.raw.end();
+        res.end();
     });
 }

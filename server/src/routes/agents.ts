@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify'
+import { Express } from 'express'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { z } from 'zod'
@@ -10,78 +10,83 @@ const modelConfigSchema = z.object({
   apiKey: z.string().optional()
 })
 
-export async function registerAgentRoutes(app: FastifyInstance, store: Store) {
-  app.get('/agents', async (req, reply) => {
-    requireOptionalBearerAuth(req, reply)
-    if (reply.sent) return
+export async function registerAgentRoutes(app: Express, store: Store) {
+  app.get('/agents', async (req, res) => {
+    requireOptionalBearerAuth(req, res)
+    if (res.headersSent) return
     console.log('Agents data:', store.agents);
-    return store.agents
+    res.json(store.agents)
   })
 
-  app.post('/agents/:id/configure-model', async (request, reply) => {
-    const { id } = request.params as { id: string }
-    const parsedBody = modelConfigSchema.safeParse(request.body)
+  app.post('/agents/:id/configure-model', async (req, res) => {
+    const { id } = req.params
+    const parsedBody = modelConfigSchema.safeParse(req.body)
     if (!parsedBody.success) {
-      return reply.status(400).send({ error: 'Invalid model configuration data', details: parsedBody.error.errors })
+      res.status(400).json({ error: 'Invalid model configuration data', details: parsedBody.error.errors })
+      return
     }
 
     await store.saveModelConfig(id, parsedBody.data)
-    reply.send({ ok: true })
+    res.json({ ok: true })
   })
 
-  app.get('/agents/:id/model-config', async (request, reply) => {
-    const { id } = request.params as { id: string }
+  app.get('/agents/:id/model-config', async (req, res) => {
+    const { id } = req.params
 
     // Retrieve model configuration from the database
     const modelConfig = await store.getModelConfig(id)
     if (!modelConfig) {
-      return reply.status(404).send({ error: 'Model configuration not found' })
+      res.status(404).json({ error: 'Model configuration not found' })
+      return
     }
 
-    reply.send(modelConfig)
+    res.json(modelConfig)
   })
 
-  app.get('/model-providers', async (request, reply) => {
+  app.get('/model-providers', async (req, res) => {
     // Simulate retrieving available model providers
     const providers = [
       { id: 'openai', name: 'OpenAI' },
       { id: 'huggingface', name: 'Hugging Face' },
     ]
-    reply.send(providers)
+    res.json(providers)
   })
 
-  app.post('/agents/:id/validate-model-config', async (request, reply) => {
-    const { id } = request.params as { id: string }
-    const parsedBody = modelConfigSchema.safeParse(request.body)
+  app.post('/agents/:id/validate-model-config', async (req, res) => {
+    const { id } = req.params
+    const parsedBody = modelConfigSchema.safeParse(req.body)
     if (!parsedBody.success) {
-      return reply.status(400).send({ error: 'Invalid model configuration data', details: parsedBody.error.errors })
+      res.status(400).json({ error: 'Invalid model configuration data', details: parsedBody.error.errors })
+      return
     }
 
     const isValid = await store.validateModelConfig(parsedBody.data)
     if (!isValid) {
-      return reply.status(400).send({ error: 'Invalid provider specified' })
+      res.status(400).json({ error: 'Invalid provider specified' })
+      return
     }
 
-    reply.send({ message: 'Model configuration is valid' })
+    res.json({ message: 'Model configuration is valid' })
   })
 
-  app.delete('/agents/:id/model-config', async (request, reply) => {
-    const { id } = request.params as { id: string }
+  app.delete('/agents/:id/model-config', async (req, res) => {
+    const { id } = req.params
 
     // Delete model configuration from the database
     await store.deleteModelConfig(id)
-    reply.send({ ok: true })
+    res.json({ ok: true })
   })
 
-  app.post('/agents/:id/model-config', async (request, reply) => {
-    const { id } = request.params as { id: string }
-    const parsedBody = modelConfigSchema.safeParse(request.body)
+  app.post('/agents/:id/model-config', async (req, res) => {
+    const { id } = req.params
+    const parsedBody = modelConfigSchema.safeParse(req.body)
     if (!parsedBody.success) {
-      return reply.status(400).send({ error: 'Invalid model configuration data', details: parsedBody.error.errors })
+      res.status(400).json({ error: 'Invalid model configuration data', details: parsedBody.error.errors })
+      return
     }
 
     await store.saveModelConfig(id, parsedBody.data)
 
-    reply.send({ message: 'Model configuration saved successfully' })
+    res.json({ message: 'Model configuration saved successfully' })
   })
 }

@@ -10,11 +10,8 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "types": ["node", "jsonwebtoken", "sqlite3", "express", "cors", "body-parser"],
-    "baseUrl": "./",
-    "paths": {
-      "*": ["node_modules/*", "src/types/*"]
-    }
+    "types": ["node", "express", "cors", "multer", "sqlite3"],
+    "baseUrl": "./"
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]

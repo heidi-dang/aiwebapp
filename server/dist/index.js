@@ -8,13 +8,20 @@ import cors from 'cors';
 import bodyParser from 'body-parser';
 import fs from 'fs';
 import { InMemoryStore, SqliteStore } from './storage.js';
+import { registerHealthRoutes } from './routes/health.js';
 import { registerAgentRoutes } from './routes/agents.js';
 import { registerTeamRoutes } from './routes/teams.js';
 import { registerSessionRoutes } from './routes/sessions.js';
 import { registerRunRoutes } from './routes/runs.js';
 import authRoutes from './routes/auth.js';
 import memoryRoutes from './routes/memory.js';
-import knowledgeRoutes from './routes/knowledge.js';
+import { registerKnowledgeRoutes } from './routes/knowledge.js';
+import { registerGuardrailRoutes } from './routes/guardrails.js';
+import { registerJobRoutes } from './routes/jobs.js';
+import { registerSkillsRoutes } from './routes/skills.js';
+import { registerEvaluationRoutes } from './routes/evaluation.js';
+import { registerTracingRoutes } from './routes/tracing.js';
+import { registerReasoningRoutes } from './routes/reasoning.js';
 const PORT = Number(process.env.PORT ?? 7777);
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000';
 const EXTRA_ORIGINS = [
@@ -34,19 +41,25 @@ app.get('/health', (req, res) => {
 async function main() {
     const sqlitePath = process.env.SQLITE_PATH;
     const store = sqlitePath ? await SqliteStore.create(sqlitePath) : new InMemoryStore();
-    await registerAgentRoutes(app, store);
-    await registerTeamRoutes(app, store);
-    await registerSessionRoutes(app, store);
-    await registerRunRoutes(app, store);
-    // Register the auth routes
-    await app.register(authRoutes);
+    // Removed app.register calls and integrated routes directly
+    registerHealthRoutes(app);
+    registerAgentRoutes(app, store);
+    registerTeamRoutes(app, store);
+    registerSessionRoutes(app, store);
+    registerRunRoutes(app, store);
+    // Register additional routes
+    app.use('/auth', authRoutes);
+    app.use('/memory', memoryRoutes);
+    registerKnowledgeRoutes(app, store);
+    registerGuardrailRoutes(app, store);
+    registerJobRoutes(app, store);
+    registerSkillsRoutes(app, store);
+    registerEvaluationRoutes(app, store);
+    registerTracingRoutes(app, store);
+    registerReasoningRoutes(app, store);
     // Register toolbox routes for UI-driven tools (internal)
     const { registerToolboxRoutes } = await import('./routes/toolbox.js');
-    await registerToolboxRoutes(app);
-    // Register memory routes
-    await app.register(memoryRoutes);
-    // Register knowledge routes
-    await app.register(knowledgeRoutes);
+    await registerToolboxRoutes(app, store);
     console.log('RUNNER_URL:', process.env.RUNNER_URL);
     // Start the server
     app.listen(PORT, '0.0.0.0', () => {
