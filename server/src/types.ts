@@ -11,6 +11,7 @@ export interface AgentDetails {
   name?: string
   db_id?: string
   model?: Model
+  base_dir?: string
 }
 
 export interface TeamDetails {
