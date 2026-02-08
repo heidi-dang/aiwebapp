@@ -32,14 +32,13 @@ Hey, so we're adding support for running local LLMs via Ollama. This'll let us h
 
 This should get us a solid local LLM setup. Let's start with Phase 1 and see how it goes. If anything comes up, we can adjust.
 
-## Port Consistency Issues
-- **aiwebapp-windsurf branch** has additional port configurations for user registration/login on port 3006
-- **main and aiwebapp-vscode** now synchronized with ui3006 scripts (ports 3006, 7777, 8788) for consistency
-- All branches now have consistent port configurations across dev, start, and smoke scripts
-
-## Bug Checks and Review Notes
-- Tools check in main shows some failures due to missing Unix tools (grep, rg) on Windows environment, but core functionality appears intact
-- UI lint passes
-- Some toolbox proxy checks fail (expected if services not running)
-- No critical function or implementation issues detected in quick review
-- All branches have recent commits today, indicating active development
+## Follow-ups After PR#7 & PR#8 Merge
+- Port internal toolbox POST route to Express with the same security and allowlist checks as Fastify:
+  - Implement read_file, write_file, list_files, list_dir, grep_search, approve_command, run_command
+  - Keep newline-delimited JSON responses and validate inputs rigorously
+  - Route location: server/src/routes/toolbox.ts using Express
+- Reconcile social login storage with Express auth routes:
+  - Ensure User/SocialAccount methods in storage match server/src/routes/auth.ts expectations
+  - Verify schema creation/migrations and consistency for SQLite tables
+- Add ESLint import resolver in ui if import resolution issues surface:
+  - Configure typescript and node resolvers in ui/eslint.config.mjs to support '@/...' aliases
