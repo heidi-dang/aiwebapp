@@ -52,8 +52,4 @@ tail -n +1 -f "$LOG_DIR/server-ui3006.log" | sed 's/^/[Server] /' &
 tail -n +1 -f "$LOG_DIR/ui-3006.log" | sed 's/^/[UI3006] /' &
 tail -n +1 -f "$LOG_DIR/runner-ui3006.log" | sed 's/^/[Runner] /' &
 
-<<<<<<< HEAD
 wait
-=======
-wait
->>>>>>> 5ad8b1e70460d2211de3bd95d8549853f9e399d1
