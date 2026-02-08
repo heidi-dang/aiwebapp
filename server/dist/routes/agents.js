@@ -1,10 +1,16 @@
 import { requireOptionalBearerAuth } from '../auth.js';
 import { z } from 'zod';
+import { access } from 'fs/promises';
+import { constants as fsConstants } from 'fs';
+import path from 'node:path';
 const modelConfigSchema = z.object({
     name: z.string(),
     model: z.string(),
     provider: z.string(),
     apiKey: z.string().optional()
+});
+const baseDirSchema = z.object({
+    base_dir: z.string().min(1)
 });
 export async function registerAgentRoutes(app, store) {
     app.get('/agents', async (req, reply) => {
@@ -13,6 +19,26 @@ export async function registerAgentRoutes(app, store) {
             return;
         console.log('Agents data:', store.agents);
         return store.agents;
+    });
+    app.put('/agents/:id/base-dir', async (request, reply) => {
+        const { id } = request.params;
+        const parsed = baseDirSchema.safeParse(request.body);
+        if (!parsed.success) {
+            return reply.status(400).send({ error: 'Invalid base_dir', details: parsed.error.errors });
+        }
+        try {
+            const baseDir = path.resolve(parsed.data.base_dir);
+            await access(baseDir, fsConstants.R_OK | fsConstants.W_OK);
+            const agent = store.agents.find(a => a.id === id);
+            if (!agent) {
+                return reply.status(404).send({ error: 'Agent not found' });
+            }
+            agent.base_dir = baseDir;
+            return reply.send({ ok: true, base_dir: baseDir });
+        }
+        catch (err) {
+            return reply.status(400).send({ error: 'base_dir not accessible', details: err instanceof Error ? err.message : String(err) });
+        }
     });
     app.post('/agents/:id/configure-model', async (request, reply) => {
         const { id } = request.params;

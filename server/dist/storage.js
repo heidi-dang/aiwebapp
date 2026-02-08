@@ -1,3 +1,4 @@
+import path from 'node:path';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 function makeSessionKey(args) {
@@ -13,12 +14,35 @@ export class InMemoryStore {
     sessionsByKey = new Map();
     users = [];
     constructor() {
+        const rootDir = path.resolve(process.cwd(), '..');
         this.agents = [
             {
                 id: 'agent_echo',
                 name: 'Echo Agent',
                 db_id: 'db_echo',
-                model: { provider: 'mock', model: 'echo', name: 'Mock Echo' }
+                model: { provider: 'mock', model: 'echo', name: 'Mock Echo' },
+                base_dir: rootDir
+            },
+            {
+                id: 'agent_ui',
+                name: 'UI Agent',
+                db_id: 'db_ui',
+                model: { provider: 'mock', model: 'echo', name: 'Mock Echo' },
+                base_dir: path.join(rootDir, 'ui')
+            },
+            {
+                id: 'agent_server',
+                name: 'Server Agent',
+                db_id: 'db_server',
+                model: { provider: 'mock', model: 'echo', name: 'Mock Echo' },
+                base_dir: path.join(rootDir, 'server')
+            },
+            {
+                id: 'agent_runner',
+                name: 'Runner Agent',
+                db_id: 'db_runner',
+                model: { provider: 'mock', model: 'echo', name: 'Mock Echo' },
+                base_dir: path.join(rootDir, 'runner')
             }
         ];
         this.teams = [

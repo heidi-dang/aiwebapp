@@ -63,7 +63,8 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
           message,
           session_id: created.sessionId,
           provider: agent.model?.provider ?? 'mock',
-          model: agent.model?.model ?? 'echo'
+          model: agent.model?.model ?? 'echo',
+          base_dir: agent.base_dir
         }
       })
     })

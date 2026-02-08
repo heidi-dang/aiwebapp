@@ -2,6 +2,9 @@ import { FastifyInstance } from 'fastify'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { z } from 'zod'
+import { access } from 'fs/promises'
+import { constants as fsConstants } from 'fs'
+import path from 'node:path'
 
 const modelConfigSchema = z.object({
   name: z.string(),
@@ -10,12 +13,36 @@ const modelConfigSchema = z.object({
   apiKey: z.string().optional()
 })
 
+const baseDirSchema = z.object({
+  base_dir: z.string().min(1)
+})
+
 export async function registerAgentRoutes(app: FastifyInstance, store: Store) {
   app.get('/agents', async (req, reply) => {
     requireOptionalBearerAuth(req, reply)
     if (reply.sent) return
     console.log('Agents data:', store.agents);
     return store.agents
+  })
+
+  app.put('/agents/:id/base-dir', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const parsed = baseDirSchema.safeParse(request.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Invalid base_dir', details: parsed.error.errors })
+    }
+    try {
+      const baseDir = path.resolve(parsed.data.base_dir)
+      await access(baseDir, fsConstants.R_OK | fsConstants.W_OK)
+      const agent = store.agents.find(a => a.id === id)
+      if (!agent) {
+        return reply.status(404).send({ error: 'Agent not found' })
+      }
+      agent.base_dir = baseDir
+      return reply.send({ ok: true, base_dir: baseDir })
+    } catch (err) {
+      return reply.status(400).send({ error: 'base_dir not accessible', details: err instanceof Error ? err.message : String(err) })
+    }
   })
 
   app.post('/agents/:id/configure-model', async (request, reply) => {

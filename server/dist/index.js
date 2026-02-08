@@ -8,6 +8,7 @@ import cors from 'cors';
 import bodyParser from 'body-parser';
 import fs from 'fs';
 import { InMemoryStore, SqliteStore } from './storage.js';
+import { registerHealthRoutes } from './routes/health.js';
 import { registerAgentRoutes } from './routes/agents.js';
 import { registerTeamRoutes } from './routes/teams.js';
 import { registerSessionRoutes } from './routes/sessions.js';
@@ -34,19 +35,19 @@ app.get('/health', (req, res) => {
 async function main() {
     const sqlitePath = process.env.SQLITE_PATH;
     const store = sqlitePath ? await SqliteStore.create(sqlitePath) : new InMemoryStore();
-    await registerAgentRoutes(app, store);
-    await registerTeamRoutes(app, store);
-    await registerSessionRoutes(app, store);
-    await registerRunRoutes(app, store);
-    // Register the auth routes
-    await app.register(authRoutes);
+    // Removed app.register calls and integrated routes directly
+    registerHealthRoutes(app);
+    registerAgentRoutes(app, store);
+    registerTeamRoutes(app, store);
+    registerSessionRoutes(app, store);
+    registerRunRoutes(app, store);
+    // Register additional routes
+    app.use('/auth', authRoutes);
+    app.use('/memory', memoryRoutes);
+    app.use('/knowledge', knowledgeRoutes);
     // Register toolbox routes for UI-driven tools (internal)
     const { registerToolboxRoutes } = await import('./routes/toolbox.js');
     await registerToolboxRoutes(app);
-    // Register memory routes
-    await app.register(memoryRoutes);
-    // Register knowledge routes
-    await app.register(knowledgeRoutes);
     console.log('RUNNER_URL:', process.env.RUNNER_URL);
     // Start the server
     app.listen(PORT, '0.0.0.0', () => {

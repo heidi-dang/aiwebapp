@@ -2,6 +2,7 @@
  * Agent implementation for coding tasks
  * Workflow: Plan -> Code Generation -> Code Execution -> Review -> Iterate/Finish
  */
+import { createOllamaClientFromEnv } from './ollama.js';
 export class CoderAgent {
     ctx;
     state = 'planning';
@@ -12,8 +13,10 @@ export class CoderAgent {
     maxIterations = 5;
     currentIteration = 0;
     messages = [];
+    ollama = null;
     constructor(ctx) {
         this.ctx = ctx;
+        this.ollama = createOllamaClientFromEnv();
         this.initializeMessages();
         this.loadMemory();
     }
@@ -220,8 +223,12 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
         this.state = 'code_generation';
     }
     async callLLMWithTools() {
+        const provider = this.ctx.input.provider || 'bridge';
+        if (provider === 'ollama' && this.ollama) {
+            return this.callLLMWithOllama();
+        }
         // Use bridge if available (preferred for Copilot access)
-        if (this.ctx.bridge) {
+        if (this.ctx.bridge && provider === 'bridge') {
             return this.callLLMWithBridge();
         }
         // Fallback to direct API
@@ -336,6 +343,27 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
         }
         catch (err) {
             throw new Error(`Bridge Copilot call failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+    async callLLMWithOllama() {
+        if (!this.ollama) {
+            throw new Error('Ollama client not available');
+        }
+        try {
+            // Convert messages to Ollama format
+            const ollamaMessages = this.messages.map(m => ({
+                role: m.role === 'tool' ? 'assistant' : m.role, // Ollama doesn't have 'tool' role
+                content: m.content || ''
+            }));
+            const response = await this.ollama.chat(ollamaMessages);
+            // For now, assume no tool calls; just return the content
+            return {
+                role: 'assistant',
+                content: response
+            };
+        }
+        catch (err) {
+            throw new Error(`Ollama call failed: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
     getAvailableTools() {
