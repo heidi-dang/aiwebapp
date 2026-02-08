@@ -153,7 +153,8 @@ async function main() {
 
     // Set up timeout if specified
     let timeoutHandle: NodeJS.Timeout | undefined
-    let cancelled = false
+    let jobCompleted = false
+    let completionMutex = false
 
     const cleanup = (status: JobStatus) => {
       if (timeoutHandle) clearTimeout(timeoutHandle)
@@ -168,8 +169,10 @@ async function main() {
 
     if (job.timeout_ms && job.timeout_ms > 0) {
       timeoutHandle = setTimeout(async () => {
-        if (cancelled) return
-        cancelled = true
+        // Use mutex to prevent race condition with executeJob completion
+        if (jobCompleted || completionMutex) return
+        completionMutex = true
+        jobCompleted = true
 
         await store.updateJobStatus(jobId, 'timeout', undefined, nowIso())
 
@@ -193,19 +196,33 @@ async function main() {
         for (const sub of subscribers) sendSse(sub, doneEvent)
 
         cleanup('timeout')
+        completionMutex = false
       }, job.timeout_ms)
     }
 
     jobHandles.set(jobId, {
       timeoutHandle,
       cancel: () => {
-        cancelled = true
+        if (!jobCompleted) {
+          jobCompleted = true
+        }
       }
     })
 
-    // Execute job asynchronously
-    executeJob(store, jobId, subscribers, input, cleanup).catch((err) => {
+    // Execute job asynchronously with proper error handling
+    executeJob(store, jobId, subscribers, input, (status: JobStatus) => {
+      // Use mutex to prevent race condition with timeout handler
+      if (jobCompleted || completionMutex) return
+      completionMutex = true
+      jobCompleted = true
+      cleanup(status)
+      completionMutex = false
+    }).catch((err) => {
       console.error(`Job ${jobId} failed:`, err)
+      if (!jobCompleted) {
+        jobCompleted = true
+        cleanup('error')
+      }
     })
 
     return { id: jobId, status: 'running', started_at: nowIso() }
