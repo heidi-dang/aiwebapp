@@ -32,6 +32,33 @@ prompt_user() {
     esac
 }
 
+# Port configuration
+MAX_PORT=3050
+
+# Function to find a free port
+find_free_port() {
+    local start=$1
+    local max=${2:-$MAX_PORT}
+    shift 2 || true
+    local exclude=("$@")
+    local port=$start
+    while [ "$port" -le "$max" ]; do
+        # skip excluded ports
+        local skip=0
+        for e in "${exclude[@]}"; do
+            [ "$e" = "$port" ] && skip=1 && break
+        done
+        [ "$skip" -eq 1 ] && port=$((port+1)) && continue
+
+        if ! lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+            printf '%s' "$port"
+            return 0
+        fi
+        port=$((port+1))
+    done
+    return 1
+}
+
 # Check if we're in the right directory
 if [ ! -d "server" ] || [ ! -d "ui" ] || [ ! -d "runner" ]; then
     echo "❌ Error: This script must be run from the aiwebapp root directory"
@@ -114,18 +141,32 @@ echo ""
 # Step 4: Start services
 echo "🚀 Step 4: Starting production services"
 if prompt_user "Start all services in production mode?"; then
+    # Find available ports starting from defaults
+    echo "Finding available ports (3000..$MAX_PORT)..."
+    UI_PORT=$(find_free_port 3000 "$MAX_PORT") || { echo "No free UI port"; exit 1; }
+    SERVER_PORT=$(find_free_port 3001 "$MAX_PORT" "$UI_PORT") || { echo "No free Server port"; exit 1; }
+    RUNNER_PORT=$(find_free_port 3002 "$MAX_PORT" "$UI_PORT" "$SERVER_PORT") || { echo "No free Runner port"; exit 1; }
+    echo "Ports: UI=$UI_PORT, Server=$SERVER_PORT, Runner=$RUNNER_PORT"
+
+    # Set environment variables for runner limits and Ollama config
+    export MAX_ITERATIONS=50
+    export MAX_TOKENS=5000
+    export MAX_TIME_SECONDS=300
+    export OLLAMA_BASE_URL=http://localhost:11434
+    export OLLAMA_MODEL=llama3.2
+
     echo "Starting server..."
-    cd server && npm run start &
+    cd server && PORT=$SERVER_PORT npm run start &
     SERVER_PID=$!
     echo "Server started (PID: $SERVER_PID)"
 
     echo "Starting UI..."
-    cd ui && npm run start &
+    cd ui && PORT=$UI_PORT npm run start &
     UI_PID=$!
     echo "UI started (PID: $UI_PID)"
 
     echo "Starting runner..."
-    cd runner && npm run start &
+    cd runner && PORT=$RUNNER_PORT npm run start &
     RUNNER_PID=$!
     echo "Runner started (PID: $RUNNER_PID)"
 
@@ -133,9 +174,9 @@ if prompt_user "Start all services in production mode?"; then
     echo "✅ All services started!"
     echo ""
     echo "🌐 Access URLs:"
-    echo "   UI: http://localhost:3000"
-    echo "   Server API: http://localhost:3001"
-    echo "   Runner: http://localhost:3002"
+    echo "   UI: http://localhost:$UI_PORT"
+    echo "   Server API: http://localhost:$SERVER_PORT"
+    echo "   Runner: http://localhost:$RUNNER_PORT"
     echo ""
     echo "📊 Process IDs:"
     echo "   Server: $SERVER_PID"

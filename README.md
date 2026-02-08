@@ -2,6 +2,11 @@
 
 A comprehensive AI-powered web application for managing and interacting with autonomous agents. Built with modern web technologies, this application provides a full-stack solution with a Fastify backend, Next.js frontend, and a dedicated runner service for agent execution.
 
+## Websites
+
+- **Main Website**: [https://heidi.com.au](https://heidi.com.au) - Landing page with company information
+- **AI Platform**: [https://ai.heidi.com.au](https://ai.heidi.com.au) - Full AI web application
+
 ## Features
 
 - 🤖 **Agent Management**: Create, configure, and manage AI agents with custom system prompts
@@ -28,10 +33,57 @@ This application consists of three main services that communicate via HTTP APIs:
 ### Data Flow
 
 ```
-UI (Port 3000) ↔ Server (Port 3001) ↔ Runner (Port 3002)
+UI (Port 3000+) ↔ Server (Port 3001+) ↔ Runner (Port 3002+)
     ↑                                               ↑
     └─────────────── Copilot API Bridge ────────────┘
 ```
+
+**Note**: Ports start from the defaults shown but automatically increment (3000-3050) if the default ports are in use, ensuring compatibility with shared development environments.
+
+### Service URLs and APIs
+
+For tunneling or external access, the following services and endpoints are available:
+
+#### UI Service (Port 3000+)
+- **URL**: `http://localhost:{PORT}` (dev) / `https://ai.heidi.com.au` (prod)
+- **Purpose**: Web interface for chat and agent management
+- **Key Routes**:
+  - `/` - Main chat interface
+  - `/api/config` - Configuration endpoint
+  - `/api/runner/*` - Proxy to runner service
+  - `/api/toolbox/*` - Developer toolbox endpoints
+
+#### Server API (Port 3001+)
+- **URL**: `http://localhost:{PORT}` (dev) / `https://api.ai.heidi.com.au` (prod)
+- **Purpose**: REST API for data management
+- **Key Endpoints**:
+  - `GET /health` - Health check
+  - `GET/POST /api/agents` - Agent CRUD
+  - `GET/POST /api/teams` - Team management
+  - `GET/POST /api/sessions` - Session management
+  - `GET/POST /api/runs` - Agent execution runs
+  - `GET/POST /api/auth` - Authentication
+  - `GET/POST /api/memory` - Memory management
+  - `GET/POST /api/knowledge` - Knowledge base
+  - `GET/POST /api/toolbox` - Developer utilities
+
+#### Runner Service (Port 3002+)
+- **URL**: `http://localhost:{PORT}` (dev) / `https://runner.ai.heidi.com.au` (prod)
+- **Purpose**: Agent execution and job processing
+- **Key Endpoints**:
+  - `GET /health` - Health check
+  - `GET /test` - Test endpoint
+  - `GET/POST /api/jobs` - Job management (create, list, start, cancel, delete)
+  - `GET /api/jobs/{id}/events` - Server-Sent Events stream for job updates
+
+#### Copilot API Bridge (Port 4000)
+- **URL**: `http://localhost:4000` (dev) / `https://copilot.ai.heidi.com.au` (prod)
+- **Purpose**: VS Code Copilot integration
+- **Key Endpoints**:
+  - `GET /v1/models` - Available models
+  - `POST /v1/chat/completions` - Chat completions
+
+**Tunneling Note**: When setting up Cloudflare/ngrok tunnels, ensure all three main service ports are tunneled. Update environment variables with the tunnel URLs for proper cross-service communication.
 
 ## Prerequisites
 
@@ -109,14 +161,18 @@ Important:
 
 ### Production Deployment
 
-For production deployment:
+For production deployment to https://ai.heidi.com.au:
 
 ```bash
 # Build and deploy
 ./production.sh
 ```
 
-This will build all services and start them in production mode.
+This will build all services and start them in production mode. Configure your reverse proxy or load balancer to route:
+- `ai.heidi.com.au` → UI service
+- `api.ai.heidi.com.au` → Server API
+- `runner.ai.heidi.com.au` → Runner service
+- `copilot.ai.heidi.com.au` → Copilot bridge (if used)
 
 ## CopilotAPI Integration
 
@@ -187,6 +243,44 @@ curl http://localhost:8080/v1/models
 # Test through UI proxy
 curl http://localhost:3000/api/copilot/v1/models
 ```
+
+## Tunneling for Remote Access
+
+For full remote access to the application (not just Copilot), you'll need to tunnel all three main services. The ports are dynamic (starting from 3000, 3001, 3002) and will be displayed when starting the services.
+
+### Using ngrok for All Services
+
+```bash
+# Install ngrok
+npm install -g ngrok
+ngrok config add-authtoken YOUR_TOKEN
+
+# Start tunnels for each service (replace PORTS with actual ports from startup)
+ngrok http 3000  # UI
+ngrok http 3001  # Server API
+ngrok http 3002  # Runner
+
+# Update environment variables with tunnel URLs
+# In ui/.env.local:
+NEXT_PUBLIC_API_URL=https://api.ai.heidi.com.au
+NEXT_PUBLIC_RUNNER_URL=https://runner.ai.heidi.com.au
+
+# In runner/.env:
+AI_API_URL=https://copilot.ai.heidi.com.au  # if using Copilot
+```
+
+### Using Cloudflare Tunnel for All Services
+
+```bash
+# Create tunnels for each service
+cloudflared tunnel --url http://localhost:3000  # UI
+cloudflared tunnel --url http://localhost:3001  # Server
+cloudflared tunnel --url http://localhost:3002  # Runner
+
+# Configure DNS and update environment variables as above
+```
+
+**Note**: Always check the actual ports used by running `./hotreload-test.sh` or `./production.sh` and update tunnel configurations accordingly.
 
 ## Ollama Integration
 
@@ -307,6 +401,16 @@ The `hotreload-test.sh` script provides the optimal development experience:
 - Health checks for all services
 - Automatic environment configuration
 - Clean shutdown on Ctrl+C
+
+**Important for Shared Development Environments:**
+
+Since multiple developers may work on the same physical machine, the script allows automatic port fallback if default ports (3000-3002) are in use. However, when preparing code for PR/merge to main:
+
+- Reset all ports back to the original defaults (UI: 3000, Server: 3001, Runner: 3002) in the script.
+- Ensure any environment variables implemented in `.env` files are included in `hotreload-test.sh` and `production.sh` for consistency.
+- Test with the standard ports to avoid CI issues.
+
+This ensures compatibility and prevents port conflicts in production or CI.
 
 **Log Output:**
 ```
@@ -447,6 +551,8 @@ Authorization: Bearer <your-token>
 
 ```
 aiwebapp/
+├── landing/               # Static landing page for heidi.com.au
+│   └── index.html        # Modern landing page with signup/signin
 ├── server/                 # Backend API server (Port 3001)
 │   ├── src/
 │   │   ├── index.ts       # Main Fastify server
