@@ -4,8 +4,47 @@ import { promises as fs } from 'node:fs'
 import { exec as execCb } from 'child_process'
 import { promisify } from 'util'
 import glob from 'glob'
+import path from 'node:path'
 
 const exec = promisify(execCb)
+
+async function grepSearchSafe(args: { query: string; includePattern?: string; maxMatches: number }) {
+  const query = args.query
+  const maxMatches = args.maxMatches
+  const include = args.includePattern
+
+  const entries = await new Promise<string[]>((resolve, reject) => {
+    const pattern = include || '**/*'
+    glob(pattern, { cwd: process.cwd(), nodir: true }, (err: Error | null, matches: string[]) => {
+      if (err) reject(err)
+      else resolve(matches)
+    })
+  })
+
+  const matches: Array<{ file: string; line: number; text: string }> = []
+
+  for (const rel of entries) {
+    if (matches.length >= maxMatches) break
+    if (rel.includes('node_modules') || rel.includes('.git') || rel.includes('dist') || rel.includes('.next')) continue
+
+    const full = path.join(process.cwd(), rel)
+    let text = ''
+    try {
+      text = await fs.readFile(full, 'utf8')
+    } catch {
+      continue
+    }
+
+    const lines = text.split(/\r?\n/)
+    for (let i = 0; i < lines.length; i++) {
+      if (matches.length >= maxMatches) break
+      if (!lines[i].includes(query)) continue
+      matches.push({ file: rel, line: i + 1, text: lines[i] })
+    }
+  }
+
+  return matches
+}
 
 function looksLikeNaturalLanguageCommand(command: string): boolean {
   if (/\b(run|execute|start|stop|open|close|list|show|find)\b\s+(the|a|an)\b/i.test(command)) {
@@ -108,22 +147,7 @@ export async function registerToolboxRoutes(app: FastifyInstance) {
           reply.code(400)
           return { error: 'Missing query' }
         }
-        let command = `grep -r -n "${query.replace(/"/g, '\\"')}" .`
-        if (include) command += ` --include="${include}"`
-        command += ` | head -n 200`
-        const { stdout } = await exec(command, { timeout: 10000, maxBuffer: 1024 * 1024, cwd: process.cwd() })
-        const lines = stdout.trim().split('\n').filter(Boolean)
-        const matches = lines.map((line) => {
-          const colonIndex = line.indexOf(':')
-          if (colonIndex === -1) return null
-          const file = line.slice(0, colonIndex)
-          const rest = line.slice(colonIndex + 1)
-          const colonIndex2 = rest.indexOf(':')
-          if (colonIndex2 === -1) return null
-          const lineNum = parseInt(rest.slice(0, colonIndex2), 10)
-          const text = rest.slice(colonIndex2 + 1)
-          return { file, line: lineNum, text }
-        }).filter(Boolean)
+        const matches = await grepSearchSafe({ query, includePattern: include || undefined, maxMatches: 200 })
         return { success: true, result: { query, matches } }
       }
 

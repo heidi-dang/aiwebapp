@@ -2,9 +2,6 @@ import { FastifyInstance } from 'fastify'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { RunEvent, StreamChunk } from '../types.js'
-import multer from 'multer'
-
-const upload = multer()
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000)
@@ -29,7 +26,7 @@ function requireEnv(name: string): string {
 export async function registerRunRoutes(app: FastifyInstance, store: Store) {
   const RUNNER_URL = requireEnv('RUNNER_URL')
   const RUNNER_TOKEN = process.env.RUNNER_TOKEN ?? 'change_me'
-  app.post('/agents/:agentId/runs', upload.none(), async (req, reply) => {
+  app.post('/agents/:agentId/runs', async (req, reply) => {
     requireOptionalBearerAuth(req, reply)
     if (reply.sent) return
 
@@ -40,8 +37,9 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       return { detail: 'Agent not found' }
     }
 
-    const message = (req.body as { message?: string }).message || ''
-    const sessionId = (req.body as { session_id?: string }).session_id || ''
+    const body = (req.body ?? {}) as { message?: string; session_id?: string }
+    const message = body.message || ''
+    const sessionId = body.session_id || ''
 
     const created = await store.getOrCreateSession({
       dbId: agent.db_id,
@@ -198,7 +196,7 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
     reply.raw.end()
   })
 
-  app.post('/teams/:teamId/runs', upload.none(), async (req, reply) => {
+  app.post('/teams/:teamId/runs', async (req, reply) => {
     requireOptionalBearerAuth(req, reply)
     if (reply.sent) return
 
@@ -209,8 +207,9 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       return { detail: 'Team not found' }
     }
 
-    const message = (req.body as { message?: string }).message || ''
-    const sessionId = (req.body as { session_id?: string }).session_id || ''
+    const body = (req.body ?? {}) as { message?: string; session_id?: string }
+    const message = body.message || ''
+    const sessionId = body.session_id || ''
 
     const created = await store.getOrCreateSession({
       dbId: team.db_id,
