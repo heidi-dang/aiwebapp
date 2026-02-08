@@ -23,6 +23,38 @@ prompt_user() {
     esac
 }
 
+prompt_value() {
+    local message="$1"
+    local default_value="${2:-}"
+    local resp
+    if [ -n "${default_value:-}" ]; then
+        read -r -p "$message [$default_value]: " resp
+        resp=${resp:-$default_value}
+    else
+        read -r -p "$message: " resp
+    fi
+    printf '%s' "$resp"
+}
+
+get_env_value() {
+    local file="$1" key="$2"
+    [ -f "$file" ] || return 0
+    grep -m1 "^${key}=" "$file" 2>/dev/null | cut -d'=' -f2- || true
+}
+
+set_env_value() {
+    local file="$1" key="$2" value="$3"
+    mkdir -p "$(dirname "$file")"
+    touch "$file"
+    if grep -q "^${key}=" "$file" 2>/dev/null; then
+        tmpfile="${file}.tmp.$$"
+        sed "s#^${key}=.*#${key}=${value}#" "$file" > "$tmpfile"
+        mv "$tmpfile" "$file"
+    else
+        printf '%s=%s\n' "$key" "$value" >> "$file"
+    fi
+}
+
 find_free_port() {
     local start=$1
     local max=${2:-$MAX_PORT}
@@ -83,6 +115,53 @@ RUNNER_PORT=$(find_free_port 3002 "$MAX_PORT" "$UI_PORT" "$SERVER_PORT") || { ec
 
 echo "UI -> $UI_PORT, Server -> $SERVER_PORT, Runner -> $RUNNER_PORT"
 
+server_env_file="server/.env"
+if [ ! -f "$server_env_file" ] && [ -f "server/.env.example" ]; then
+    cp server/.env.example "$server_env_file"
+fi
+
+ui_origin_default="http://localhost:$UI_PORT"
+server_public_default="http://localhost:$SERVER_PORT"
+runner_url_default="http://localhost:$RUNNER_PORT"
+
+existing_cors_origin=$(get_env_value "$server_env_file" "CORS_ORIGIN")
+existing_server_public=$(get_env_value "$server_env_file" "SERVER_PUBLIC_URL")
+existing_state_secret=$(get_env_value "$server_env_file" "OAUTH_STATE_SECRET")
+
+cors_origin=$(prompt_value "Server CORS_ORIGIN" "${existing_cors_origin:-$ui_origin_default}")
+server_public=$(prompt_value "Server SERVER_PUBLIC_URL (OAuth redirect base)" "${existing_server_public:-$server_public_default}")
+set_env_value "$server_env_file" "PORT" "$SERVER_PORT"
+set_env_value "$server_env_file" "CORS_ORIGIN" "$cors_origin"
+set_env_value "$server_env_file" "RUNNER_URL" "$runner_url_default"
+set_env_value "$server_env_file" "SERVER_PUBLIC_URL" "$server_public"
+
+if prompt_user "Configure OAuth providers now?" "n"; then
+    state_secret=$(prompt_value "Server OAUTH_STATE_SECRET" "${existing_state_secret:-}")
+    if [ -n "${state_secret:-}" ]; then
+        set_env_value "$server_env_file" "OAUTH_STATE_SECRET" "$state_secret"
+    fi
+
+    gh_id=$(prompt_value "GITHUB_CLIENT_ID (leave blank to skip)" "$(get_env_value "$server_env_file" "GITHUB_CLIENT_ID")")
+    gh_secret=$(prompt_value "GITHUB_CLIENT_SECRET (leave blank to skip)" "$(get_env_value "$server_env_file" "GITHUB_CLIENT_SECRET")")
+    [ -n "${gh_id:-}" ] && set_env_value "$server_env_file" "GITHUB_CLIENT_ID" "$gh_id"
+    [ -n "${gh_secret:-}" ] && set_env_value "$server_env_file" "GITHUB_CLIENT_SECRET" "$gh_secret"
+
+    google_id=$(prompt_value "GOOGLE_CLIENT_ID (leave blank to skip)" "$(get_env_value "$server_env_file" "GOOGLE_CLIENT_ID")")
+    google_secret=$(prompt_value "GOOGLE_CLIENT_SECRET (leave blank to skip)" "$(get_env_value "$server_env_file" "GOOGLE_CLIENT_SECRET")")
+    [ -n "${google_id:-}" ] && set_env_value "$server_env_file" "GOOGLE_CLIENT_ID" "$google_id"
+    [ -n "${google_secret:-}" ] && set_env_value "$server_env_file" "GOOGLE_CLIENT_SECRET" "$google_secret"
+
+    ms_id=$(prompt_value "MICROSOFT_CLIENT_ID (leave blank to skip)" "$(get_env_value "$server_env_file" "MICROSOFT_CLIENT_ID")")
+    ms_secret=$(prompt_value "MICROSOFT_CLIENT_SECRET (leave blank to skip)" "$(get_env_value "$server_env_file" "MICROSOFT_CLIENT_SECRET")")
+    [ -n "${ms_id:-}" ] && set_env_value "$server_env_file" "MICROSOFT_CLIENT_ID" "$ms_id"
+    [ -n "${ms_secret:-}" ] && set_env_value "$server_env_file" "MICROSOFT_CLIENT_SECRET" "$ms_secret"
+
+    apple_id=$(prompt_value "APPLE_CLIENT_ID (leave blank to skip)" "$(get_env_value "$server_env_file" "APPLE_CLIENT_ID")")
+    apple_secret=$(prompt_value "APPLE_CLIENT_SECRET (leave blank to skip)" "$(get_env_value "$server_env_file" "APPLE_CLIENT_SECRET")")
+    [ -n "${apple_id:-}" ] && set_env_value "$server_env_file" "APPLE_CLIENT_ID" "$apple_id"
+    [ -n "${apple_secret:-}" ] && set_env_value "$server_env_file" "APPLE_CLIENT_SECRET" "$apple_secret"
+fi
+
 echo "Clearing logs..."
 : > "$LOG_DIR/server.log"
 : > "$LOG_DIR/ui.log"
@@ -142,7 +221,7 @@ run_with_ato() {
 }
 
 echo "Starting server (logs/server.log)..."
-SERVER_PID=$(run_with_ato "$LOG_DIR/server.log" "cd server && PORT=\"$SERVER_PORT\" RUNNER_URL=\"http://localhost:$RUNNER_PORT\" MAX_ITERATIONS=10 REQUEST_TIMEOUT_MS=30000 MAX_PAYLOAD_SIZE=1048576 FEATURE_X_ENABLED=false npm run dev")
+SERVER_PID=$(run_with_ato "$LOG_DIR/server.log" "cd server && PORT=\"$SERVER_PORT\" RUNNER_URL=\"http://localhost:$RUNNER_PORT\" CORS_ORIGIN=\"$cors_origin\" SERVER_PUBLIC_URL=\"$server_public\" MAX_ITERATIONS=10 REQUEST_TIMEOUT_MS=30000 MAX_PAYLOAD_SIZE=1048576 FEATURE_X_ENABLED=false npm run dev")
 sleep 0.2
 
 echo "Starting UI (logs/ui.log)..."

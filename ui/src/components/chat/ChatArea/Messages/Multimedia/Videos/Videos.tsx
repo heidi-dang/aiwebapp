@@ -4,10 +4,11 @@ import { memo } from 'react'
 
 import { toast } from 'sonner'
 
-import { type VideoData } from '@/types/os'
 import Icon from '@/components/ui/icon'
 
-const VideoItem = memo(({ video }: { video: VideoData }) => {
+type Video = { id: number; url: string; eta?: number }
+
+const VideoItem = memo(({ video }: { video: Video }) => {
   const videoUrl = video.url
 
   const handleDownload = async () => {
@@ -66,7 +67,7 @@ const VideoItem = memo(({ video }: { video: VideoData }) => {
 
 VideoItem.displayName = 'VideoItem'
 
-const Videos = memo(({ videos }: { videos: VideoData[] }) => (
+const Videos = memo(({ videos }: { videos: Video[] }) => (
   <div className="flex flex-col gap-4">
     {videos.map((video) => (
       <VideoItem key={video.id} video={video} />

@@ -7,6 +7,7 @@
     "bootstrap": "npm --prefix server install && npm --prefix runner install && npm --prefix ui install",
     "dev": "concurrently -k -n server,runner,ui -c blue,magenta,green \"npm --prefix server run dev\" \"npm --prefix runner run dev\" \"npm --prefix ui run dev\"",
     "dev:ui3006": "concurrently -k -n server,runner,ui3006 -c blue,magenta,green \"PORT=7777 RUNNER_URL=http://localhost:8788 CORS_ORIGIN=http://localhost:3006 npm --prefix server run dev\" \"PORT=8788 CORS_ORIGIN=http://localhost:3006 npm --prefix runner run dev\" \"PORT=3006 NEXT_PUBLIC_API_URL=http://localhost:7777 RUNNER_BASE_URL=http://localhost:8788 RUNNER_TOKEN=change_me npm --prefix ui run dev:3006\"",
+    "dev:phase2": "concurrently -k -n server,runner,ui -c blue,magenta,green \"PORT=3201 RUNNER_URL=http://localhost:3202 RUNNER_TOKEN=test_runner_token_123 CORS_ORIGIN=http://localhost:3200 npm --prefix server run dev\" \"PORT=3202 RUNNER_PERSIST=false RUNNER_TOKEN=test_runner_token_123 CORS_ORIGIN=http://localhost:3200 npm --prefix runner run dev\" \"PORT=3200 NEXT_PUBLIC_API_URL=http://localhost:3201 RUNNER_BASE_URL=http://localhost:3202 RUNNER_TOKEN=test_runner_token_123 npm --prefix ui run dev:phase2\"",
     "build": "npm run bootstrap && npm --prefix server run build && npm --prefix runner run build && npm --prefix ui run build",
     "start": "concurrently -k -n server,runner,ui -c blue,magenta,green \"npm --prefix server start\" \"npm --prefix runner start\" \"npm --prefix ui start\"",
     "start:ui3006": "concurrently -k -n server,runner,ui3006 -c blue,magenta,green \"PORT=7777 RUNNER_URL=http://localhost:8788 CORS_ORIGIN=http://localhost:3006 npm --prefix server start\" \"PORT=8788 CORS_ORIGIN=http://localhost:3006 npm --prefix runner start\" \"PORT=3006 NEXT_PUBLIC_API_URL=http://localhost:7777 RUNNER_BASE_URL=http://localhost:8788 RUNNER_TOKEN=change_me npm --prefix ui run start:3006\"",
@@ -25,8 +26,18 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/glob": "^8.1.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.0.0",
+    "@types/node": "^25.2.2",
+    "@types/sqlite3": "^5.1.0",
     "concurrently": "^9.1.2",
     "glob": "^13.0.1"
+  },
+  "dependencies": {
+    "cacache": "^20.0.3",
+    "make-fetch-happen": "^15.0.3",
+    "node-gyp": "^12.2.0",
+    "sqlite3": "^5.1.7",
+    "tar": "^7.5.7"
   }
 }
