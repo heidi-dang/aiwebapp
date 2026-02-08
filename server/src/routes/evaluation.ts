@@ -1,4 +1,3 @@
-import { Express } from 'express'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { z } from 'zod'
@@ -10,8 +9,8 @@ const runEvalSchema = z.object({
   agentId: z.string().optional()
 })
 
-export async function registerEvaluationRoutes(app: Express, store: Store) {
-  app.get('/evaluation/suites', async (req, res) => {
+export async function registerEvaluationRoutes(app: any, store: Store) {
+  app.get('/evaluation/suites', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -36,7 +35,7 @@ export async function registerEvaluationRoutes(app: Express, store: Store) {
     res.json(mockSuites)
   })
 
-  app.get('/evaluation/suites/:id', async (req, res) => {
+  app.get('/evaluation/suites/:id', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -69,7 +68,7 @@ export async function registerEvaluationRoutes(app: Express, store: Store) {
     res.json(mockSuite)
   })
 
-  app.post('/evaluation/suites/:id/run', async (req, res) => {
+  app.post('/evaluation/suites/:id/run', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -126,7 +125,7 @@ export async function registerEvaluationRoutes(app: Express, store: Store) {
     }
   })
 
-  app.post('/evaluation/suites/seed', async (req, res) => {
+  app.post('/evaluation/suites/seed', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     

@@ -1,4 +1,3 @@
-import { Express } from 'express'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { z } from 'zod'
@@ -10,15 +9,15 @@ const modelConfigSchema = z.object({
   apiKey: z.string().optional()
 })
 
-export async function registerAgentRoutes(app: Express, store: Store) {
-  app.get('/agents', async (req, res) => {
+export async function registerAgentRoutes(app: any, store: Store) {
+  app.get('/agents', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     console.log('Agents data:', store.agents);
     res.json(store.agents)
   })
 
-  app.post('/agents/:id/configure-model', async (req, res) => {
+  app.post('/agents/:id/configure-model', async (req: any, res: any) => {
     const { id } = req.params
     const parsedBody = modelConfigSchema.safeParse(req.body)
     if (!parsedBody.success) {
@@ -30,7 +29,7 @@ export async function registerAgentRoutes(app: Express, store: Store) {
     res.json({ ok: true })
   })
 
-  app.get('/agents/:id/model-config', async (req, res) => {
+  app.get('/agents/:id/model-config', async (req: any, res: any) => {
     const { id } = req.params
 
     // Retrieve model configuration from the database
@@ -43,7 +42,7 @@ export async function registerAgentRoutes(app: Express, store: Store) {
     res.json(modelConfig)
   })
 
-  app.get('/model-providers', async (req, res) => {
+  app.get('/model-providers', async (req: any, res: any) => {
     // Simulate retrieving available model providers
     const providers = [
       { id: 'openai', name: 'OpenAI' },
@@ -52,7 +51,7 @@ export async function registerAgentRoutes(app: Express, store: Store) {
     res.json(providers)
   })
 
-  app.post('/agents/:id/validate-model-config', async (req, res) => {
+  app.post('/agents/:id/validate-model-config', async (req: any, res: any) => {
     const { id } = req.params
     const parsedBody = modelConfigSchema.safeParse(req.body)
     if (!parsedBody.success) {
@@ -69,7 +68,7 @@ export async function registerAgentRoutes(app: Express, store: Store) {
     res.json({ message: 'Model configuration is valid' })
   })
 
-  app.delete('/agents/:id/model-config', async (req, res) => {
+  app.delete('/agents/:id/model-config', async (req: any, res: any) => {
     const { id } = req.params
 
     // Delete model configuration from the database
@@ -77,7 +76,7 @@ export async function registerAgentRoutes(app: Express, store: Store) {
     res.json({ ok: true })
   })
 
-  app.post('/agents/:id/model-config', async (req, res) => {
+  app.post('/agents/:id/model-config', async (req: any, res: any) => {
     const { id } = req.params
     const parsedBody = modelConfigSchema.safeParse(req.body)
     if (!parsedBody.success) {

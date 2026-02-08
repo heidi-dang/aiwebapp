@@ -1,4 +1,3 @@
-import { Express } from 'express'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { guardrailService } from '../guardrail_service.js'
@@ -13,8 +12,8 @@ const guardrailConfigSchema = z.object({
   maxResponseLength: z.number().optional()
 })
 
-export async function registerGuardrailRoutes(app: Express, store: Store) {
-  app.get('/guardrails/config', async (req, res) => {
+export async function registerGuardrailRoutes(app: any, store: Store) {
+  app.get('/guardrails/config', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -30,7 +29,7 @@ export async function registerGuardrailRoutes(app: Express, store: Store) {
     })
   })
 
-  app.post('/guardrails/test-input', async (req, res) => {
+  app.post('/guardrails/test-input', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -52,7 +51,7 @@ export async function registerGuardrailRoutes(app: Express, store: Store) {
     })
   })
 
-  app.post('/guardrails/test-output', async (req, res) => {
+  app.post('/guardrails/test-output', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -73,7 +72,7 @@ export async function registerGuardrailRoutes(app: Express, store: Store) {
     })
   })
 
-  app.post('/guardrails/test-tool', async (req, res) => {
+  app.post('/guardrails/test-tool', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
