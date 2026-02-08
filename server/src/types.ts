@@ -73,6 +73,7 @@ export interface User {
   email: string
   name?: string
   role: 'admin' | 'user'
+  hashed_password?: string
   created_at: number
   last_login_at?: number
 }

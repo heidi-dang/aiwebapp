@@ -31,3 +31,15 @@ Hey, so we're adding support for running local LLMs via Ollama. This'll let us h
 - Update the docs and make sure everything's working smoothly.
 
 This should get us a solid local LLM setup. Let's start with Phase 1 and see how it goes. If anything comes up, we can adjust.
+
+## Port Consistency Issues
+- **aiwebapp-windsurf branch** has additional port configurations for user registration/login on port 3006
+- **main and aiwebapp-vscode** now synchronized with ui3006 scripts (ports 3006, 7777, 8788) for consistency
+- All branches now have consistent port configurations across dev, start, and smoke scripts
+
+## Bug Checks and Review Notes
+- Tools check in main shows some failures due to missing Unix tools (grep, rg) on Windows environment, but core functionality appears intact
+- UI lint passes
+- Some toolbox proxy checks fail (expected if services not running)
+- No critical function or implementation issues detected in quick review
+- All branches have recent commits today, indicating active development

@@ -39,7 +39,12 @@ const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(
+  cors({
+    origin: [CORS_ORIGIN, ...EXTRA_ORIGINS],
+    credentials: true
+  })
+);
 app.use(bodyParser.json());
 
 // Health route
@@ -59,7 +64,7 @@ async function main() {
   registerRunRoutes(app, store);
 
   // Register additional routes
-  app.use('/auth', authRoutes);
+  app.use('/auth', authRoutes(store));
   app.use('/memory', memoryRoutes);
   registerKnowledgeRoutes(app, store);
   registerGuardrailRoutes(app, store);
