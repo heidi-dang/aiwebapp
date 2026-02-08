@@ -20,11 +20,19 @@ export interface TeamDetails {
   model?: Model
 }
 
+export interface ToolDetails {
+  name: string
+  description: string
+  parameters?: any
+}
+
 export interface SessionEntry {
   session_id: string
   session_name: string
   created_at: number
   updated_at?: number
+  entity_type?: EntityType
+  component_id?: string
 }
 
 export interface RunRecord {
