@@ -637,20 +637,12 @@ const ChatInput = () => {
                   <div
                     key={
                       tc.id ||
-<<<<<<< HEAD
                       `${tc.function?.name || 'unknown'}-${idx}`
-=======
-                      `${tc.function.name}-${idx}`
->>>>>>> 2402ca3 (fix: update ToolCall interface to OpenAI format and fix build issues)
                     }
                     className="cursor-default rounded-full bg-accent px-2 py-1.5 text-xs"
                   >
                     <p className="font-dmmono uppercase text-primary/80">
-<<<<<<< HEAD
                       {tc.function?.name || 'Unknown Tool'}
-=======
-                      {tc.function.name}
->>>>>>> 2402ca3 (fix: update ToolCall interface to OpenAI format and fix build issues)
                     </p>
                   </div>
                 ))}

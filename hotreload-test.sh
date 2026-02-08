@@ -221,11 +221,7 @@ run_with_ato() {
 }
 
 echo "Starting server (logs/server.log)..."
-<<<<<<< HEAD
-SERVER_PID=$(run_with_ato "$LOG_DIR/server.log" "cd server && PORT=\"$SERVER_PORT\" RUNNER_URL=\"http://localhost:$RUNNER_PORT\" MAX_ITERATIONS=10 REQUEST_TIMEOUT_MS=30000 MAX_PAYLOAD_SIZE=1048576 FEATURE_X_ENABLED=false npm run dev")
-=======
-SERVER_PID=$(run_with_ato "$LOG_DIR/server.log" "cd server && PORT=\"$SERVER_PORT\" RUNNER_URL=\"http://localhost:$RUNNER_PORT\" CORS_ORIGIN=\"$cors_origin\" SERVER_PUBLIC_URL=\"$server_public\" npm run dev")
->>>>>>> 2402ca3 (fix: update ToolCall interface to OpenAI format and fix build issues)
+SERVER_PID=$(run_with_ato "$LOG_DIR/server.log" "cd server && PORT=\"$SERVER_PORT\" RUNNER_URL=\"http://localhost:$RUNNER_PORT\" CORS_ORIGIN=\"$cors_origin\" SERVER_PUBLIC_URL=\"$server_public\" MAX_ITERATIONS=10 REQUEST_TIMEOUT_MS=30000 MAX_PAYLOAD_SIZE=1048576 FEATURE_X_ENABLED=false npm run dev")
 sleep 0.2
 
 echo "Starting UI (logs/ui.log)..."

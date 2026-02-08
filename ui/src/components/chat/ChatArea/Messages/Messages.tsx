@@ -105,7 +105,6 @@ const AgentMessageWrapper = ({ message }: MessageWrapperProps) => {
           </Tooltip>
 
           <div className="flex flex-wrap gap-2">
-<<<<<<< HEAD
             {message.tool_calls.map((toolCall, index) => {
               const key =
                 toolCall.tool_call_id ||
@@ -114,17 +113,6 @@ const AgentMessageWrapper = ({ message }: MessageWrapperProps) => {
               const name = toolCall.tool_name || toolCall.function?.name || 'tool'
               return <ToolComponent key={key} name={name} />
             })}
-=======
-            {message.tool_calls.map((toolCall, index) => (
-              <ToolComponent
-                key={
-                  toolCall.id ||
-                  `${toolCall.function?.name || 'unknown'}-${index}`
-                }
-                tools={toolCall}
-              />
-            ))}
->>>>>>> 2402ca3 (fix: update ToolCall interface to OpenAI format and fix build issues)
           </div>
         </div>
       )}
@@ -154,11 +142,7 @@ const Reasonings: FC<ReasoningProps> = ({ reasoning }) => (
 
 const ToolComponent = memo(({ name }: { name: string }) => (
   <div className="cursor-default rounded-full bg-accent px-2 py-1.5 text-xs">
-<<<<<<< HEAD
     <p className="font-dmmono uppercase text-primary/80">{name}</p>
-=======
-    <p className="font-dmmono uppercase text-primary/80">{tools.function?.name || 'Unknown Tool'}</p>
->>>>>>> 2402ca3 (fix: update ToolCall interface to OpenAI format and fix build issues)
   </div>
 ))
 ToolComponent.displayName = 'ToolComponent'

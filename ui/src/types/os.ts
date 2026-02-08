@@ -1,5 +1,4 @@
 export interface ToolCall {
-<<<<<<< HEAD
   role?: 'user' | 'tool' | 'system' | 'assistant'
   content?: string | null
   tool_call_id?: string
@@ -17,14 +16,6 @@ export interface ToolCall {
   }
   id?: string
   type?: string
-=======
-  function: {
-    arguments: string
-    name: string
-  }
-  id: string
-  type: string
->>>>>>> 2402ca3 (fix: update ToolCall interface to OpenAI format and fix build issues)
 }
 
 export interface ReasoningSteps {
