@@ -1,5 +1,4 @@
 
-import { Request, Response, Application } from 'express';
 import { Store } from '../storage.js';
 import { getEmbedding } from '../llm.js';
 import { z } from 'zod';
@@ -14,9 +13,9 @@ const searchSchema = z.object({
   limit: z.number().optional().default(5)
 });
 
-export function registerKnowledgeRoutes(app: Application, store: Store) {
+export function registerKnowledgeRoutes(app: any, store: Store) {
   // Add document
-  app.post('/knowledge/documents', async (req: Request, res: Response) => {
+  app.post('/knowledge/documents', async (req: any, res: any) => {
     const result = addDocSchema.safeParse(req.body);
     if (!result.success) {
       res.status(400).json({ error: 'Invalid input', details: result.error.errors });
@@ -30,7 +29,7 @@ export function registerKnowledgeRoutes(app: Application, store: Store) {
       const docId = await store.addKnowledgeDocument(title, content);
 
       // 2. Chunk content (simple splitting by newline or length for MVP)
-      const chunks = content.split('\n\n').filter(c => c.trim().length > 0);
+      const chunks = content.split('\n\n').filter((c: string) => c.trim().length > 0);
 
       // 3. Embed and save chunks
       for (const chunk of chunks) {
@@ -47,7 +46,7 @@ export function registerKnowledgeRoutes(app: Application, store: Store) {
   });
 
   // Search
-  app.post('/knowledge/search', async (req: Request, res: Response) => {
+  app.post('/knowledge/search', async (req: any, res: any) => {
     const result = searchSchema.safeParse(req.body);
     if (!result.success) {
       res.status(400).json({ error: 'Invalid input', details: result.error.errors });

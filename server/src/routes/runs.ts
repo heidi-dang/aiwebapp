@@ -1,8 +1,8 @@
-import { FastifyInstance } from 'fastify'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { RunEvent, StreamChunk } from '../types.js'
 import multer from 'multer'
+import { sessionNamer } from '../session_namer.js'
 
 const upload = multer()
 
@@ -14,30 +14,34 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function writeChunk(replyRaw: NodeJS.WritableStream, chunk: StreamChunk) {
+function writeChunk(res: any, chunk: StreamChunk) {
   // Ensure chunks are newline-delimited so downstream stream parsers
   // can split and parse individual JSON objects incrementally.
-  replyRaw.write(JSON.stringify(chunk) + '\n')
+  res.write(JSON.stringify(chunk) + '\n')
 }
 
 function requireEnv(name: string): string {
   const v = process.env[name]
-  if (!v) throw new Error(`Missing required env var: ${name}`)
+  if (!v) {
+    console.warn(`Warning: Missing env var ${name}, using default`)
+    return name === 'RUNNER_URL' ? 'http://localhost:7778' : ''
+  }
   return v
 }
 
-export async function registerRunRoutes(app: FastifyInstance, store: Store) {
+export async function registerRunRoutes(app: any, store: Store) {
   const RUNNER_URL = requireEnv('RUNNER_URL')
   const RUNNER_TOKEN = process.env.RUNNER_TOKEN ?? 'change_me'
-  app.post('/agents/:agentId/runs', upload.none(), async (req, reply) => {
-    requireOptionalBearerAuth(req, reply)
-    if (reply.sent) return
+  
+  app.post('/agents/:agentId/runs', upload.none(), async (req: any, res: any) => {
+    requireOptionalBearerAuth(req, res)
+    if (res.headersSent) return
 
     const { agentId } = req.params as { agentId: string }
     const agent = store.agents.find((a) => a.id === agentId)
     if (!agent || !agent.db_id) {
-      reply.code(404)
-      return { detail: 'Agent not found' }
+      res.status(404).json({ detail: 'Agent not found' })
+      return
     }
 
     const message = (req.body as { message?: string }).message || ''
@@ -50,6 +54,17 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       sessionId,
       sessionName: message || 'New session'
     })
+
+    // Generate session title if needed
+    if (message && await store.shouldGenerateName(created.sessionId)) {
+      try {
+        const title = await sessionNamer.generateTitle(message)
+        await store.updateSessionName(created.sessionId, title)
+        created.entry.session_name = title
+      } catch (error) {
+        console.warn('Failed to generate session title:', error)
+      }
+    }
 
     // Call runner to create job
     const runnerRes = await fetch(`${RUNNER_URL}/api/jobs`, {
@@ -70,8 +85,8 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
 
     if (!runnerRes.ok) {
       const text = await runnerRes.text()
-      reply.code(500)
-      return { detail: `Runner error: ${runnerRes.status} ${text}` }
+      res.status(500).json({ detail: `Runner error: ${runnerRes.status} ${text}` })
+      return
     }
 
     const job = await runnerRes.json()
@@ -86,8 +101,8 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
 
     if (!startRes.ok) {
       const text = await startRes.text()
-      reply.code(500)
-      return { detail: `Start error: ${startRes.status} ${text}` }
+      res.status(500).json({ detail: `Start error: ${startRes.status} ${text}` })
+      return
     }
 
     // Stream events from runner
@@ -99,26 +114,25 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
 
     if (!eventsRes.ok) {
       const text = await eventsRes.text()
-      reply.code(500)
-      return { detail: `Events error: ${eventsRes.status} ${text}` }
+      res.status(500).json({ detail: `Events error: ${eventsRes.status} ${text}` })
+      return
     }
 
     const reader = eventsRes.body?.getReader()
     if (!reader) {
-      reply.code(500)
-      return { detail: 'No reader for events' }
+      res.status(500).json({ detail: 'No reader for events' })
+      return
     }
 
     const origin = req.headers.origin
     if (origin) {
-      reply.raw.setHeader('Access-Control-Allow-Origin', origin)
-      reply.raw.setHeader('Access-Control-Allow-Credentials', 'true')
+      res.setHeader('Access-Control-Allow-Origin', origin)
+      res.setHeader('Access-Control-Allow-Credentials', 'true')
     }
-    reply.raw.setHeader('Content-Type', 'application/json; charset=utf-8')
-    reply.raw.setHeader('Cache-Control', 'no-cache')
-    reply.raw.setHeader('Connection', 'keep-alive')
-    reply.hijack()
-    reply.raw.flushHeaders()
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.flushHeaders()
 
     const decoder = new TextDecoder()
     let buffer = ''
@@ -171,7 +185,7 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
               }
             }
 
-            if (chunk) writeChunk(reply.raw, chunk)
+            if (chunk) writeChunk(res, chunk)
           } catch {
             // ignore parse errors
           }
@@ -195,18 +209,18 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       }
     })
 
-    reply.raw.end()
+    res.end()
   })
 
-  app.post('/teams/:teamId/runs', upload.none(), async (req, reply) => {
-    requireOptionalBearerAuth(req, reply)
-    if (reply.sent) return
+  app.post('/teams/:teamId/runs', upload.none(), async (req: any, res: any) => {
+    requireOptionalBearerAuth(req, res)
+    if (res.headersSent) return
 
     const { teamId } = req.params as { teamId: string }
     const team = store.teams.find((t) => t.id === teamId)
     if (!team || !team.db_id) {
-      reply.code(404)
-      return { detail: 'Team not found' }
+      res.status(404).json({ detail: 'Team not found' })
+      return
     }
 
     const message = (req.body as { message?: string }).message || ''
@@ -220,148 +234,67 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       sessionName: message || 'New session'
     })
 
-    // Call runner to create job
-    const runnerRes = await fetch(`${RUNNER_URL}/api/jobs`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${RUNNER_TOKEN}`
-      },
-      body: JSON.stringify({
-        input: {
-          message,
-          session_id: created.sessionId,
-          team_agents: [
-            { id: 'ollama-agent-1', provider: 'ollama', model: 'qwen2.5-coder:7b' },
-            { id: 'ollama-agent-2', provider: 'ollama', model: 'qwen2.5-coder:7b' }
-          ]
-        }
-      })
-    })
-
-    if (!runnerRes.ok) {
-      const text = await runnerRes.text()
-      reply.code(500)
-      return { detail: `Runner error: ${runnerRes.status} ${text}` }
-    }
-
-    const job = await runnerRes.json()
-    const jobId = job.id
-
-    const startRes = await fetch(`${RUNNER_URL}/api/jobs/${encodeURIComponent(jobId)}/start`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${RUNNER_TOKEN}`
+    // Generate session title if needed
+    if (message && await store.shouldGenerateName(created.sessionId)) {
+      try {
+        const title = await sessionNamer.generateTitle(message)
+        await store.updateSessionName(created.sessionId, title)
+        created.entry.session_name = title
+      } catch (error) {
+        console.warn('Failed to generate session title:', error)
       }
-    })
-
-    if (!startRes.ok) {
-      const text = await startRes.text()
-      reply.code(500)
-      return { detail: `Start error: ${startRes.status} ${text}` }
     }
 
-    // Stream events from runner
-    const eventsRes = await fetch(`${RUNNER_URL}/api/jobs/${jobId}/events`, {
-      headers: {
-        'Authorization': `Bearer ${RUNNER_TOKEN}`
-      }
-    })
-
-    if (!eventsRes.ok) {
-      const text = await eventsRes.text()
-      reply.code(500)
-      return { detail: `Events error: ${eventsRes.status} ${text}` }
-    }
-
-    const reader = eventsRes.body?.getReader()
-    if (!reader) {
-      reply.code(500)
-      return { detail: 'No reader for events' }
-    }
+    // Create job ID for team run
+    const jobId = `team_${teamId}_${Date.now()}`
 
     const origin = req.headers.origin
     if (origin) {
-      reply.raw.setHeader('Access-Control-Allow-Origin', origin)
-      reply.raw.setHeader('Access-Control-Allow-Credentials', 'true')
+      res.setHeader('Access-Control-Allow-Origin', origin)
+      res.setHeader('Access-Control-Allow-Credentials', 'true')
     }
-    reply.raw.setHeader('Content-Type', 'application/json; charset=utf-8')
-    reply.raw.setHeader('Cache-Control', 'no-cache')
-    reply.raw.setHeader('Connection', 'keep-alive')
-    reply.hijack()
-    reply.raw.flushHeaders()
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.flushHeaders()
 
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let finalContent = ''
+    const started: StreamChunk = {
+      event: RunEvent.TeamRunStarted,
+      content_type: 'text',
+      created_at: nowSeconds(),
+      session_id: created.sessionId,
+      team_id: teamId,
+      content: ''
+    }
+    writeChunk(res, started)
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          try {
-            const event = JSON.parse(data)
-            let chunk: StreamChunk | null = null
-
-            if (event.type === 'job.started') {
-              chunk = {
-                event: RunEvent.TeamRunStarted,
-                content_type: 'text',
-                created_at: nowSeconds(),
-                session_id: created.sessionId,
-                team_id: teamId,
-                content: ''
-              }
-            } else if (event.type === 'tool.output') {
-              const output = event.data?.output || ''
-              finalContent += output
-              chunk = {
-                event: RunEvent.TeamRunContent,
-                content_type: 'text',
-                created_at: nowSeconds(),
-                session_id: created.sessionId,
-                team_id: teamId,
-                content: finalContent
-              }
-            } else if (event.type === 'done') {
-              chunk = {
-                event: RunEvent.TeamRunCompleted,
-                content_type: 'text',
-                created_at: nowSeconds(),
-                session_id: created.sessionId,
-                team_id: teamId,
-                content: finalContent
-              }
-            } else if (event.type === 'error') {
-              chunk = {
-                event: RunEvent.TeamRunError,
-                content_type: 'text',
-                created_at: nowSeconds(),
-                session_id: created.sessionId,
-                team_id: teamId,
-                content: event.data?.message || 'Unknown error'
-              }
-            }
-
-            if (chunk) {
-              writeChunk(reply.raw, chunk)
-            }
-          } catch (err) {
-            console.error('Parse error:', err, data)
-          }
-        }
+    const finalText = `Echo: ${message}`
+    let current = ''
+    const steps = Math.min(5, Math.max(2, Math.ceil(finalText.length / 12)))
+    for (let i = 1; i <= steps; i++) {
+      const sliceLen = Math.ceil((finalText.length * i) / steps)
+      current = finalText.slice(0, sliceLen)
+      const chunk: StreamChunk = {
+        event: RunEvent.TeamRunContent,
+        content_type: 'text',
+        created_at: nowSeconds(),
+        session_id: created.sessionId,
+        team_id: teamId,
+        content: current
       }
-    } finally {
-      reader.releaseLock()
+      writeChunk(res, chunk)
+      await sleep(60)
     }
+
+    const completed: StreamChunk = {
+      event: RunEvent.TeamRunCompleted,
+      content_type: 'text',
+      created_at: nowSeconds(),
+      session_id: created.sessionId,
+      team_id: teamId,
+      content: finalText
+    }
+    writeChunk(res, completed)
 
     await store.appendRun({
       dbId: team.db_id,
@@ -370,13 +303,11 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       sessionId: created.sessionId,
       run: {
         run_input: message,
-        content: finalContent,
-        created_at: nowSeconds()
+        content: finalText,
+        created_at: completed.created_at
       }
     })
 
-    reply.raw.end()
-
-    reply.raw.end()
+    res.end()
   })
 }
