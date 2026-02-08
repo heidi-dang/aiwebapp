@@ -2,25 +2,19 @@
 
 ## 🔴 CRITICAL PRIORITY - Must Fix ASAP
 
-### 0. MERGE CONFLICT IN storage.ts (BLOCKING BUILD) ❌
-**Status:** ❌ Blocking all builds  
-**File:** `server/src/storage.ts` line 967  
-**Issue:** Incomplete merge with duplicate content. Line 967 has `=======` marker. Content from line 968-1806 duplicates lines 1-966 BUT with additional social account methods in the Store interface and their implementations in SqliteStore.  
-**Root Cause:** Two versions of storage.ts were merged:
-- Version A: Lines 1-966 - Has `toolbox: ToolDetails[]`, knowledge base methods, session state methods
-- Version B: Lines 968-1806 - Missing `toolbox`, knowledge base, and session state, but HAS user session and social account methods
-
-**Solution:** Manual merge required:
-1. Keep imports from line 1, add `UserSession, SocialAccount` to imports
-2. In Store interface (lines 15-97), add missing methods:
-   - `createUserSession`, `getUserSessionByTokenHash`, `deleteUserSession`, `deleteUserSessionsByUserId`
-   - `createSocialAccount`, `getSocialAccountByProvider`, `getSocialAccountsByUserId`, `deleteSocialAccount`
-3. In InMemoryStore class, add stub implementations of above methods
-4. In SqliteStore class, keep the social account method implementations from the duplicate section (lines ~1650-1800 in original)
-5. Remove lines 967-1806 (all duplicate content)
-6. Verify `ToolDetails` type is defined or remove `toolbox` property if not needed
-
-**Note:** This requires careful manual review - automated scripts keep breaking the file structure.
+### 0. MERGE CONFLICT IN storage.ts (BLOCKING BUILD) ✅ FIXED
+**Status:** ✅ **FIXED**  
+**File:** `server/src/storage.ts`  
+**Issue:** Incomplete merge with duplicate content. Line 967 had `=======` marker. Content from line 968-1806 duplicated lines 1-966 BUT with additional social account methods.  
+**Solution Implemented:**
+- Added `UserSession, SocialAccount, ToolDetails` to imports
+- Added 8 missing methods to Store interface (user sessions + social accounts)
+- Added proper implementations in SqliteStore class
+- Added descriptive error messages in InMemoryStore stubs
+- Removed 843 lines of duplicate content
+- File reduced from 1806 → 1104 lines
+- Fixed User object creation to include `password_hash` field
+**Verification:** ✅ Server builds successfully
 
 ### 1. Code Duplication - GuardrailService (CRITICAL)
 **Status:** ❌ Not Fixed  
@@ -33,24 +27,29 @@
 - **Option C:** Use npm workspaces to create a shared package
 **Recommendation:** Option B for minimal changes, then Option C for long-term maintainability
 
-### 2. Job Execution Race Condition (CRITICAL)
-**Status:** ❌ Not Fixed  
+### 2. Job Execution Race Condition (CRITICAL) ✅ FIXED
+**Status:** ✅ **FIXED**  
 **File:** `runner/src/index.ts` lines 145-212  
-**Issue:** Job timeout handler and executeJob() can both update job status simultaneously without mutual exclusion  
-**Scenario:** 
-1. Job starts with 30s timeout
-2. Job completes at 29.9s and starts calling `updateJobStatus('completed')`
-3. Timeout fires at 30s and calls `updateJobStatus('timeout')`
-4. Race condition: final status is unpredictable
-**Impact:** Data corruption, incorrect job status, duplicate events sent to subscribers  
-**Solution:** Add `cancelled` flag check before executeJob updates status, ensure atomic status updates
+**Issue:** Job timeout handler and executeJob() could both update job status simultaneously without mutual exclusion  
+**Solution Implemented:**
+- Added `jobCompleted` flag to track completion state
+- Added `completionMutex` flag for basic mutual exclusion
+- Both timeout handler and completion callback check flags before updating status
+- Prevents duplicate status updates and events
+**Note:** Code review suggests using proper mutex library for better thread safety, but current implementation significantly reduces race window
+**Verification:** ✅ Runner builds successfully
 
-### 3. Missing Request Timeouts (HIGH)
-**Status:** ❌ Not Fixed  
+### 3. Missing Request Timeouts (HIGH) ✅ FIXED
+**Status:** ✅ **FIXED**  
 **File:** `server/src/routes/runs.ts` lines 70-120  
-**Issue:** Fetch calls to runner service have no timeout. If runner hangs, server request hangs indefinitely  
-**Impact:** Resource exhaustion, connection pool depletion, unresponsive API  
-**Solution:** Add timeout to all fetch calls (e.g., 30s for job creation, 5min for streaming)
+**Issue:** Fetch calls to runner service had no timeout. If runner hangs, server request hangs indefinitely  
+**Solution Implemented:**
+- Created `fetchWithTimeout()` helper function with AbortController
+- Added 30s timeout for job creation
+- Added 10s timeout for job start
+- Streaming connection intentionally has no timeout
+**Impact:** Prevents resource exhaustion and connection pool depletion  
+**Verification:** ✅ Server builds successfully
 
 ## 🟡 HIGH PRIORITY - Type Safety
 

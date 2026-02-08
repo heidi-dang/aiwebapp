@@ -347,7 +347,16 @@ export class InMemoryStore implements Store {
     const createdAt = nowSeconds();
     const role = (await this.getUserCount()) === 0 ? 'admin' : 'user';
     const id = (this.users.length + 1).toString();
-    const user: User = { id, email, name, role, email_verified: false, created_at: createdAt, updated_at: createdAt };
+    const user: User = { 
+      id, 
+      email, 
+      name,
+      password_hash: hashedPassword,
+      email_verified: false,
+      role, 
+      created_at: createdAt,
+      updated_at: createdAt
+    };
     this.users.push(user);
     return user;
   }
