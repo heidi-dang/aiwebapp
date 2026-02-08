@@ -39,7 +39,7 @@ export function AgentBaseDirSelector({ agentId }: { agentId: string }) {
 
   return (
     <div className="flex w-full items-center gap-2 rounded-xl border border-primary/15 bg-accent p-2 text-xs">
-      <Icon type="folder" size="xs" className="shrink-0 text-muted" />
+      <Icon type="sheet" size="xs" className="shrink-0 text-muted" />
       {isEditing ? (
         <>
           <Input
@@ -49,17 +49,17 @@ export function AgentBaseDirSelector({ agentId }: { agentId: string }) {
             className="h-7 w-full rounded-md border border-primary/15 bg-background-secondary px-2 text-xs"
             autoFocus
           />
-          <Button onClick={handleSave} size="xs" className="h-7 rounded-md">
+          <Button onClick={handleSave} size="sm" className="h-7 rounded-md">
             Save
           </Button>
-          <Button onClick={handleCancel} variant="ghost" size="xs" className="h-7 rounded-md">
+          <Button onClick={handleCancel} variant="ghost" size="sm" className="h-7 rounded-md">
             Cancel
           </Button>
         </>
       ) : (
         <>
           <span className="flex-1 truncate text-muted">{currentBaseDir || 'No folder assigned'}</span>
-          <Button onClick={() => setIsEditing(true)} variant="ghost" size="xs" className="h-7 rounded-md">
+          <Button onClick={() => setIsEditing(true)} variant="ghost" size="sm" className="h-7 rounded-md">
             <Icon type="edit" size="xxs" />
           </Button>
         </>

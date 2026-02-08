@@ -31,6 +31,7 @@ const AgentMessage = memo(({ message }: MessageProps) => {
       </p>
     )
   } else if (runnerJobId) {
+    // In chat mode we should not show RunCards or plan/tools — show plain content instead
     if (mode === 'agent') {
       messageContent = (
         <div className="flex w-full flex-col gap-4">

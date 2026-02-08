@@ -4,7 +4,7 @@ import { APIRoutes } from '@/api/routes'
 
 import useChatActions from '@/hooks/useChatActions'
 import { useStore } from '../store'
-import { RunEvent, RunResponseContent, type RunResponse } from '@/types/os'
+import { RunEvent, RunResponseContent, type RunResponse, ChatMessage } from '@/types/os'
 import { constructEndpointUrl } from '@/lib/constructEndpointUrl'
 import useAIResponseStream from './useAIResponseStream'
 import { ToolCall } from '@/types/os'
@@ -46,16 +46,8 @@ const useAIChatStreamHandler = () => {
    */
   const processToolCall = useCallback(
     (toolCall: ToolCall, prevToolCalls: ToolCall[] = []) => {
-      const toolCallId =
-        toolCall.tool_call_id || `${toolCall.tool_name}-${toolCall.created_at}`
-
       const existingToolCallIndex = prevToolCalls.findIndex(
-        (tc) =>
-          (tc.tool_call_id && tc.tool_call_id === toolCall.tool_call_id) ||
-          (!tc.tool_call_id &&
-            toolCall.tool_name &&
-            toolCall.created_at &&
-            `${tc.tool_name}-${tc.created_at}` === toolCallId)
+        (tc) => tc.id === toolCall.id
       )
       if (existingToolCallIndex >= 0) {
         const updatedToolCalls = [...prevToolCalls]
@@ -213,8 +205,8 @@ const useAIChatStreamHandler = () => {
                 if (lastMessage && lastMessage.role === 'agent') {
                   lastMessage.tool_calls = processChunkToolCalls(
                     chunk,
-                    lastMessage.tool_calls
-                  )
+                    lastMessage.tool_calls || []
+                  ) as typeof lastMessage.tool_calls
                 }
                 return newMessages
               })
@@ -279,10 +271,10 @@ const useAIChatStreamHandler = () => {
                   typeof chunk.response_audio?.transcript === 'string'
                 ) {
                   const transcript = chunk.response_audio.transcript
-                  lastMessage.response_audio = {
-                    ...lastMessage.response_audio,
+                  ;(lastMessage as ChatMessage).response_audio = {
+                    ...(lastMessage as ChatMessage).response_audio,
                     transcript:
-                      lastMessage.response_audio?.transcript + transcript
+                      (lastMessage as ChatMessage).response_audio?.transcript + transcript
                   }
                 }
                 return newMessages
