@@ -1,11 +1,10 @@
-import { Express } from 'express'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 
 // Mock tracing data - in real implementation this would come from runner
 
-export async function registerTracingRoutes(app: Express, store: Store) {
-  app.get('/tracing/current', async (req, res) => {
+export async function registerTracingRoutes(app: any, store: Store) {
+  app.get('/tracing/current', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -21,7 +20,7 @@ export async function registerTracingRoutes(app: Express, store: Store) {
     })
   })
 
-  app.post('/tracing/export', async (req, res) => {
+  app.post('/tracing/export', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -46,7 +45,7 @@ export async function registerTracingRoutes(app: Express, store: Store) {
     })
   })
 
-  app.post('/tracing/start', async (req, res) => {
+  app.post('/tracing/start', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -60,7 +59,7 @@ export async function registerTracingRoutes(app: Express, store: Store) {
     res.json({ success: true, message: 'Trace started', traceId })
   })
 
-  app.post('/tracing/end', async (req, res) => {
+  app.post('/tracing/end', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -77,7 +76,7 @@ export async function registerTracingRoutes(app: Express, store: Store) {
     })
   })
 
-  app.post('/tracing/span/start', async (req, res) => {
+  app.post('/tracing/span/start', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -91,7 +90,7 @@ export async function registerTracingRoutes(app: Express, store: Store) {
     res.json({ success: true, message: 'Span started', name })
   })
 
-  app.post('/tracing/span/end', async (req, res) => {
+  app.post('/tracing/span/end', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -99,7 +98,7 @@ export async function registerTracingRoutes(app: Express, store: Store) {
     res.json({ success: true, message: 'Span ended' })
   })
 
-  app.post('/tracing/event', async (req, res) => {
+  app.post('/tracing/event', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -113,7 +112,7 @@ export async function registerTracingRoutes(app: Express, store: Store) {
     res.json({ success: true, message: 'Event added', name })
   })
 
-  app.post('/tracing/status', async (req, res) => {
+  app.post('/tracing/status', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     

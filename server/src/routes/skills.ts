@@ -1,4 +1,3 @@
-import { Express } from 'express'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 
@@ -21,8 +20,8 @@ const mockSkills = [
   }
 ]
 
-export async function registerSkillsRoutes(app: Express, store: Store) {
-  app.get('/skills', async (req, res) => {
+export async function registerSkillsRoutes(app: any, store: Store) {
+  app.get('/skills', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -33,7 +32,7 @@ export async function registerSkillsRoutes(app: Express, store: Store) {
     })))
   })
 
-  app.get('/skills/:name', async (req, res) => {
+  app.get('/skills/:name', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     

@@ -142,16 +142,16 @@ run_with_ato() {
 }
 
 echo "Starting server (logs/server.log)..."
-SERVER_PID=$(run_with_ato "$LOG_DIR/server.log" "cd server && PORT=\"$SERVER_PORT\" RUNNER_URL=\"http://localhost:$RUNNER_PORT\" npm run dev")
+SERVER_PID=$(run_with_ato "$LOG_DIR/server.log" "cd server && PORT=\"$SERVER_PORT\" RUNNER_URL=\"http://localhost:$RUNNER_PORT\" MAX_ITERATIONS=10 REQUEST_TIMEOUT_MS=30000 MAX_PAYLOAD_SIZE=1048576 FEATURE_X_ENABLED=false npm run dev")
 sleep 0.2
 
 echo "Starting UI (logs/ui.log)..."
 # pass -p for Next
-UI_PID=$(run_with_ato "$LOG_DIR/ui.log" "cd ui && npm run dev")
+UI_PID=$(run_with_ato "$LOG_DIR/ui.log" "cd ui && MAX_ITERATIONS=10 REQUEST_TIMEOUT_MS=30000 MAX_PAYLOAD_SIZE=1048576 FEATURE_X_ENABLED=false npm run dev")
 sleep 0.2
 
 echo "Starting runner (logs/runner.log)..."
-RUNNER_PID=$(run_with_ato "$LOG_DIR/runner.log" "cd runner && PORT=\"$RUNNER_PORT\" RUNNER_TOKEN=\"$RUNNER_TOKEN\" AI_API_URL=\"$AI_API_URL\" BRIDGE_URL=\"$BRIDGE_URL\" BRIDGE_TOKEN=\"$BRIDGE_TOKEN\" npm run dev")
+RUNNER_PID=$(run_with_ato "$LOG_DIR/runner.log" "cd runner && PORT=\"$RUNNER_PORT\" RUNNER_TOKEN=\"$RUNNER_TOKEN\" AI_API_URL=\"$AI_API_URL\" BRIDGE_URL=\"$BRIDGE_URL\" BRIDGE_TOKEN=\"$BRIDGE_TOKEN\" MAX_ITERATIONS=10 REQUEST_TIMEOUT_MS=30000 MAX_PAYLOAD_SIZE=1048576 FEATURE_X_ENABLED=false npm run dev")
 sleep 0.2
 
 echo "PIDs: server=$SERVER_PID ui=$UI_PID runner=$RUNNER_PID"

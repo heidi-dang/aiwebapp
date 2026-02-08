@@ -14,6 +14,7 @@ import { promisify } from 'node:util'
 import type { RunnerEvent, RunnerEventType, JobStore, JobStatus } from './db.js'
 import { BridgeClient, createBridgeClientFromEnv } from './bridge.js'
 import { runCoderAgent } from './agent.js'
+import { createOllamaClientFromEnv } from './ollama.js'
 import type { FastifyReply } from 'fastify'
 
 const execAsync = promisify(execCb)
@@ -34,6 +35,7 @@ export interface JobInput {
   provider?: string
   model?: string
   session_id?: string
+  team_agents?: Array<{id: string, provider?: string, model?: string}>
 }
 
 type ToolCall = {
@@ -837,6 +839,94 @@ For specific actions like running commands or modifying files, ask the user to c
 }
 
 /**
+ * Execute a job with Ollama
+ */
+async function executeWithOllama(ctx: JobContext): Promise<void> {
+  const message = ctx.input.message ?? ctx.input.instruction ?? 'Hello'
+  const model = ctx.input.model || 'qwen2.5-coder:7b'
+
+  const ollama = createOllamaClientFromEnv()
+  if (!ollama) {
+    throw new Error('Ollama client not configured')
+  }
+
+  await emitEvent(ctx, 'tool.start', { tool: 'ollama', input: { model, message } })
+
+  try {
+    const response = await ollama.chat([
+      { role: 'user', content: message }
+    ])
+
+    await emitEvent(ctx, 'tool.output', {
+      tool: 'ollama',
+      output: response
+    })
+    await emitEvent(ctx, 'tool.end', { tool: 'ollama', success: true })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await emitEvent(ctx, 'tool.end', { tool: 'ollama', success: false, error: message })
+    throw err
+  }
+}
+
+/**
+ * Call LLM based on provider
+ */
+async function callLLM(ctx: JobContext, provider: string, model: string, messages: ChatMessage[]): Promise<string> {
+  if (provider === 'ollama') {
+    const ollama = createOllamaClientFromEnv()
+    if (!ollama) throw new Error('Ollama not configured')
+    const ollamaMessages = messages.map(m => ({
+      role: m.role === 'tool' ? 'assistant' : m.role,
+      content: m.content || ''
+    }))
+    return await ollama.chat(ollamaMessages)
+  } else if (provider === 'copilotapi') {
+    // For now, simple, but since executeWithCopilotApi is complex, perhaps duplicate or simplify
+    // To keep simple, assume only ollama for multi-agent
+    throw new Error('CopilotAPI not supported for multi-agent yet')
+  } else {
+    throw new Error(`Unknown provider: ${provider}`)
+  }
+}
+
+/**
+ * Execute multi-agent chat
+ */
+async function executeMultiAgent(ctx: JobContext): Promise<void> {
+  const teamAgents = ctx.input.team_agents!
+  const initialMessage = ctx.input.message ?? 'Hello'
+
+  let messages: ChatMessage[] = [
+    { role: 'user', content: initialMessage }
+  ]
+
+  for (const agent of teamAgents) {
+    const provider = agent.provider || 'ollama'
+    const model = agent.model || 'qwen2.5-coder:7b'
+
+    await emitEvent(ctx, 'tool.start', { tool: 'agent', agent: agent.id, input: { provider, model } })
+
+    try {
+      const response = await callLLM(ctx, provider, model, messages)
+
+      messages.push({ role: 'assistant', content: response, name: agent.id })
+
+      await emitEvent(ctx, 'tool.output', {
+        tool: 'agent',
+        agent: agent.id,
+        output: response
+      })
+      await emitEvent(ctx, 'tool.end', { tool: 'agent', agent: agent.id, success: true })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await emitEvent(ctx, 'tool.end', { tool: 'agent', agent: agent.id, success: false, error: msg })
+      // Continue to next agent
+    }
+  }
+}
+
+/**
  * Main job executor
  */
 export async function executeJob(
@@ -874,6 +964,12 @@ export async function executeJob(
     if (input.provider === 'copilotapi') {
       console.log(`[Runner] Using Copilot API for job ${jobId}`);
       await executeWithCopilotApi(ctx);
+    } else if (input.provider === 'ollama') {
+      console.log(`[Runner] Using Ollama for job ${jobId}`);
+      await executeWithOllama(ctx);
+    } else if (input.team_agents && input.team_agents.length > 0) {
+      console.log(`[Runner] Using multi-agent for job ${jobId}`);
+      await executeMultiAgent(ctx);
     } else if (bridge) {
       console.log(`[Runner] Using bridge client for job ${jobId}`);
       try {

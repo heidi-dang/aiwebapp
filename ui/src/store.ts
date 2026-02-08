@@ -50,8 +50,8 @@ interface Store {
   setAvailableModels: (models: string[]) => void
   mode: 'agent' | 'team'
   setMode: (mode: 'agent' | 'team') => void
-  provider: 'bridge' | 'copilotapi'
-  setProvider: (provider: 'bridge' | 'copilotapi') => void
+  provider: 'bridge' | 'copilotapi' | 'ollama'
+  setProvider: (provider: 'bridge' | 'copilotapi' | 'ollama') => void
   // System prompt for agents
   systemPromptMode: 'default' | 'strict' | 'custom'
   setSystemPromptMode: (mode: 'default' | 'strict' | 'custom') => void

@@ -1,4 +1,3 @@
-import { Express } from 'express'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { z } from 'zod'
@@ -12,15 +11,15 @@ const sessionStateSchema = z.object({
   state: z.record(z.any())
 })
 
-export async function registerSessionRoutes(app: Express, store: Store) {
-  app.get('/sessions', async (req, res) => {
+export async function registerSessionRoutes(app: any, store: Store) {
+  app.get('/sessions', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     const sessions = await store.listAllSessions()
     res.json(sessions)
   })
 
-  app.get('/sessions/:id', async (req, res) => {
+  app.get('/sessions/:id', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     const session = await store.getSession(req.params.id)
@@ -31,7 +30,7 @@ export async function registerSessionRoutes(app: Express, store: Store) {
     res.json(session)
   })
 
-  app.patch('/sessions/:id/rename', async (req, res) => {
+  app.patch('/sessions/:id/rename', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
 
@@ -51,7 +50,7 @@ export async function registerSessionRoutes(app: Express, store: Store) {
     res.json({ success: true, name: parsed.data.name })
   })
 
-  app.get('/sessions/:id/state', async (req, res) => {
+  app.get('/sessions/:id/state', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
 
@@ -65,7 +64,7 @@ export async function registerSessionRoutes(app: Express, store: Store) {
     res.json({ state: state || {} })
   })
 
-  app.patch('/sessions/:id/state', async (req, res) => {
+  app.patch('/sessions/:id/state', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
 
@@ -85,7 +84,7 @@ export async function registerSessionRoutes(app: Express, store: Store) {
     res.json({ success: true, state: parsed.data.state })
   })
 
-  app.get('/sessions/cache/stats', async (req, res) => {
+  app.get('/sessions/cache/stats', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     

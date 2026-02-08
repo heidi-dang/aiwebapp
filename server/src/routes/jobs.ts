@@ -1,14 +1,13 @@
-import { Express } from 'express'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { z } from 'zod'
 
-export async function registerJobRoutes(app: Express, store: Store) {
+export async function registerJobRoutes(app: any, store: Store) {
   // Store runner URL and token for job cancellation
   const RUNNER_URL = process.env.RUNNER_URL ?? 'http://localhost:7778'
   const RUNNER_TOKEN = process.env.RUNNER_TOKEN ?? 'change_me'
 
-  app.post('/jobs/:id/cancel', async (req, res) => {
+  app.post('/jobs/:id/cancel', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
 
@@ -45,7 +44,7 @@ export async function registerJobRoutes(app: Express, store: Store) {
     }
   })
 
-  app.post('/jobs/:id/approve', async (req, res) => {
+  app.post('/jobs/:id/approve', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
 
@@ -66,7 +65,7 @@ export async function registerJobRoutes(app: Express, store: Store) {
     res.json({ success: true, message: 'Tool call approved', tool: parsed.data.toolName })
   })
 
-  app.post('/jobs/:id/reject', async (req, res) => {
+  app.post('/jobs/:id/reject', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
 
@@ -87,7 +86,7 @@ export async function registerJobRoutes(app: Express, store: Store) {
     res.json({ success: true, message: 'Tool call rejected', tool: parsed.data.toolName })
   })
 
-  app.get('/jobs/:id/status', async (req, res) => {
+  app.get('/jobs/:id/status', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
 

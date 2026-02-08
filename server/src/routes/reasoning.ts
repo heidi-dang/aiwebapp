@@ -1,4 +1,3 @@
-import { Express } from 'express'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { z } from 'zod'
@@ -20,8 +19,8 @@ const reasoningRequestSchema = z.object({
   config: reasoningConfigSchema.optional()
 })
 
-export async function registerReasoningRoutes(app: Express, store: Store) {
-  app.get('/reasoning/config', async (req, res) => {
+export async function registerReasoningRoutes(app: any, store: Store) {
+  app.get('/reasoning/config', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -35,7 +34,7 @@ export async function registerReasoningRoutes(app: Express, store: Store) {
     })
   })
 
-  app.post('/reasoning/process', async (req, res) => {
+  app.post('/reasoning/process', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     
@@ -94,7 +93,7 @@ export async function registerReasoningRoutes(app: Express, store: Store) {
     }
   })
 
-  app.post('/reasoning/test', async (req, res) => {
+  app.post('/reasoning/test', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
     

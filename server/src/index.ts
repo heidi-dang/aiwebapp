@@ -24,7 +24,6 @@ import { registerSkillsRoutes } from './routes/skills.js';
 import { registerEvaluationRoutes } from './routes/evaluation.js';
 import { registerTracingRoutes } from './routes/tracing.js';
 import { registerReasoningRoutes } from './routes/reasoning.js';
-import { Response } from 'express-serve-static-core';
 
 const PORT = Number(process.env.PORT ?? 7777)
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000'
@@ -44,9 +43,7 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // Health route
-import { Request } from 'express';
-
-app.get('/health', (req: Request, res: Response) => {
+app.get('/health', (req: any, res: any) => {
   res.status(200).json({ status: 'ok' });
 });
 

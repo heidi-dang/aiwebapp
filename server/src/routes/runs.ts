@@ -1,4 +1,3 @@
-import { Express } from 'express'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { RunEvent, StreamChunk } from '../types.js'
@@ -30,11 +29,11 @@ function requireEnv(name: string): string {
   return v
 }
 
-export async function registerRunRoutes(app: Express, store: Store) {
+export async function registerRunRoutes(app: any, store: Store) {
   const RUNNER_URL = requireEnv('RUNNER_URL')
   const RUNNER_TOKEN = process.env.RUNNER_TOKEN ?? 'change_me'
   
-  app.post('/agents/:agentId/runs', upload.none(), async (req, res) => {
+  app.post('/agents/:agentId/runs', upload.none(), async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
 
@@ -213,7 +212,7 @@ export async function registerRunRoutes(app: Express, store: Store) {
     res.end()
   })
 
-  app.post('/teams/:teamId/runs', upload.none(), async (req, res) => {
+  app.post('/teams/:teamId/runs', upload.none(), async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
 
