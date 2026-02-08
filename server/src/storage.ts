@@ -1,8 +1,7 @@
-import { AgentDetails, EntityType, RunRecord, SessionEntry, TeamDetails, ToolDetails, User, ModelConfig } from './types.js'
+import { AgentDetails, EntityType, RunRecord, SessionEntry, TeamDetails, User, UserSession, SocialAccount, ModelConfig } from './types.js'
 
 import sqlite3 from 'sqlite3'
 import { open, type Database } from 'sqlite'
-import { sessionCache } from './session_cache.js'
 
 type SessionKey = string
 
@@ -14,17 +13,12 @@ interface StoredSession {
 export interface Store {
   readonly agents: AgentDetails[]
   readonly teams: TeamDetails[]
-  readonly toolbox: ToolDetails[]
 
   listSessions(args: {
     dbId: string
     entityType: EntityType
     componentId: string
   }): Promise<SessionEntry[]>
-
-  listAllSessions(): Promise<SessionEntry[]>
-
-  getSession(sessionId: string): Promise<SessionEntry | null>
 
   getOrCreateSession(args: {
     dbId: string
@@ -63,24 +57,23 @@ export interface Store {
   updateUserLastLogin(id: string): Promise<void>
   getUserCount(): Promise<number>
 
+  // User sessions
+  createUserSession(userId: string, tokenHash: string, expiresAt: number): Promise<UserSession>
+  getUserSessionByTokenHash(tokenHash: string): Promise<UserSession | null>
+  deleteUserSession(tokenHash: string): Promise<boolean>
+  deleteUserSessionsByUserId(userId: string): Promise<boolean>
+
+  // Social accounts
+  createSocialAccount(userId: string, provider: string, providerId: string, providerData?: string): Promise<SocialAccount>
+  getSocialAccountByProvider(provider: string, providerId: string): Promise<SocialAccount | null>
+  getSocialAccountsByUserId(userId: string): Promise<SocialAccount[]>
+  deleteSocialAccount(id: string): Promise<boolean>
+
   // Model configuration
   saveModelConfig(agentId: string, modelConfig: ModelConfig): Promise<void>
   getModelConfig(agentId: string): Promise<ModelConfig | null>
   validateModelConfig(modelConfig: ModelConfig): Promise<boolean>
   deleteModelConfig(agentId: string): Promise<void>
-
-  // Session naming
-  updateSessionName(sessionId: string, name: string): Promise<void>
-  shouldGenerateName(sessionId: string): Promise<boolean>
-
-  // Session state
-  getSessionState(sessionId: string): Promise<Record<string, any> | null>
-  updateSessionState(sessionId: string, state: Record<string, any>): Promise<void>
-
-  // Knowledge Base
-  addKnowledgeDocument(title: string, content: string): Promise<string>
-  addKnowledgeChunk(docId: string, content: string, embedding: number[]): Promise<void>
-  searchKnowledge(embedding: number[], limit: number): Promise<Array<{ docId: string; content: string; score: number }>>
 }
 
 function makeSessionKey(args: {
@@ -99,7 +92,6 @@ function nowSeconds(): number {
 export class InMemoryStore implements Store {
   readonly agents: AgentDetails[]
   readonly teams: TeamDetails[]
-  readonly toolbox: ToolDetails[]
 
   private readonly sessionsByListKey: Map<string, SessionEntry[]> = new Map()
   private readonly sessionsByKey: Map<SessionKey, StoredSession> = new Map()
@@ -124,25 +116,6 @@ export class InMemoryStore implements Store {
         model: { provider: 'mock', model: 'echo', name: 'Mock Echo' }
       }
     ]
-
-    this.toolbox = [
-      {
-        name: 'read_file',
-        description: 'Read a file from the workspace'
-      },
-      {
-        name: 'write_file',
-        description: 'Write a file to the workspace'
-      },
-      {
-        name: 'list_files',
-        description: 'List files in the workspace'
-      },
-      {
-        name: 'run_command',
-        description: 'Run a shell command'
-      }
-    ]
   }
 
   async listSessions(args: {
@@ -151,48 +124,7 @@ export class InMemoryStore implements Store {
     componentId: string
   }): Promise<SessionEntry[]> {
     const listKey = `${args.dbId}::${args.entityType}::${args.componentId}`
-    
-    // Check cache first
-    const cached = sessionCache.getSessionList(listKey)
-    if (cached) {
-      return cached
-    }
-    
-    const result = this.sessionsByListKey.get(listKey) ?? []
-    sessionCache.setSessionList(listKey, result)
-    return result
-  }
-
-  async listAllSessions(): Promise<SessionEntry[]> {
-    const cacheKey = 'all_sessions'
-    const cached = sessionCache.getSessionList(cacheKey)
-    if (cached) {
-      return cached
-    }
-    
-    const allSessions: SessionEntry[] = []
-    for (const session of this.sessionsByKey.values()) {
-      allSessions.push(session.entry)
-    }
-    const result = allSessions.sort((a, b) => b.created_at - a.created_at)
-    sessionCache.setSessionList(cacheKey, result)
-    return result
-  }
-
-  async getSession(sessionId: string): Promise<SessionEntry | null> {
-    // Check cache first
-    const cached = sessionCache.getSession(sessionId)
-    if (cached) {
-      return cached
-    }
-    
-    for (const session of this.sessionsByKey.values()) {
-      if (session.entry.session_id === sessionId) {
-        sessionCache.setSession(sessionId, session.entry)
-        return session.entry
-      }
-    }
-    return null
+    return this.sessionsByListKey.get(listKey) ?? []
   }
 
   async getOrCreateSession(args: {
@@ -218,9 +150,7 @@ export class InMemoryStore implements Store {
     const entry: SessionEntry = {
       session_id: sessionId,
       session_name: args.sessionName,
-      created_at: nowSeconds(),
-      entity_type: args.entityType,
-      component_id: args.componentId
+      created_at: nowSeconds()
     }
 
     this.sessionsByKey.set(key, { entry, runs: [] })
@@ -251,9 +181,7 @@ export class InMemoryStore implements Store {
       const entry: SessionEntry = {
         session_id: args.sessionId,
         session_name: 'Session',
-        created_at: nowSeconds(),
-        entity_type: args.entityType,
-        component_id: args.componentId
+        created_at: nowSeconds()
       }
       this.sessionsByKey.set(key, { entry, runs: [args.run] })
       return
@@ -261,10 +189,6 @@ export class InMemoryStore implements Store {
 
     session.runs.push(args.run)
     session.entry.updated_at = nowSeconds()
-    
-    // Invalidate cache
-    sessionCache.deleteSession(args.sessionId)
-    sessionCache.deleteSessionList('all_sessions')
   }
 
   async getRuns(args: {
@@ -311,13 +235,15 @@ export class InMemoryStore implements Store {
     const createdAt = nowSeconds();
     const role = (await this.getUserCount()) === 0 ? 'admin' : 'user';
     const id = (this.users.length + 1).toString();
-    const user: User = {
-      id,
-      email,
-      name,
-      role,
-      hashed_password: hashedPassword,
-      created_at: createdAt
+    const user: User = { 
+      id, 
+      email, 
+      name, 
+      password_hash: hashedPassword,
+      email_verified: false,
+      role, 
+      created_at: createdAt,
+      updated_at: createdAt
     };
     this.users.push(user);
     return user;
@@ -362,55 +288,86 @@ export class InMemoryStore implements Store {
     // No-op in InMemoryStore
   }
 
-  async updateSessionName(sessionId: string, name: string): Promise<void> {
-    for (const [key, session] of this.sessionsByKey.entries()) {
-      if (session.entry.session_id === sessionId) {
-        session.entry.session_name = name
-        session.entry.updated_at = nowSeconds()
-        break
-      }
+  // User sessions
+  async createUserSession(userId: string, tokenHash: string, expiresAt: number): Promise<UserSession> {
+    const id = (this.userSessions?.length || 0) + 1;
+    const session: UserSession = {
+      id: id.toString(),
+      user_id: userId,
+      token_hash: tokenHash,
+      expires_at: expiresAt,
+      created_at: nowSeconds()
+    };
+    if (!this.userSessions) this.userSessions = [];
+    this.userSessions.push(session);
+    return session;
+  }
+
+  async getUserSessionByTokenHash(tokenHash: string): Promise<UserSession | null> {
+    const session = this.userSessions?.find((s) => s.token_hash === tokenHash) || null
+    if (!session) return null
+    if (session.expires_at <= nowSeconds()) return null
+    return session
+  }
+
+  async deleteUserSession(tokenHash: string): Promise<boolean> {
+    if (!this.userSessions) return false;
+    const index = this.userSessions.findIndex(session => session.token_hash === tokenHash);
+    if (index >= 0) {
+      this.userSessions.splice(index, 1);
+      return true;
     }
-    
-    // Invalidate cache
-    sessionCache.deleteSession(sessionId)
-    sessionCache.deleteSessionList('all_sessions')
+    return false;
   }
 
-  async shouldGenerateName(sessionId: string): Promise<boolean> {
-    for (const session of this.sessionsByKey.values()) {
-      if (session.entry.session_id === sessionId) {
-        return session.entry.session_name === 'New Session' || session.entry.session_name === ''
-      }
+  async deleteUserSessionsByUserId(userId: string): Promise<boolean> {
+    if (!this.userSessions) return false;
+    const initialLength = this.userSessions.length;
+    this.userSessions = this.userSessions.filter(session => session.user_id !== userId);
+    return this.userSessions.length < initialLength;
+  }
+
+  // Social accounts
+  async createSocialAccount(userId: string, provider: string, providerId: string, providerData?: string): Promise<SocialAccount> {
+    const id = (this.socialAccounts?.length || 0) + 1;
+    const account: SocialAccount = {
+      id: id.toString(),
+      user_id: userId,
+      provider: provider as 'google' | 'github' | 'apple' | 'microsoft',
+      provider_id: providerId,
+      provider_data: providerData,
+      created_at: nowSeconds()
+    };
+    if (!this.socialAccounts) this.socialAccounts = [];
+    this.socialAccounts.push(account);
+    return account;
+  }
+
+  async getSocialAccountByProvider(provider: string, providerId: string): Promise<SocialAccount | null> {
+    return this.socialAccounts?.find(account => account.provider === provider && account.provider_id === providerId) || null;
+  }
+
+  async getSocialAccountsByUserId(userId: string): Promise<SocialAccount[]> {
+    return this.socialAccounts?.filter(account => account.user_id === userId) || [];
+  }
+
+  async deleteSocialAccount(id: string): Promise<boolean> {
+    if (!this.socialAccounts) return false;
+    const index = this.socialAccounts.findIndex(account => account.id === id);
+    if (index >= 0) {
+      this.socialAccounts.splice(index, 1);
+      return true;
     }
-    return false
+    return false;
   }
 
-  async addKnowledgeDocument(title: string, content: string): Promise<string> {
-    return 'mock_doc_id'
-  }
-
-  async addKnowledgeChunk(docId: string, content: string, embedding: number[]): Promise<void> {
-    // No-op
-  }
-
-  async searchKnowledge(embedding: number[], limit: number): Promise<Array<{ docId: string; content: string; score: number }>> {
-    return []
-  }
-
-  async getSessionState(sessionId: string): Promise<Record<string, any> | null> {
-    // InMemoryStore doesn't persist session state
-    return null
-  }
-
-  async updateSessionState(sessionId: string, state: Record<string, any>): Promise<void> {
-    // No-op in InMemoryStore
-  }
+  private userSessions: UserSession[] = [];
+  private socialAccounts: SocialAccount[] = [];
 }
 
 export class SqliteStore implements Store {
   readonly agents: AgentDetails[]
   readonly teams: TeamDetails[]
-  readonly toolbox: ToolDetails[]
 
   private readonly db: Database
 
@@ -432,25 +389,6 @@ export class SqliteStore implements Store {
         name: 'Echo Team',
         db_id: 'db_team_echo',
         model: { provider: 'mock', model: 'echo', name: 'Mock Echo' }
-      }
-    ]
-
-    this.toolbox = [
-      {
-        name: 'read_file',
-        description: 'Read a file from the workspace'
-      },
-      {
-        name: 'write_file',
-        description: 'Write a file to the workspace'
-      },
-      {
-        name: 'list_files',
-        description: 'List files in the workspace'
-      },
-      {
-        name: 'run_command',
-        description: 'Run a shell command'
       }
     ]
   }
@@ -490,40 +428,49 @@ export class SqliteStore implements Store {
         'CREATE TABLE IF NOT EXISTS users (',
         '  id INTEGER PRIMARY KEY AUTOINCREMENT,',
         '  email TEXT NOT NULL UNIQUE,',
-        '  name TEXT NOT NULL,',
-        '  hashed_password TEXT NOT NULL,',
-        '  role TEXT NOT NULL,',
+        '  password_hash TEXT,',
+        '  name TEXT,',
+        '  avatar_url TEXT,',
+        '  email_verified BOOLEAN DEFAULT FALSE,',
+        '  role TEXT NOT NULL DEFAULT "user",',
         '  created_at INTEGER NOT NULL,',
+        '  updated_at INTEGER NOT NULL,',
         '  last_login_at INTEGER',
         ');',
         'CREATE INDEX IF NOT EXISTS users_email_idx ON users (email);',
+        'CREATE TABLE IF NOT EXISTS user_sessions (',
+        '  id INTEGER PRIMARY KEY AUTOINCREMENT,',
+        '  user_id INTEGER NOT NULL,',
+        '  token_hash TEXT NOT NULL,',
+        '  expires_at INTEGER NOT NULL,',
+        '  created_at INTEGER NOT NULL,',
+        '  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE',
+        ');',
+        'CREATE INDEX IF NOT EXISTS user_sessions_token_idx ON user_sessions (token_hash);',
+        'CREATE INDEX IF NOT EXISTS user_sessions_user_idx ON user_sessions (user_id);',
+        'CREATE TABLE IF NOT EXISTS social_accounts (',
+        '  id INTEGER PRIMARY KEY AUTOINCREMENT,',
+        '  user_id INTEGER NOT NULL,',
+        '  provider TEXT NOT NULL,',
+        '  provider_id TEXT NOT NULL,',
+        '  provider_data TEXT,',
+        '  created_at INTEGER NOT NULL,',
+        '  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,',
+        '  UNIQUE(provider, provider_id)',
+        ');',
+        'CREATE INDEX IF NOT EXISTS social_accounts_provider_idx ON social_accounts (provider, provider_id);',
+        'CREATE INDEX IF NOT EXISTS social_accounts_user_idx ON social_accounts (user_id);',
         'CREATE TABLE IF NOT EXISTS agents (',
         '  id TEXT PRIMARY KEY,',
         '  name TEXT NOT NULL,',
         '  db_id TEXT NOT NULL,',
+        '  user_id INTEGER,',
         '  model_provider TEXT NOT NULL,',
         '  model_name TEXT NOT NULL,',
         '  model TEXT NOT NULL',
         ');',
         'CREATE INDEX IF NOT EXISTS agents_name_idx ON agents (name);',
-        'CREATE TABLE IF NOT EXISTS knowledge_documents (',
-        '  id TEXT PRIMARY KEY,',
-        '  title TEXT NOT NULL,',
-        '  content TEXT NOT NULL,',
-        '  created_at INTEGER NOT NULL',
-        ');',
-        'CREATE TABLE IF NOT EXISTS knowledge_chunks (',
-        '  id TEXT PRIMARY KEY,',
-        '  doc_id TEXT NOT NULL,',
-        '  content TEXT NOT NULL,',
-        '  embedding TEXT NOT NULL,',
-        '  FOREIGN KEY(doc_id) REFERENCES knowledge_documents(id) ON DELETE CASCADE',
-        ');',
-        'CREATE TABLE IF NOT EXISTS session_state (',
-        '  session_id TEXT PRIMARY KEY,',
-        '  state_data TEXT NOT NULL,',
-        '  updated_at INTEGER NOT NULL',
-        ');'
+        'CREATE INDEX IF NOT EXISTS agents_user_idx ON agents (user_id);'
       ].join('\n')
     )
 
@@ -535,14 +482,6 @@ export class SqliteStore implements Store {
     entityType: EntityType
     componentId: string
   }): Promise<SessionEntry[]> {
-    const listKey = `${args.dbId}::${args.entityType}::${args.componentId}`
-    
-    // Check cache first
-    const cached = sessionCache.getSessionList(listKey)
-    if (cached) {
-      return cached
-    }
-    
     const rows = await this.db.all<
       Array<{ session_id: string; session_name: string; created_at: number; updated_at: number | null }>
     >(
@@ -552,72 +491,12 @@ export class SqliteStore implements Store {
       args.componentId
     )
 
-    const result = rows.map((r: { session_id: string; session_name: string; created_at: number; updated_at: number | null }) => ({
+    return rows.map((r: { session_id: string; session_name: string; created_at: number; updated_at: number | null }) => ({
       session_id: r.session_id,
       session_name: r.session_name,
       created_at: r.created_at,
-      updated_at: r.updated_at || undefined,
-      entity_type: args.entityType,
-      component_id: args.componentId
+      ...(r.updated_at ? { updated_at: r.updated_at } : {})
     }))
-    
-    sessionCache.setSessionList(listKey, result)
-    return result
-  }
-
-  async listAllSessions(): Promise<SessionEntry[]> {
-    const cacheKey = 'all_sessions'
-    const cached = sessionCache.getSessionList(cacheKey)
-    if (cached) {
-      return cached
-    }
-    
-    const rows = await this.db.all<
-      Array<{ session_id: string; session_name: string; created_at: number; updated_at: number | null; entity_type: EntityType; component_id: string }>
-    >(
-      'SELECT session_id, session_name, created_at, updated_at, entity_type, component_id FROM sessions ORDER BY created_at DESC'
-    )
-
-    const result = rows.map((r) => ({
-      session_id: r.session_id,
-      session_name: r.session_name,
-      created_at: r.created_at,
-      updated_at: r.updated_at || undefined,
-      entity_type: r.entity_type,
-      component_id: r.component_id
-    }))
-    
-    sessionCache.setSessionList(cacheKey, result)
-    return result
-  }
-
-  async getSession(sessionId: string): Promise<SessionEntry | null> {
-    // Check cache first
-    const cached = sessionCache.getSession(sessionId)
-    if (cached) {
-      return cached
-    }
-    
-    const row = await this.db.get<
-      { session_id: string; session_name: string; created_at: number; updated_at: number | null; entity_type: EntityType; component_id: string } | undefined
-    >(
-      'SELECT session_id, session_name, created_at, updated_at, entity_type, component_id FROM sessions WHERE session_id = ?',
-      sessionId
-    )
-
-    if (!row) return null
-
-    const result = {
-      session_id: row.session_id,
-      session_name: row.session_name,
-      created_at: row.created_at,
-      updated_at: row.updated_at || undefined,
-      entity_type: row.entity_type,
-      component_id: row.component_id
-    }
-    
-    sessionCache.setSession(sessionId, result)
-    return result
   }
 
   async getOrCreateSession(args: {
@@ -646,9 +525,7 @@ export class SqliteStore implements Store {
           session_id: existing.session_id,
           session_name: existing.session_name,
           created_at: existing.created_at,
-          updated_at: existing.updated_at || undefined,
-          entity_type: args.entityType,
-          component_id: args.componentId
+          ...(existing.updated_at ? { updated_at: existing.updated_at } : {})
         }
       }
     }
@@ -656,9 +533,7 @@ export class SqliteStore implements Store {
     const entry: SessionEntry = {
       session_id: sessionId,
       session_name: args.sessionName,
-      created_at: nowSeconds(),
-      entity_type: args.entityType,
-      component_id: args.componentId
+      created_at: nowSeconds()
     }
 
     await this.db.run(
@@ -704,10 +579,6 @@ export class SqliteStore implements Store {
       args.componentId,
       args.sessionId
     )
-    
-    // Invalidate cache
-    sessionCache.deleteSession(args.sessionId)
-    sessionCache.deleteSessionList('all_sessions')
   }
 
   async getRuns(args: {
@@ -762,19 +633,24 @@ export class SqliteStore implements Store {
     const createdAt = nowSeconds()
     const role = (await this.getUserCount()) === 0 ? 'admin' : 'user'
     const result = await this.db.run(
-      `INSERT INTO users (email, name, hashed_password, role, created_at) VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO users (email, name, password_hash, role, created_at, updated_at, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       email,
       name,
       hashedPassword,
       role,
-      createdAt
+      createdAt,
+      createdAt,
+      false
     )
     return {
       id: result.lastID?.toString() || "0",
       email,
       name,
+      password_hash: hashedPassword,
+      email_verified: false,
       role,
-      created_at: createdAt
+      created_at: createdAt,
+      updated_at: createdAt
     }
   }
 
@@ -801,8 +677,14 @@ export class SqliteStore implements Store {
   async saveModelConfig(agentId: string, modelConfig: ModelConfig): Promise<void> {
     console.log('saveModelConfig called with:', { agentId, modelConfig });
     try {
-        const query = `INSERT INTO agents (id, name, model, provider, apiKey, db_id) VALUES (?, ?, ?, ?, ?, ?)`;
-        const params = [agentId, modelConfig.name, modelConfig.model, modelConfig.provider, modelConfig.apiKey, modelConfig.db_id];
+        const dbId = modelConfig.db_id ?? `db_${agentId}`
+        const query = `INSERT INTO agents (id, name, db_id, model_provider, model_name, model) VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            db_id=excluded.db_id,
+            model_provider=excluded.model_provider,
+            model_name=excluded.model_name,
+            model=excluded.model`;
+        const params = [agentId, agentId, dbId, modelConfig.provider, modelConfig.name, JSON.stringify(modelConfig)];
         console.log('Executing query:', query, 'with params:', params);
         await this.db.run(query, params);
         console.log('Query executed successfully');
@@ -814,11 +696,27 @@ export class SqliteStore implements Store {
 
   async getModelConfig(agentId: string): Promise<ModelConfig | null> {
     console.log(`Fetching model config for agentId: ${agentId}`);
-    const query = `SELECT model FROM agents WHERE id = ?`;
+    const query = `SELECT model_provider, model_name, model FROM agents WHERE id = ?`;
     console.log(`Executing query: ${query}`);
     const row = await this.db.get(query, agentId);
     console.log(`Fetched row:`, row);
-    return row ? JSON.parse(row.model) : null;
+    if (!row) return null
+    const modelValue = (row as any).model
+    if (typeof modelValue === 'string') {
+      try {
+        const parsed = JSON.parse(modelValue)
+        if (parsed && typeof parsed === 'object') return parsed as ModelConfig
+      } catch {
+        // fall through
+      }
+    }
+    const provider = (row as any).model_provider
+    const name = (row as any).model_name
+    const model = modelValue
+    if (typeof provider === 'string' && typeof name === 'string' && typeof model === 'string') {
+      return { provider, name, model }
+    }
+    return null
   }
 
   async validateModelConfig(modelConfig: ModelConfig): Promise<boolean> {
@@ -841,103 +739,95 @@ export class SqliteStore implements Store {
     console.log(`Delete result:`, result);
   }
 
-  async updateSessionName(sessionId: string, name: string): Promise<void> {
-    await this.db.run(
-      'UPDATE sessions SET session_name = ?, updated_at = ? WHERE session_id = ?',
-      name,
-      nowSeconds(),
-      sessionId
+  // User sessions
+  async createUserSession(userId: string, tokenHash: string, expiresAt: number): Promise<UserSession> {
+    const createdAt = nowSeconds()
+    const result = await this.db.run(
+      `INSERT INTO user_sessions (user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)`,
+      userId,
+      tokenHash,
+      expiresAt,
+      createdAt
     )
-    
-    // Invalidate cache
-    sessionCache.deleteSession(sessionId)
-    sessionCache.deleteSessionList('all_sessions')
-  }
-
-  async shouldGenerateName(sessionId: string): Promise<boolean> {
-    const row = await this.db.get<{ session_name: string }>(
-      'SELECT session_name FROM sessions WHERE session_id = ?',
-      sessionId
-    )
-    return !row || row.session_name === 'New Session' || row.session_name === ''
-  }
-
-  async getSessionState(sessionId: string): Promise<Record<string, any> | null> {
-    const row = await this.db.get<{ state_data: string }>(
-      'SELECT state_data FROM session_state WHERE session_id = ?',
-      sessionId
-    )
-    
-    if (!row) {
-      return null
-    }
-    
-    try {
-      return JSON.parse(row.state_data)
-    } catch (error) {
-      console.warn('Failed to parse session state:', error)
-      return null
+    return {
+      id: result.lastID?.toString() || "0",
+      user_id: userId,
+      token_hash: tokenHash,
+      expires_at: expiresAt,
+      created_at: createdAt
     }
   }
 
-  async updateSessionState(sessionId: string, state: Record<string, any>): Promise<void> {
-    const stateData = JSON.stringify(state)
-    const updatedAt = nowSeconds()
-    
-    await this.db.run(
-      'INSERT OR REPLACE INTO session_state (session_id, state_data, updated_at) VALUES (?, ?, ?)',
-      sessionId,
-      stateData,
-      updatedAt
+  async getUserSessionByTokenHash(tokenHash: string): Promise<UserSession | null> {
+    const row = await this.db.get<UserSession>(
+      `SELECT * FROM user_sessions WHERE token_hash = ? AND expires_at > ?`,
+      tokenHash,
+      nowSeconds()
     )
+    return row || null
   }
 
-  async addKnowledgeDocument(title: string, content: string): Promise<string> {
-    const id = `doc_${Date.now()}_${Math.random().toString(36).slice(2)}`
-    await this.db.run(
-      'INSERT INTO knowledge_documents (id, title, content, created_at) VALUES (?, ?, ?, ?)',
-      id, title, content, Math.floor(Date.now() / 1000)
+  async deleteUserSession(tokenHash: string): Promise<boolean> {
+    const result = await this.db.run(
+      `DELETE FROM user_sessions WHERE token_hash = ?`,
+      tokenHash
     )
-    return id
+    return (result.changes ?? 0) > 0
   }
 
-  async addKnowledgeChunk(docId: string, content: string, embedding: number[]): Promise<void> {
-    const id = `chunk_${Date.now()}_${Math.random().toString(36).slice(2)}`
-    await this.db.run(
-      'INSERT INTO knowledge_chunks (id, doc_id, content, embedding) VALUES (?, ?, ?, ?)',
-      id, docId, content, JSON.stringify(embedding)
+  async deleteUserSessionsByUserId(userId: string): Promise<boolean> {
+    const result = await this.db.run(
+      `DELETE FROM user_sessions WHERE user_id = ?`,
+      userId
     )
+    return (result.changes ?? 0) > 0
   }
 
-  async searchKnowledge(embedding: number[], limit: number): Promise<Array<{ docId: string; content: string; score: number }>> {
-    // Fetch all chunks (inefficient for large data, but MVP)
-    const chunks = await this.db.all<{ doc_id: string; content: string; embedding: string }[]>(
-      'SELECT doc_id, content, embedding FROM knowledge_chunks'
+  // Social accounts
+  async createSocialAccount(userId: string, provider: string, providerId: string, providerData?: string): Promise<SocialAccount> {
+    const createdAt = nowSeconds()
+    const result = await this.db.run(
+      `INSERT INTO social_accounts (user_id, provider, provider_id, provider_data, created_at) VALUES (?, ?, ?, ?, ?)`,
+      userId,
+      provider,
+      providerId,
+      providerData,
+      createdAt
     )
-
-    const results = chunks.map(chunk => {
-      const chunkEmbedding = JSON.parse(chunk.embedding) as number[]
-      const score = cosineSimilarity(embedding, chunkEmbedding)
-      return { docId: chunk.doc_id, content: chunk.content, score }
-    })
-
-    // Sort by score descending
-    results.sort((a: { score: number }, b: { score: number }) => b.score - a.score)
-
-    return results.slice(0, limit)
+    return {
+      id: result.lastID?.toString() || "0",
+      user_id: userId,
+      provider: provider as 'google' | 'github' | 'apple' | 'microsoft',
+      provider_id: providerId,
+      provider_data: providerData,
+      created_at: createdAt
+    }
   }
-}
 
-function cosineSimilarity(a: number[], b: number[]): number {
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
+  async getSocialAccountByProvider(provider: string, providerId: string): Promise<SocialAccount | null> {
+    const row = await this.db.get<SocialAccount>(
+      `SELECT * FROM social_accounts WHERE provider = ? AND provider_id = ?`,
+      provider,
+      providerId
+    )
+    return row || null
   }
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+
+  async getSocialAccountsByUserId(userId: string): Promise<SocialAccount[]> {
+    const rows = await this.db.all<SocialAccount[]>(
+      `SELECT * FROM social_accounts WHERE user_id = ? ORDER BY created_at DESC`,
+      userId
+    )
+    return rows || []
+  }
+
+  async deleteSocialAccount(id: string): Promise<boolean> {
+    const result = await this.db.run(
+      `DELETE FROM social_accounts WHERE id = ?`,
+      id
+    )
+    return (result.changes ?? 0) > 0
+  }
 }
 
 function safeJsonParse(value: string): unknown {

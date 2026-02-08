@@ -5,7 +5,7 @@
 import fs from 'fs';
 import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
-import glob from 'glob';
+import { globSync } from 'glob';
 import path from 'path';
 const exec = promisify(execCb);
 
@@ -66,7 +66,7 @@ async function writeFileCmd(p, text) {
 
 async function listFilesCmd(pattern) {
   try {
-    const files = glob.sync(pattern, { cwd: process.cwd() });
+    const files = globSync(pattern, { cwd: process.cwd() });
     for (const f of files) console.log(f);
     return 0;
   } catch (err) {
@@ -88,18 +88,37 @@ async function listDirCmd(p) {
 
 async function grepSearchCmd(query, includePattern) {
   try {
-    let cmd = `grep -R -n "${query.replace(/"/g, '\\"')}" . | head -n 200`;
-    if (includePattern) cmd = `grep -R -n --include="${includePattern}" "${query.replace(/"/g, '\\"')}" . | head -n 200`;
-    const { stdout } = await exec(cmd, { maxBuffer: 2 * 1024 * 1024 }); // 2MB buffer
-    console.log(stdout);
+    if (!query) {
+      console.error('grep-search error: missing query');
+      return 2;
+    }
+
+    // Avoid shelling out (command injection risk). Do a simple text search in Node.
+    const files = includePattern ? globSync(includePattern, { cwd: process.cwd(), nodir: true }) : globSync('**/*', { cwd: process.cwd(), nodir: true })
+    let printed = 0
+    for (const rel of files) {
+      if (printed >= 200) break
+      if (rel.includes('node_modules') || rel.includes('.git') || rel.includes('dist') || rel.includes('.next')) continue
+      const full = path.join(process.cwd(), rel)
+      let text = ''
+      try {
+        text = await fs.promises.readFile(full, 'utf8')
+      } catch {
+        continue
+      }
+
+      const lines = text.split(/\r?\n/)
+      for (let i = 0; i < lines.length; i++) {
+        if (printed >= 200) break
+        if (!lines[i].includes(query)) continue
+        printed++
+        console.log(`${rel}:${i + 1}:${lines[i]}`)
+      }
+    }
+
+    if (printed === 0) console.log('(no matches found)')
     return 0;
   } catch (err) {
-    // grep returns exit code 1 when no matches found, which is not an error
-    if (err.code === 1) {
-      console.log('(no matches found)');
-      return 0;
-    }
-    if (err.stdout) console.log(err.stdout);
     console.error('grep-search error:', err.message);
     return 2;
   }
@@ -109,6 +128,16 @@ async function runCommandCmd(command, opts = { yes: false }) {
   if (!command) {
     console.error('run-command: missing command');
     return 2;
+  }
+
+  // Refuse early on unsafe / non-shell input (before any prompting)
+  if (looksLikeNaturalLanguageCommand(command)) {
+    console.error('Refusing to run: looks like natural language rather than shell command');
+    return 3;
+  }
+  if (isDangerousCommand(command)) {
+    console.error('Refusing to run: command matches disallowed or unsafe patterns');
+    return 3;
   }
 
   // Load allowlist
@@ -134,7 +163,8 @@ async function runCommandCmd(command, opts = { yes: false }) {
   const isAllowed = matchesAllowlist(command, allowed);
   if (!isAllowed && !opts.yes) {
     // prompt user
-    const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout });
+    const { createInterface } = await import('node:readline');
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
     const q = `Command not in allowlist. Are you sure you want to run: "${command}"? (y/N) `;
     const answer = await new Promise((resolve) => {
       rl.question(q, (ans) => {
@@ -151,15 +181,6 @@ async function runCommandCmd(command, opts = { yes: false }) {
       console.error('Aborted by user (not confirmed)');
       return 3;
     }
-  }
-
-  if (looksLikeNaturalLanguageCommand(command)) {
-    console.error('Refusing to run: looks like natural language rather than shell command');
-    return 3;
-  }
-  if (isDangerousCommand(command)) {
-    console.error('Refusing to run: command matches disallowed or unsafe patterns');
-    return 3;
   }
   try {
     const { stdout, stderr } = await exec(command, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }); // 30s timeout, 10MB buffer
