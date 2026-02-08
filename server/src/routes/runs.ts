@@ -220,6 +220,66 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       sessionName: message || 'New session'
     })
 
+    // Call runner to create job
+    const runnerRes = await fetch(`${RUNNER_URL}/api/jobs`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${RUNNER_TOKEN}`
+      },
+      body: JSON.stringify({
+        input: {
+          message,
+          session_id: created.sessionId,
+          team_agents: [
+            { id: 'ollama-agent-1', provider: 'ollama', model: 'qwen2.5-coder:7b' },
+            { id: 'ollama-agent-2', provider: 'ollama', model: 'qwen2.5-coder:7b' }
+          ]
+        }
+      })
+    })
+
+    if (!runnerRes.ok) {
+      const text = await runnerRes.text()
+      reply.code(500)
+      return { detail: `Runner error: ${runnerRes.status} ${text}` }
+    }
+
+    const job = await runnerRes.json()
+    const jobId = job.id
+
+    const startRes = await fetch(`${RUNNER_URL}/api/jobs/${encodeURIComponent(jobId)}/start`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${RUNNER_TOKEN}`
+      }
+    })
+
+    if (!startRes.ok) {
+      const text = await startRes.text()
+      reply.code(500)
+      return { detail: `Start error: ${startRes.status} ${text}` }
+    }
+
+    // Stream events from runner
+    const eventsRes = await fetch(`${RUNNER_URL}/api/jobs/${jobId}/events`, {
+      headers: {
+        'Authorization': `Bearer ${RUNNER_TOKEN}`
+      }
+    })
+
+    if (!eventsRes.ok) {
+      const text = await eventsRes.text()
+      reply.code(500)
+      return { detail: `Events error: ${eventsRes.status} ${text}` }
+    }
+
+    const reader = eventsRes.body?.getReader()
+    if (!reader) {
+      reply.code(500)
+      return { detail: 'No reader for events' }
+    }
+
     const origin = req.headers.origin
     if (origin) {
       reply.raw.setHeader('Access-Control-Allow-Origin', origin)
@@ -228,45 +288,80 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
     reply.raw.setHeader('Content-Type', 'application/json; charset=utf-8')
     reply.raw.setHeader('Cache-Control', 'no-cache')
     reply.raw.setHeader('Connection', 'keep-alive')
+    reply.hijack()
     reply.raw.flushHeaders()
 
-    const started: StreamChunk = {
-      event: RunEvent.TeamRunStarted,
-      content_type: 'text',
-      created_at: nowSeconds(),
-      session_id: created.sessionId,
-      team_id: teamId,
-      content: ''
-    }
-    writeChunk(reply.raw, started)
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let finalContent = ''
 
-    const finalText = `Echo: ${message}`
-    let current = ''
-    const steps = Math.min(5, Math.max(2, Math.ceil(finalText.length / 12)))
-    for (let i = 1; i <= steps; i++) {
-      const sliceLen = Math.ceil((finalText.length * i) / steps)
-      current = finalText.slice(0, sliceLen)
-      const chunk: StreamChunk = {
-        event: RunEvent.TeamRunContent,
-        content_type: 'text',
-        created_at: nowSeconds(),
-        session_id: created.sessionId,
-        team_id: teamId,
-        content: current
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6)
+          try {
+            const event = JSON.parse(data)
+            let chunk: StreamChunk | null = null
+
+            if (event.type === 'job.started') {
+              chunk = {
+                event: RunEvent.TeamRunStarted,
+                content_type: 'text',
+                created_at: nowSeconds(),
+                session_id: created.sessionId,
+                team_id: teamId,
+                content: ''
+              }
+            } else if (event.type === 'tool.output') {
+              const output = event.data?.output || ''
+              finalContent += output
+              chunk = {
+                event: RunEvent.TeamRunContent,
+                content_type: 'text',
+                created_at: nowSeconds(),
+                session_id: created.sessionId,
+                team_id: teamId,
+                content: finalContent
+              }
+            } else if (event.type === 'done') {
+              chunk = {
+                event: RunEvent.TeamRunCompleted,
+                content_type: 'text',
+                created_at: nowSeconds(),
+                session_id: created.sessionId,
+                team_id: teamId,
+                content: finalContent
+              }
+            } else if (event.type === 'error') {
+              chunk = {
+                event: RunEvent.TeamRunError,
+                content_type: 'text',
+                created_at: nowSeconds(),
+                session_id: created.sessionId,
+                team_id: teamId,
+                content: event.data?.message || 'Unknown error'
+              }
+            }
+
+            if (chunk) {
+              writeChunk(reply.raw, chunk)
+            }
+          } catch (err) {
+            console.error('Parse error:', err, data)
+          }
+        }
       }
-      writeChunk(reply.raw, chunk)
-      await sleep(60)
+    } finally {
+      reader.releaseLock()
     }
-
-    const completed: StreamChunk = {
-      event: RunEvent.TeamRunCompleted,
-      content_type: 'text',
-      created_at: nowSeconds(),
-      session_id: created.sessionId,
-      team_id: teamId,
-      content: finalText
-    }
-    writeChunk(reply.raw, completed)
 
     await store.appendRun({
       dbId: team.db_id,
@@ -275,10 +370,12 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       sessionId: created.sessionId,
       run: {
         run_input: message,
-        content: finalText,
-        created_at: completed.created_at
+        content: finalContent,
+        created_at: nowSeconds()
       }
     })
+
+    reply.raw.end()
 
     reply.raw.end()
   })

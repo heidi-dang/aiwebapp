@@ -188,6 +188,35 @@ curl http://localhost:8080/v1/models
 curl http://localhost:3000/api/copilot/v1/models
 ```
 
+## Ollama Integration
+
+We're adding support for local LLMs via Ollama. This lets you run agents with models like qwen2.5-coder:7b on your own machine, which is great for offline work or keeping things local.
+
+### Setup
+
+1. Install Ollama from [ollama.ai](https://ollama.ai)
+2. Pull the model: `ollama pull qwen2.5-coder:7b`
+3. Start the server: `ollama serve` (it runs on port 11434 by default)
+
+### Configuration
+
+In `runner/.env`, add:
+```
+OLLAMA_API_URL=http://localhost:11434/api
+```
+
+Agents can now be configured to use 'ollama' as their model instead of Copilot. We'll be expanding this as we implement the full integration.
+
+### Testing
+
+Quick test the API:
+```bash
+curl http://localhost:11434/api/chat \
+  -d '{"model":"qwen2.5-coder:7b","messages":[{"role":"user","content":"Hello!"}]}'
+```
+
+More details coming as we build this out.
+
 ## Environment Configuration
 
 ### Development Environment Variables
