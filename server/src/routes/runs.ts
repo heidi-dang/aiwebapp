@@ -3,6 +3,7 @@ import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { RunEvent, StreamChunk } from '../types.js'
 import multer from 'multer'
+import { sessionNamer } from '../session_namer.js'
 
 const upload = multer()
 
@@ -22,7 +23,10 @@ function writeChunk(res: any, chunk: StreamChunk) {
 
 function requireEnv(name: string): string {
   const v = process.env[name]
-  if (!v) throw new Error(`Missing required env var: ${name}`)
+  if (!v) {
+    console.warn(`Warning: Missing env var ${name}, using default`)
+    return name === 'RUNNER_URL' ? 'http://localhost:7778' : ''
+  }
   return v
 }
 
@@ -51,6 +55,17 @@ export async function registerRunRoutes(app: Express, store: Store) {
       sessionId,
       sessionName: message || 'New session'
     })
+
+    // Generate session title if needed
+    if (message && await store.shouldGenerateName(created.sessionId)) {
+      try {
+        const title = await sessionNamer.generateTitle(message)
+        await store.updateSessionName(created.sessionId, title)
+        created.entry.session_name = title
+      } catch (error) {
+        console.warn('Failed to generate session title:', error)
+      }
+    }
 
     // Call runner to create job
     const runnerRes = await fetch(`${RUNNER_URL}/api/jobs`, {
@@ -219,6 +234,20 @@ export async function registerRunRoutes(app: Express, store: Store) {
       sessionId,
       sessionName: message || 'New session'
     })
+
+    // Generate session title if needed
+    if (message && await store.shouldGenerateName(created.sessionId)) {
+      try {
+        const title = await sessionNamer.generateTitle(message)
+        await store.updateSessionName(created.sessionId, title)
+        created.entry.session_name = title
+      } catch (error) {
+        console.warn('Failed to generate session title:', error)
+      }
+    }
+
+    // Create job ID for team run
+    const jobId = `team_${teamId}_${Date.now()}`
 
     const origin = req.headers.origin
     if (origin) {

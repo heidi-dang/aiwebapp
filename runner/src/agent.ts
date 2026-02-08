@@ -132,6 +132,22 @@ For multi-file projects:
         return await res.json()
       }
     })
+
+    // Add a tool that requires approval for demonstration
+    this.tools.registerTool({
+      name: 'dangerous_command',
+      description: 'Execute a potentially dangerous system command (requires approval)',
+      parameters: z.object({
+        command: z.string().describe('The command to execute')
+      }),
+      handler: async (args) => {
+        return {
+          warning: 'This is a dangerous command that would normally execute: ' + args.command,
+          note: 'In production, this would require human approval'
+        }
+      },
+      requiresApproval: true
+    })
   }
 
   async run(input?: string): Promise<void> {

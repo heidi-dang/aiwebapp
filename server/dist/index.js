@@ -16,6 +16,12 @@ import { registerRunRoutes } from './routes/runs.js';
 import authRoutes from './routes/auth.js';
 import memoryRoutes from './routes/memory.js';
 import { registerKnowledgeRoutes } from './routes/knowledge.js';
+import { registerGuardrailRoutes } from './routes/guardrails.js';
+import { registerJobRoutes } from './routes/jobs.js';
+import { registerSkillsRoutes } from './routes/skills.js';
+import { registerEvaluationRoutes } from './routes/evaluation.js';
+import { registerTracingRoutes } from './routes/tracing.js';
+import { registerReasoningRoutes } from './routes/reasoning.js';
 const PORT = Number(process.env.PORT ?? 7777);
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000';
 const EXTRA_ORIGINS = [
@@ -45,6 +51,12 @@ async function main() {
     app.use('/auth', authRoutes);
     app.use('/memory', memoryRoutes);
     registerKnowledgeRoutes(app, store);
+    registerGuardrailRoutes(app, store);
+    registerJobRoutes(app, store);
+    registerSkillsRoutes(app, store);
+    registerEvaluationRoutes(app, store);
+    registerTracingRoutes(app, store);
+    registerReasoningRoutes(app, store);
     // Register toolbox routes for UI-driven tools (internal)
     const { registerToolboxRoutes } = await import('./routes/toolbox.js');
     await registerToolboxRoutes(app, store);

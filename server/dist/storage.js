@@ -1,5 +1,6 @@
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import { sessionCache } from './session_cache.js';
 function makeSessionKey(args) {
     return `${args.dbId}::${args.entityType}::${args.componentId}::${args.sessionId}`;
 }
@@ -51,18 +52,38 @@ export class InMemoryStore {
     }
     async listSessions(args) {
         const listKey = `${args.dbId}::${args.entityType}::${args.componentId}`;
-        return this.sessionsByListKey.get(listKey) ?? [];
+        // Check cache first
+        const cached = sessionCache.getSessionList(listKey);
+        if (cached) {
+            return cached;
+        }
+        const result = this.sessionsByListKey.get(listKey) ?? [];
+        sessionCache.setSessionList(listKey, result);
+        return result;
     }
     async listAllSessions() {
+        const cacheKey = 'all_sessions';
+        const cached = sessionCache.getSessionList(cacheKey);
+        if (cached) {
+            return cached;
+        }
         const allSessions = [];
         for (const session of this.sessionsByKey.values()) {
             allSessions.push(session.entry);
         }
-        return allSessions.sort((a, b) => b.created_at - a.created_at);
+        const result = allSessions.sort((a, b) => b.created_at - a.created_at);
+        sessionCache.setSessionList(cacheKey, result);
+        return result;
     }
     async getSession(sessionId) {
+        // Check cache first
+        const cached = sessionCache.getSession(sessionId);
+        if (cached) {
+            return cached;
+        }
         for (const session of this.sessionsByKey.values()) {
             if (session.entry.session_id === sessionId) {
+                sessionCache.setSession(sessionId, session.entry);
                 return session.entry;
             }
         }
@@ -114,6 +135,9 @@ export class InMemoryStore {
         }
         session.runs.push(args.run);
         session.entry.updated_at = nowSeconds();
+        // Invalidate cache
+        sessionCache.deleteSession(args.sessionId);
+        sessionCache.deleteSessionList('all_sessions');
     }
     async getRuns(args) {
         const key = makeSessionKey({
@@ -178,6 +202,26 @@ export class InMemoryStore {
     async deleteModelConfig(agentId) {
         // No-op in InMemoryStore
     }
+    async updateSessionName(sessionId, name) {
+        for (const [key, session] of this.sessionsByKey.entries()) {
+            if (session.entry.session_id === sessionId) {
+                session.entry.session_name = name;
+                session.entry.updated_at = nowSeconds();
+                break;
+            }
+        }
+        // Invalidate cache
+        sessionCache.deleteSession(sessionId);
+        sessionCache.deleteSessionList('all_sessions');
+    }
+    async shouldGenerateName(sessionId) {
+        for (const session of this.sessionsByKey.values()) {
+            if (session.entry.session_id === sessionId) {
+                return session.entry.session_name === 'New Session' || session.entry.session_name === '';
+            }
+        }
+        return false;
+    }
     async addKnowledgeDocument(title, content) {
         return 'mock_doc_id';
     }
@@ -186,6 +230,13 @@ export class InMemoryStore {
     }
     async searchKnowledge(embedding, limit) {
         return [];
+    }
+    async getSessionState(sessionId) {
+        // InMemoryStore doesn't persist session state
+        return null;
+    }
+    async updateSessionState(sessionId, state) {
+        // No-op in InMemoryStore
     }
 }
 export class SqliteStore {
@@ -291,13 +342,24 @@ export class SqliteStore {
             '  content TEXT NOT NULL,',
             '  embedding TEXT NOT NULL,',
             '  FOREIGN KEY(doc_id) REFERENCES knowledge_documents(id) ON DELETE CASCADE',
+            ');',
+            'CREATE TABLE IF NOT EXISTS session_state (',
+            '  session_id TEXT PRIMARY KEY,',
+            '  state_data TEXT NOT NULL,',
+            '  updated_at INTEGER NOT NULL',
             ');'
         ].join('\n'));
         return new SqliteStore(db);
     }
     async listSessions(args) {
+        const listKey = `${args.dbId}::${args.entityType}::${args.componentId}`;
+        // Check cache first
+        const cached = sessionCache.getSessionList(listKey);
+        if (cached) {
+            return cached;
+        }
         const rows = await this.db.all('SELECT session_id, session_name, created_at, updated_at FROM sessions WHERE db_id = ? AND entity_type = ? AND component_id = ? ORDER BY created_at DESC', args.dbId, args.entityType, args.componentId);
-        return rows.map((r) => ({
+        const result = rows.map((r) => ({
             session_id: r.session_id,
             session_name: r.session_name,
             created_at: r.created_at,
@@ -305,10 +367,17 @@ export class SqliteStore {
             entity_type: args.entityType,
             component_id: args.componentId
         }));
+        sessionCache.setSessionList(listKey, result);
+        return result;
     }
     async listAllSessions() {
+        const cacheKey = 'all_sessions';
+        const cached = sessionCache.getSessionList(cacheKey);
+        if (cached) {
+            return cached;
+        }
         const rows = await this.db.all('SELECT session_id, session_name, created_at, updated_at, entity_type, component_id FROM sessions ORDER BY created_at DESC');
-        return rows.map((r) => ({
+        const result = rows.map((r) => ({
             session_id: r.session_id,
             session_name: r.session_name,
             created_at: r.created_at,
@@ -316,12 +385,19 @@ export class SqliteStore {
             entity_type: r.entity_type,
             component_id: r.component_id
         }));
+        sessionCache.setSessionList(cacheKey, result);
+        return result;
     }
     async getSession(sessionId) {
+        // Check cache first
+        const cached = sessionCache.getSession(sessionId);
+        if (cached) {
+            return cached;
+        }
         const row = await this.db.get('SELECT session_id, session_name, created_at, updated_at, entity_type, component_id FROM sessions WHERE session_id = ?', sessionId);
         if (!row)
             return null;
-        return {
+        const result = {
             session_id: row.session_id,
             session_name: row.session_name,
             created_at: row.created_at,
@@ -329,6 +405,8 @@ export class SqliteStore {
             entity_type: row.entity_type,
             component_id: row.component_id
         };
+        sessionCache.setSession(sessionId, result);
+        return result;
     }
     async getOrCreateSession(args) {
         const sessionId = (args.sessionId && args.sessionId.trim()) || `s_${Date.now()}`;
@@ -362,6 +440,9 @@ export class SqliteStore {
         const runInput = args.run.run_input ?? null;
         await this.db.run('INSERT INTO runs (db_id, entity_type, component_id, session_id, created_at, run_input, content_json) VALUES (?, ?, ?, ?, ?, ?, ?)', args.dbId, args.entityType, args.componentId, args.sessionId, createdAt, runInput, contentJson);
         await this.db.run('UPDATE sessions SET updated_at = ? WHERE db_id = ? AND entity_type = ? AND component_id = ? AND session_id = ?', nowSeconds(), args.dbId, args.entityType, args.componentId, args.sessionId);
+        // Invalidate cache
+        sessionCache.deleteSession(args.sessionId);
+        sessionCache.deleteSessionList('all_sessions');
     }
     async getRuns(args) {
         const rows = await this.db.all('SELECT created_at, run_input, content_json FROM runs WHERE db_id = ? AND entity_type = ? AND component_id = ? AND session_id = ? ORDER BY created_at ASC, id ASC', args.dbId, args.entityType, args.componentId, args.sessionId);
@@ -440,6 +521,34 @@ export class SqliteStore {
         console.log(`Deleting model config for agentId: ${agentId}`);
         const result = await this.db.run(`DELETE FROM agents WHERE id = ?`, agentId);
         console.log(`Delete result:`, result);
+    }
+    async updateSessionName(sessionId, name) {
+        await this.db.run('UPDATE sessions SET session_name = ?, updated_at = ? WHERE session_id = ?', name, nowSeconds(), sessionId);
+        // Invalidate cache
+        sessionCache.deleteSession(sessionId);
+        sessionCache.deleteSessionList('all_sessions');
+    }
+    async shouldGenerateName(sessionId) {
+        const row = await this.db.get('SELECT session_name FROM sessions WHERE session_id = ?', sessionId);
+        return !row || row.session_name === 'New Session' || row.session_name === '';
+    }
+    async getSessionState(sessionId) {
+        const row = await this.db.get('SELECT state_data FROM session_state WHERE session_id = ?', sessionId);
+        if (!row) {
+            return null;
+        }
+        try {
+            return JSON.parse(row.state_data);
+        }
+        catch (error) {
+            console.warn('Failed to parse session state:', error);
+            return null;
+        }
+    }
+    async updateSessionState(sessionId, state) {
+        const stateData = JSON.stringify(state);
+        const updatedAt = nowSeconds();
+        await this.db.run('INSERT OR REPLACE INTO session_state (session_id, state_data, updated_at) VALUES (?, ?, ?)', sessionId, stateData, updatedAt);
     }
     async addKnowledgeDocument(title, content) {
         const id = `doc_${Date.now()}_${Math.random().toString(36).slice(2)}`;

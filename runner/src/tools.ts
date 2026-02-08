@@ -1,11 +1,14 @@
 
 import { z } from 'zod';
+import { guardrailService } from './guardrail_service.js';
+import { hookManager } from './hooks.js';
 
 export interface ToolDefinition {
   name: string;
   description: string;
   parameters: z.ZodSchema;
   handler: (args: any, context: any) => Promise<any>;
+  requiresApproval?: boolean;
 }
 
 export interface ToolSchema {
@@ -96,6 +99,20 @@ export class ToolRegistry {
     const tool = this.tools.get(name);
     if (!tool) {
       throw new Error(`Tool ${name} not found`);
+    }
+    
+    // Apply guardrails
+    const guardResult = guardrailService.checkToolCall(name, args);
+    if (!guardResult.allowed) {
+      throw new Error(`Tool call blocked: ${guardResult.reason}`);
+    }
+    
+    // Check if approval is required
+    if (tool.requiresApproval) {
+      const approved = await hookManager.triggerApprovalRequired(name, args);
+      if (!approved) {
+        throw new Error(`Tool call requires approval and was denied: ${name}`);
+      }
     }
     
     // Validate args against schema

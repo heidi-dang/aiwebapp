@@ -97,6 +97,41 @@ For multi-file projects:
             }),
             handler: async (args) => this.handleApplyEdit(args.path, args.range, args.text)
         });
+        this.tools.registerTool({
+            name: 'search_knowledge',
+            description: 'Search the knowledge base for relevant documents',
+            parameters: z.object({
+                query: z.string().describe('Search query')
+            }),
+            handler: async (args) => {
+                const apiUrl = process.env.SERVER_URL || 'http://localhost:3000';
+                const res = await fetch(`${apiUrl}/knowledge/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: args.query })
+                });
+                if (!res.ok) {
+                    // If knowledge base is not available or empty, return empty list instead of error
+                    return { results: [] };
+                }
+                return await res.json();
+            }
+        });
+        // Add a tool that requires approval for demonstration
+        this.tools.registerTool({
+            name: 'dangerous_command',
+            description: 'Execute a potentially dangerous system command (requires approval)',
+            parameters: z.object({
+                command: z.string().describe('The command to execute')
+            }),
+            handler: async (args) => {
+                return {
+                    warning: 'This is a dangerous command that would normally execute: ' + args.command,
+                    note: 'In production, this would require human approval'
+                };
+            },
+            requiresApproval: true
+        });
     }
     async run(input) {
         const instruction = input || this.context.input.message || this.context.input.instruction;
