@@ -29,6 +29,33 @@ function requireEnv(name: string): string {
   return v
 }
 
+/**
+ * Fetch with timeout to prevent hanging requests
+ * @param url - URL to fetch
+ * @param options - Fetch options
+ * @param timeoutMs - Timeout in milliseconds (default 30000ms = 30s)
+ * @returns Fetch response
+ */
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number = 30000): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    })
+    clearTimeout(timeoutId)
+    return response
+  } catch (error) {
+    clearTimeout(timeoutId)
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeoutMs}ms`)
+    }
+    throw error
+  }
+}
+
 export async function registerRunRoutes(app: any, store: Store) {
   const RUNNER_URL = requireEnv('RUNNER_URL')
   const RUNNER_TOKEN = process.env.RUNNER_TOKEN ?? 'change_me'
@@ -66,8 +93,8 @@ export async function registerRunRoutes(app: any, store: Store) {
       }
     }
 
-    // Call runner to create job
-    const runnerRes = await fetch(`${RUNNER_URL}/api/jobs`, {
+    // Call runner to create job with timeout
+    const runnerRes = await fetchWithTimeout(`${RUNNER_URL}/api/jobs`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -82,7 +109,7 @@ export async function registerRunRoutes(app: any, store: Store) {
           base_dir: agent.base_dir
         }
       })
-    })
+    }, 30000) // 30 second timeout for job creation
 
     if (!runnerRes.ok) {
       const text = await runnerRes.text()
@@ -93,12 +120,12 @@ export async function registerRunRoutes(app: any, store: Store) {
     const job = await runnerRes.json()
     const jobId = job.id
 
-    const startRes = await fetch(`${RUNNER_URL}/api/jobs/${encodeURIComponent(jobId)}/start`, {
+    const startRes = await fetchWithTimeout(`${RUNNER_URL}/api/jobs/${encodeURIComponent(jobId)}/start`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${RUNNER_TOKEN}`
       }
-    })
+    }, 10000) // 10 second timeout for starting job
 
     if (!startRes.ok) {
       const text = await startRes.text()
@@ -106,7 +133,7 @@ export async function registerRunRoutes(app: any, store: Store) {
       return
     }
 
-    // Stream events from runner
+    // Stream events from runner (no timeout for streaming connection)
     const eventsRes = await fetch(`${RUNNER_URL}/api/jobs/${jobId}/events`, {
       headers: {
         'Authorization': `Bearer ${RUNNER_TOKEN}`
