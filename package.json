@@ -7,7 +7,7 @@
     "bootstrap": "npm --prefix server install && npm --prefix runner install && npm --prefix ui install",
     "dev": "concurrently -k -n server,runner,ui -c blue,magenta,green \"npm --prefix server run dev\" \"npm --prefix runner run dev\" \"npm --prefix ui run dev\"",
     "dev:phase2": "concurrently -k -n server,runner,ui -c blue,magenta,green \"PORT=3201 RUNNER_URL=http://localhost:3202 RUNNER_TOKEN=test_runner_token_123 CORS_ORIGIN=http://localhost:3200 npm --prefix server run dev\" \"PORT=3202 RUNNER_PERSIST=false RUNNER_TOKEN=test_runner_token_123 CORS_ORIGIN=http://localhost:3200 npm --prefix runner run dev\" \"PORT=3200 NEXT_PUBLIC_API_URL=http://localhost:3201 RUNNER_BASE_URL=http://localhost:3202 RUNNER_TOKEN=test_runner_token_123 npm --prefix ui run dev:phase2\"",
-    "build": "npm --prefix server run build && npm --prefix runner run build && npm --prefix ui run build",
+    "build": "npm run bootstrap && npm --prefix server run build && npm --prefix runner run build && npm --prefix ui run build",
     "start": "concurrently -k -n server,runner,ui -c blue,magenta,green \"npm --prefix server start\" \"npm --prefix runner start\" \"npm --prefix ui start\"",
     "smoke": "npm --prefix server run smoke && npm --prefix runner run smoke && npm --prefix ui run smoke",
     "smoke:phase2": "BASE_URL=http://localhost:3201 npm --prefix server run smoke && RUNNER_BASE_URL=http://localhost:3202 npm --prefix runner run smoke && BASE_URL=http://localhost:3200 npm --prefix ui run smoke",

@@ -915,7 +915,7 @@ export class SqliteStore implements Store {
     })
 
     // Sort by score descending
-    results.sort((a, b) => b.score - a.score)
+    results.sort((a: { score: number }, b: { score: number }) => b.score - a.score)
 
     return results.slice(0, limit)
   }
