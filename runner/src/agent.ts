@@ -5,6 +5,7 @@
 
 import type { JobContext, JobInput } from './executor.js'
 import type { RunnerEventType } from './db.js'
+import { OllamaClient, createOllamaClientFromEnv } from './ollama.js'
 
 export type AgentState = 'planning' | 'code_generation' | 'code_execution' | 'review' | 'iterate' | 'finish'
 
@@ -43,8 +44,10 @@ export class CoderAgent {
   private maxIterations = 5
   private currentIteration = 0
   private messages: ChatMessage[] = []
+  private ollama: OllamaClient | null = null
 
   constructor(private ctx: JobContext) {
+    this.ollama = createOllamaClientFromEnv()
     this.initializeMessages()
     this.loadMemory()
   }
@@ -285,8 +288,14 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   }
 
   private async callLLMWithTools(): Promise<ChatMessage> {
+    const provider = this.ctx.input.provider || 'bridge'
+
+    if (provider === 'ollama' && this.ollama) {
+      return this.callLLMWithOllama()
+    }
+
     // Use bridge if available (preferred for Copilot access)
-    if (this.ctx.bridge) {
+    if (this.ctx.bridge && provider === 'bridge') {
       return this.callLLMWithBridge()
     }
 
@@ -411,6 +420,30 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       }
     } catch (err) {
       throw new Error(`Bridge Copilot call failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  private async callLLMWithOllama(): Promise<ChatMessage> {
+    if (!this.ollama) {
+      throw new Error('Ollama client not available')
+    }
+
+    try {
+      // Convert messages to Ollama format
+      const ollamaMessages = this.messages.map(m => ({
+        role: m.role === 'tool' ? 'assistant' : m.role, // Ollama doesn't have 'tool' role
+        content: m.content || ''
+      }))
+
+      const response = await this.ollama.chat(ollamaMessages)
+
+      // For now, assume no tool calls; just return the content
+      return {
+        role: 'assistant',
+        content: response
+      }
+    } catch (err) {
+      throw new Error(`Ollama call failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
