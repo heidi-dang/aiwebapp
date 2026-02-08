@@ -42,3 +42,7 @@ This should get us a solid local LLM setup. Let's start with Phase 1 and see how
   - Verify schema creation/migrations and consistency for SQLite tables
 - Add ESLint import resolver in ui if import resolution issues surface:
   - Configure typescript and node resolvers in ui/eslint.config.mjs to support '@/...' aliases
+
+## Immediate TODOs for UI-Implement Branch
+- Resolve conflict markers in server/src/storage.ts to allow server build and route smoke test
+- After storage is clean, run server and test POST /internal/toolbox via UI tools panel
