@@ -1,0 +1,21 @@
+{
+  "editor.inlineSuggest.enabled": true,
+  "editor.suggest.preview": true,
+  "editor.quickSuggestions": {
+    "other": true,
+    "comments": false,
+    "strings": true
+  },
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "eslint.validate": ["javascript", "javascriptreact", "typescript", "typescriptreact"],
+  "github.copilot.enable": {
+    "*": true
+  },
+  "github.copilot.chat.enabled": true,
+  "github.copilot.chat.showWelcome": false,
+  "github.copilot.inlineSuggest.enable": true,
+  "workbench.editor.enablePreview": false,
+  "files.autoSave": "onFocusChange"
+}
