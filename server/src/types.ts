@@ -77,6 +77,7 @@ export interface User {
   avatar_url?: string
   email_verified: boolean
   role: 'admin' | 'user'
+  hashed_password?: string
   created_at: number
   updated_at: number
   last_login_at?: number
