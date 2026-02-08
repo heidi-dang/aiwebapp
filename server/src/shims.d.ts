@@ -1,5 +1,13 @@
 
 declare module 'jsonwebtoken';
+<<<<<<< HEAD
+=======
+
+declare module 'cors';
+
+declare module 'multer';
+
+>>>>>>> 2402ca3 (fix: update ToolCall interface to OpenAI format and fix build issues)
 declare module 'glob';
 declare module 'sqlite3';
 declare module 'cors';

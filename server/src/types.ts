@@ -72,17 +72,57 @@ export interface StreamChunk {
 export interface User {
   id: string
   email: string
+  password_hash?: string
   name?: string
+  avatar_url?: string
+  email_verified: boolean
   role: 'admin' | 'user'
   hashed_password?: string
   created_at: number
+  updated_at: number
   last_login_at?: number
+}
+
+export interface UserSession {
+  id: string
+  user_id: string
+  token_hash: string
+  expires_at: number
+  created_at: number
+}
+
+export interface SocialAccount {
+  id: string
+  user_id: string
+  provider: 'google' | 'github' | 'apple' | 'microsoft'
+  provider_id: string
+  provider_data?: string
+  created_at: number
 }
 
 export interface AuthTokens {
   access_token: string
   refresh_token: string
   user: User
+}
+
+export interface RegisterRequest {
+  email: string
+  password: string
+  name?: string
+}
+
+export interface LoginRequest {
+  email: string
+  password: string
+}
+
+export interface OAuthProfile {
+  id: string
+  email: string
+  name?: string
+  avatar_url?: string
+  provider: 'google' | 'github' | 'apple' | 'microsoft'
 }
 
 export interface ModelConfig {
