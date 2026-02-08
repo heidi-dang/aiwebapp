@@ -4,13 +4,10 @@ echo "Running local CI checks..."
 
 # Repo hygiene
 echo "Checking for forbidden files..."
-forbidden_files=".env .local .private *.log build/ dist/"
-for file in $forbidden_files; do
-  if find . -name "$file" -type f | grep -q .; then
-    echo "ERROR: Forbidden file found: $file"
-    exit 1
-  fi
-done
+if find . -type f \( -name ".env" -o -name "*.local" -o -name "*.private" -o -name "*.log" \) | grep -q .; then
+  echo "ERROR: Forbidden files found"
+  exit 1
+fi
 echo "✅ Repo hygiene passed"
 
 # Config validation
