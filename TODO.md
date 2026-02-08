@@ -2,6 +2,26 @@
 
 ## 🔴 CRITICAL PRIORITY - Must Fix ASAP
 
+### 0. MERGE CONFLICT IN storage.ts (BLOCKING BUILD) ❌
+**Status:** ❌ Blocking all builds  
+**File:** `server/src/storage.ts` line 967  
+**Issue:** Incomplete merge with duplicate content. Line 967 has `=======` marker. Content from line 968-1806 duplicates lines 1-966 BUT with additional social account methods in the Store interface and their implementations in SqliteStore.  
+**Root Cause:** Two versions of storage.ts were merged:
+- Version A: Lines 1-966 - Has `toolbox: ToolDetails[]`, knowledge base methods, session state methods
+- Version B: Lines 968-1806 - Missing `toolbox`, knowledge base, and session state, but HAS user session and social account methods
+
+**Solution:** Manual merge required:
+1. Keep imports from line 1, add `UserSession, SocialAccount` to imports
+2. In Store interface (lines 15-97), add missing methods:
+   - `createUserSession`, `getUserSessionByTokenHash`, `deleteUserSession`, `deleteUserSessionsByUserId`
+   - `createSocialAccount`, `getSocialAccountByProvider`, `getSocialAccountsByUserId`, `deleteSocialAccount`
+3. In InMemoryStore class, add stub implementations of above methods
+4. In SqliteStore class, keep the social account method implementations from the duplicate section (lines ~1650-1800 in original)
+5. Remove lines 967-1806 (all duplicate content)
+6. Verify `ToolDetails` type is defined or remove `toolbox` property if not needed
+
+**Note:** This requires careful manual review - automated scripts keep breaking the file structure.
+
 ### 1. Code Duplication - GuardrailService (CRITICAL)
 **Status:** ❌ Not Fixed  
 **Files:** `server/src/guardrail_service.ts` and `runner/src/guardrail_service.ts`  
