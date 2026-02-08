@@ -5,13 +5,7 @@ import type { ChatMessage } from '@/types/os'
 import { AgentMessage, UserMessage } from './MessageItem'
 import Tooltip from '@/components/ui/tooltip'
 import { memo } from 'react'
-import {
-  ToolCallProps,
-  ReasoningStepProps,
-  ReasoningProps,
-  ReferenceData,
-  Reference
-} from '@/types/os'
+import { ReasoningStepProps, ReasoningProps, ReferenceData, Reference } from '@/types/os'
 import React, { type FC } from 'react'
 
 import Icon from '@/components/ui/icon'
@@ -64,7 +58,7 @@ const References: FC<ReferenceProps> = ({ references }) => (
 const AgentMessageWrapper = ({ message }: MessageWrapperProps) => {
   return (
     <div className="flex flex-col gap-y-9">
-      {message.extra_data?.reasoning_steps &&
+      {Array.isArray(message.extra_data?.reasoning_steps) &&
         message.extra_data.reasoning_steps.length > 0 && (
           <div className="flex items-start gap-4">
             <Tooltip
@@ -111,15 +105,14 @@ const AgentMessageWrapper = ({ message }: MessageWrapperProps) => {
           </Tooltip>
 
           <div className="flex flex-wrap gap-2">
-            {message.tool_calls.map((toolCall, index) => (
-              <ToolComponent
-                key={
-                  toolCall.tool_call_id ||
-                  `${toolCall.tool_name}-${toolCall.created_at}-${index}`
-                }
-                tools={toolCall}
-              />
-            ))}
+            {message.tool_calls.map((toolCall, index) => {
+              const key =
+                toolCall.tool_call_id ||
+                toolCall.id ||
+                `${toolCall.tool_name || toolCall.function?.name || 'tool'}-${index}`
+              const name = toolCall.tool_name || toolCall.function?.name || 'tool'
+              return <ToolComponent key={key} name={name} />
+            })}
           </div>
         </div>
       )}
@@ -147,9 +140,9 @@ const Reasonings: FC<ReasoningProps> = ({ reasoning }) => (
   </div>
 )
 
-const ToolComponent = memo(({ tools }: ToolCallProps) => (
+const ToolComponent = memo(({ name }: { name: string }) => (
   <div className="cursor-default rounded-full bg-accent px-2 py-1.5 text-xs">
-    <p className="font-dmmono uppercase text-primary/80">{tools.tool_name}</p>
+    <p className="font-dmmono uppercase text-primary/80">{name}</p>
   </div>
 ))
 ToolComponent.displayName = 'ToolComponent'

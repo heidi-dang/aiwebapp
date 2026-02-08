@@ -1,14 +1,21 @@
 export interface ToolCall {
-  role: 'user' | 'tool' | 'system' | 'assistant'
-  content: string | null
-  tool_call_id: string
-  tool_name: string
-  tool_args: Record<string, string>
-  tool_call_error: boolean
-  metrics: {
+  role?: 'user' | 'tool' | 'system' | 'assistant'
+  content?: string | null
+  tool_call_id?: string
+  tool_name?: string
+  tool_args?: Record<string, string>
+  tool_call_error?: boolean
+  metrics?: {
     time: number
   }
-  created_at: number
+  created_at?: number
+  // Optional OpenAI-style fields for compatibility
+  function?: {
+    arguments: string
+    name: string
+  }
+  id?: string
+  type?: string
 }
 
 export interface ReasoningSteps {
@@ -44,8 +51,8 @@ interface ModelMessage {
   name: string | null
   role: string
   tool_args?: unknown
-  tool_call_id: string | null
-  tool_calls: Array<{
+  tool_call_id?: string | null
+  tool_calls?: Array<{
     function: {
       arguments: string
       name: string
@@ -186,9 +193,19 @@ export interface AgentExtraData {
   references?: ReferenceData[]
 }
 
-export interface AgentExtraData {
-  reasoning_messages?: ReasoningMessage[]
-  references?: ReferenceData[]
+// Reference data used by the UI to display agent citations
+export interface Reference {
+  name: string
+  content: string
+  meta_data: {
+    chunk?: number | string
+    [key: string]: unknown
+  }
+}
+
+export interface ReferenceData {
+  query: string
+  references: Reference[]
 }
 
 export interface ReasoningMessage {
@@ -206,7 +223,14 @@ export interface ReasoningMessage {
 export interface ChatMessage {
   role: 'user' | 'agent' | 'system' | 'tool'
   content: string
+  created_at: number
   streamingError?: boolean
+  tool_calls?: ToolCall[]
+  extra_data?: (AgentExtraData & { runner_job_id?: string; [key: string]: unknown })
+  videos?: VideoData[]
+  images?: ImageData[]
+  audio?: AudioData[]
+  response_audio?: ResponseAudio
 }
 
 export interface Sessions {
@@ -225,4 +249,37 @@ export interface TeamDetails {
   name?: string
   db_id?: string
   model?: Model
+}
+
+export interface ChatEntry {
+  run_input?: string
+  created_at: number
+  content?: string | object
+  tools?: ToolCall[]
+  extra_data?: AgentExtraData
+  images?: ImageData[]
+  videos?: VideoData[]
+  audio?: AudioData[]
+  response_audio?: ResponseAudio
+}
+
+export interface ImageData {
+  revised_prompt: string
+  url: string
+}
+
+export interface VideoData {
+  id: number
+  eta: number
+  url: string
+}
+
+export interface AudioData {
+  base64_audio?: string
+  mime_type?: string
+  url?: string
+  id?: string
+  content?: string
+  channels?: number
+  sample_rate?: number
 }
