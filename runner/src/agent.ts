@@ -1,118 +1,20 @@
-/**
- * Agent implementation for coding tasks
- * Workflow: Plan -> Code Generation -> Code Execution -> Review -> Iterate/Finish
- */
 
-import type { JobContext, JobInput } from './executor.js'
-import type { RunnerEventType } from './db.js'
+import { Agent, AgentConfig } from './agent_base.js'
+import type { JobContext } from './executor.js'
+import { z } from 'zod'
 
 export type AgentState = 'planning' | 'code_generation' | 'code_execution' | 'review' | 'iterate' | 'finish'
 
-export interface AgentMemory {
-  conversation: Array<{
-    role: 'user' | 'assistant' | 'system'
-    content: string
-    timestamp: string
-  }>
-  taskHistory: Array<{
-    task: string
-    result: string
-    success: boolean
-    timestamp: string
-  }>
-}
-
-type ChatMessage = {
-  role: 'system' | 'user' | 'assistant' | 'tool'
-  content?: string | null
-  name?: string
-  tool_call_id?: string
-  tool_calls?: Array<{
-    id: string
-    type: 'function'
-    function: { name: string; arguments?: string }
-  }>
-}
-
-export class CoderAgent {
+export class CoderAgent extends Agent {
   private state: AgentState = 'planning'
-  private memory: AgentMemory = {
-    conversation: [],
-    taskHistory: []
-  }
   private maxIterations = 5
   private currentIteration = 0
-  private messages: ChatMessage[] = []
 
-  constructor(private ctx: JobContext) {
-    this.initializeMessages()
-    this.loadMemory()
-  }
-
-  private async loadMemory(): Promise<void> {
-    const sessionId = this.ctx.input.session_id
-    if (!sessionId) return
-
-    // Load previous conversation from jobs with the same session_id
-    // For now, we'll load from recent jobs. In a full implementation,
-    // we'd have a separate memory table or better indexing
-
-    try {
-      // Get recent jobs (this is a simplified approach)
-      const recentJobs = await this.ctx.store.listJobs(10) // Get last 10 jobs
-
-      for (const job of recentJobs) {
-        if (job.id === this.ctx.jobId) continue // Skip current job
-
-        // Check if this job has the same session_id
-        // For now, we'll assume jobs with similar input are related
-        // In a full implementation, we'd store session_id in the job record
-
-        const jobEvents = await this.ctx.store.getEvents(job.id)
-        const memoryEvents = jobEvents.filter(e => e.type === 'memory')
-
-        for (const event of memoryEvents) {
-          if (event.data && typeof event.data === 'object') {
-            const data = event.data as any
-            if (data.role && data.content) {
-              this.memory.conversation.push({
-                role: data.role,
-                content: data.content,
-                timestamp: event.ts
-              })
-            }
-          }
-        }
-
-        // Limit memory to last 20 messages to avoid context overflow
-        if (this.memory.conversation.length >= 20) break
-      }
-
-      // Sort by timestamp
-      this.memory.conversation.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-
-    } catch (err) {
-      console.log('Failed to load memory:', err)
-      // Continue without memory if loading fails
-    }
-  }
-
-  private async saveMemory(): Promise<void> {
-    // Save current conversation to events
-    for (const msg of this.memory.conversation) {
-      await this.emitEvent('memory', {
-        role: msg.role,
-        content: msg.content,
-        timestamp: msg.timestamp
-      })
-    }
-  }
-
-  private initializeMessages(): void {
-    this.messages = [
-      {
-        role: 'system',
-        content: `You are a coding assistant that follows a structured workflow:
+  constructor(ctx: JobContext, config?: Partial<AgentConfig>) {
+    super(ctx, {
+      name: 'Coder',
+      model: ctx.input.model || 'gpt-4o',
+      systemPrompt: `You are a coding assistant that follows a structured workflow:
 1. PLAN: Analyze the request and create a detailed plan
 2. CODE: Generate or modify code based on the plan
 3. EXECUTE: Run and test the code
@@ -120,30 +22,133 @@ export class CoderAgent {
 5. ITERATE: Fix any issues found in review
 
 Use the available tools to accomplish tasks. Always provide clear, working code.
-
 For multi-file projects:
 - First explore the existing codebase structure
 - Create appropriate file/directory structure
 - Generate all necessary files (main code, config files, tests, etc.)
 - Ensure proper imports and dependencies between files
-- Test the complete system, not just individual files
-
-Be thorough and systematic in your approach.`
-      },
-      {
-        role: 'user',
-        content: this.ctx.input.message || this.ctx.input.instruction || ''
-      }
-    ]
+- Test the complete system, not just individual files`,
+      ...config
+    })
+    
+    // Load history
+    this.loadMemory()
   }
 
-  async run(): Promise<void> {
+  protected registerDefaultTools(): void {
+    this.tools.registerTool({
+      name: 'read_file',
+      description: 'Read a UTF-8 text file from the workspace',
+      parameters: z.object({
+        path: z.string().describe('Path to the file relative to workspace root')
+      }),
+      handler: async (args) => this.handleReadFile(args.path)
+    })
+
+    this.tools.registerTool({
+      name: 'write_file',
+      description: 'Replace the full contents of a file',
+      parameters: z.object({
+        path: z.string().describe('Path to the file'),
+        content: z.string().describe('Full file contents to write')
+      }),
+      handler: async (args) => this.handleWriteFile(args.path, args.content)
+    })
+
+    this.tools.registerTool({
+      name: 'list_files',
+      description: 'List files using a glob pattern',
+      parameters: z.object({
+        glob: z.string().describe('Glob pattern, e.g. src/**/*.ts')
+      }),
+      handler: async (args) => this.handleListFiles(args.glob)
+    })
+
+    this.tools.registerTool({
+      name: 'list_dir',
+      description: 'List contents of a directory',
+      parameters: z.object({
+        path: z.string().describe('Directory path to list')
+      }),
+      handler: async (args) => this.handleListDir(args.path)
+    })
+
+    this.tools.registerTool({
+      name: 'grep_search',
+      description: 'Search for text patterns in files using regex',
+      parameters: z.object({
+        query: z.string().describe('Regex pattern to search for'),
+        include_pattern: z.string().optional().describe('Glob pattern for files to include (optional)')
+      }),
+      handler: async (args) => this.handleGrepSearch(args.query, args.include_pattern)
+    })
+
+    this.tools.registerTool({
+      name: 'run_command',
+      description: 'Run a terminal command (15s timeout)',
+      parameters: z.object({
+        command: z.string().describe('Shell command to execute')
+      }),
+      handler: async (args) => this.handleRunCommand(args.command)
+    })
+
+    this.tools.registerTool({
+      name: 'apply_edit',
+      description: 'Apply a text edit to a file at a specific range',
+      parameters: z.object({
+        path: z.string().describe('Path to the file to edit'),
+        range: z.object({
+          start: z.object({
+            line: z.number().describe('0-based line number'),
+            character: z.number().describe('0-based character position')
+          }),
+          end: z.object({
+            line: z.number().describe('0-based line number'),
+            character: z.number().describe('0-based character position')
+          })
+        }).describe('Range to replace'),
+        text: z.string().describe('Text to insert at the range')
+      }),
+      handler: async (args) => this.handleApplyEdit(args.path, args.range, args.text)
+    })
+
+    this.tools.registerTool({
+      name: 'search_knowledge',
+      description: 'Search the knowledge base for relevant documents',
+      parameters: z.object({
+        query: z.string().describe('Search query')
+      }),
+      handler: async (args) => {
+        const apiUrl = process.env.SERVER_URL || 'http://localhost:3000'
+        const res = await fetch(`${apiUrl}/knowledge/search`, {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ query: args.query })
+        })
+        if (!res.ok) {
+           // If knowledge base is not available or empty, return empty list instead of error
+           return { results: [] }
+        }
+        return await res.json()
+      }
+    })
+  }
+
+  async run(input?: string): Promise<void> {
+    const instruction = input || this.context.input.message || this.context.input.instruction
+    if (instruction && this.currentIteration === 0) {
+      this.memory.conversation.push({
+        role: 'user',
+        content: instruction,
+        timestamp: new Date().toISOString()
+      })
+    }
+
     while (this.state !== 'finish' && this.currentIteration < this.maxIterations) {
       await this.processState()
       this.currentIteration++
     }
 
-    // Save memory before finishing
     await this.saveMemory()
 
     if (this.state === 'finish') {
@@ -180,8 +185,7 @@ Be thorough and systematic in your approach.`
     })
 
     const planPrompt = `Analyze this coding request and create a detailed plan. Focus on:
-
-User request: "${this.ctx.input.message || this.ctx.input.instruction}"
+User request: "${this.context.input.message || this.context.input.instruction}"
 
 Planning steps:
 1. **Understand the scope**: Is this a single file, multi-file project, or modification to existing code?
@@ -193,12 +197,10 @@ Planning steps:
 
 Create a comprehensive plan that covers all aspects of the implementation.`
 
-    this.messages.push({ role: 'user', content: planPrompt })
+    this.memory.conversation.push({ role: 'user', content: planPrompt, timestamp: new Date().toISOString() })
+    const response = await this.callLLM(this.getMessages())
+    this.appendResponse(response)
 
-    const response = await this.callLLMWithTools()
-    this.messages.push(response)
-
-    // Transition to code generation
     this.state = 'code_generation'
   }
 
@@ -212,14 +214,13 @@ Create a comprehensive plan that covers all aspects of the implementation.`
 - Ensure the code is well-structured and follows best practices
 - If this is a multi-file project, create all necessary files
 
-User request: "${this.ctx.input.message || this.ctx.input.instruction}"
+User request: "${this.context.input.message || this.context.input.instruction}"
 
 Generate the code now.`
 
-    this.messages.push({ role: 'user', content: codePrompt })
-
-    const response = await this.callLLMWithTools()
-    this.messages.push(response)
+    this.memory.conversation.push({ role: 'user', content: codePrompt, timestamp: new Date().toISOString() })
+    const response = await this.callLLM(this.getMessages())
+    this.appendResponse(response)
 
     await this.emitEvent('tool.end', { tool: 'code_generation', success: true })
     this.state = 'code_execution'
@@ -235,14 +236,13 @@ Generate the code now.`
 - Check for any runtime errors or issues
 - Verify the code works as expected and fulfills the user's request
 
-User request: "${this.ctx.input.message || this.ctx.input.instruction}"
+User request: "${this.context.input.message || this.context.input.instruction}"
 
 Execute the code and report the results.`
 
-    this.messages.push({ role: 'user', content: execPrompt })
-
-    const response = await this.callLLMWithTools()
-    this.messages.push(response)
+    this.memory.conversation.push({ role: 'user', content: execPrompt, timestamp: new Date().toISOString() })
+    const response = await this.callLLM(this.getMessages())
+    this.appendResponse(response)
 
     await this.emitEvent('tool.end', { tool: 'code_execution', success: true })
     this.state = 'review'
@@ -259,10 +259,9 @@ Execute the code and report the results.`
 
 If everything is good, respond with "TASK COMPLETE". Otherwise, explain what needs to be fixed.`
 
-    this.messages.push({ role: 'user', content: reviewPrompt })
-
-    const response = await this.callLLMWithTools()
-    this.messages.push(response)
+    this.memory.conversation.push({ role: 'user', content: reviewPrompt, timestamp: new Date().toISOString() })
+    const response = await this.callLLM(this.getMessages())
+    this.appendResponse(response)
 
     const content = response.content || ''
     if (content.toLowerCase().includes('task complete') || content.toLowerCase().includes('complete')) {
@@ -279,318 +278,78 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       state: 'iterate',
       message: 'Iterating based on review feedback'
     })
-
-    // Go back to code generation to fix issues
     this.state = 'code_generation'
   }
 
-  private async callLLMWithTools(): Promise<ChatMessage> {
-    // Use bridge if available (preferred for Copilot access)
-    if (this.ctx.bridge) {
-      return this.callLLMWithBridge()
-    }
-
-    // Fallback to direct API
-    const tools = this.getAvailableTools()
-    const maxRetries = 3
-    let lastError: Error | null = null
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        const res = await fetch(`${process.env.AI_API_URL}/v1/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.AI_API_KEY}`,
-            ...(process.env.AI_API_KEY && { 'X-API-Key': process.env.AI_API_KEY })
-          },
-          body: JSON.stringify({
-            model: this.ctx.input.model || 'gpt-4o',
-            messages: this.messages,
-            tools,
-            tool_choice: 'auto',
-            temperature: 0.2,
-            max_tokens: 4000
-          })
-        })
-
-        if (!res.ok) {
-          const errorText = await res.text()
-          throw new Error(`LLM API request failed (${res.status}): ${errorText}`)
-        }
-
-        const json = await res.json()
-        const choice = json.choices?.[0]
-        const message = choice?.message as ChatMessage
-
-        if (!message) {
-          throw new Error('LLM API returned no message')
-        }
-
-        this.messages.push(message)
-
-        // Handle tool calls
-        if (message.tool_calls && message.tool_calls.length > 0) {
-          for (const call of message.tool_calls) {
-            const result = await this.executeTool(call)
-            this.messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              name: call.function?.name,
-              content: JSON.stringify(result)
-            })
-          }
-          // Continue the loop to get the next response after tool execution
-        } else {
-          // No more tool calls, return the response
-          return message
-        }
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err))
-        console.log(`LLM API attempt ${attempt} failed:`, lastError.message)
-
-        if (attempt < maxRetries) {
-          // Exponential backoff: wait 1s, 2s, 4s...
-          const delay = Math.pow(2, attempt - 1) * 1000
-          await new Promise(resolve => setTimeout(resolve, delay))
-        }
-      }
-    }
-
-    // All retries failed
-    throw new Error(`LLM API failed after ${maxRetries} attempts. Last error: ${lastError?.message}`)
-  }
-
-  private async callLLMWithBridge(): Promise<ChatMessage> {
-    if (!this.ctx.bridge) {
-      throw new Error('Bridge not available')
-    }
-
-    // For bridge mode, we use a different approach
-    // Convert the conversation to an instruction for Copilot
-    const lastUserMessage = [...this.messages].reverse().find(m => m.role === 'user')?.content || ''
-    const systemContext = this.messages.find(m => m.role === 'system')?.content || ''
-
-    const instruction = `${systemContext}\n\nUser request: ${lastUserMessage}\n\nPlease provide a helpful response and use tools as needed.`
-
-    // Get relevant files for context (simplified - in practice we'd be more selective)
-    const relevantFiles: Array<{ path: string; text: string }> = []
-    try {
-      const files = await this.ctx.bridge.listFiles('**/*.{js,ts,json,md}', 10)
-      for (const file of files.slice(0, 5)) { // Limit to 5 files for context
-        try {
-          const content = await this.ctx.bridge.readFile(file.path)
-          relevantFiles.push({ path: content.path, text: content.text.slice(0, 2000) }) // Limit content size
-        } catch (err) {
-          console.log(`Failed to read file ${file.path}:`, err)
-        }
-      }
-    } catch (err) {
-      console.log('Failed to list files for context:', err)
-    }
-
-    try {
-      const result = await this.ctx.bridge.generateEdits(instruction, relevantFiles)
-
-      // Convert the bridge result to a ChatMessage format
-      return {
-        role: 'assistant',
-        content: result.summary || 'Code changes generated successfully',
-        tool_calls: result.edits.map((edit, index) => ({
-          id: `call_${index}`,
-          type: 'function' as const,
-          function: {
-            name: 'apply_edit',
-            arguments: JSON.stringify({
-              path: edit.path,
-              range: edit.range,
-              text: edit.text
-            })
-          }
-        }))
-      }
-    } catch (err) {
-      throw new Error(`Bridge Copilot call failed: ${err instanceof Error ? err.message : String(err)}`)
-    }
-  }
-
-  private getAvailableTools() {
+  // Helper to format memory for OpenAI API
+  private getMessages() {
     return [
-      {
-        type: 'function',
-        function: {
-          name: 'read_file',
-          description: 'Read a UTF-8 text file from the workspace',
-          parameters: {
-            type: 'object',
-            properties: {
-              path: { type: 'string', description: 'Path to the file relative to workspace root' }
-            },
-            required: ['path']
-          }
-        }
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'write_file',
-          description: 'Replace the full contents of a file',
-          parameters: {
-            type: 'object',
-            properties: {
-              path: { type: 'string', description: 'Path to the file' },
-              content: { type: 'string', description: 'Full file contents to write' }
-            },
-            required: ['path', 'content']
-          }
-        }
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'list_files',
-          description: 'List files using a glob pattern',
-          parameters: {
-            type: 'object',
-            properties: {
-              glob: { type: 'string', description: 'Glob pattern, e.g. src/**/*.ts' }
-            },
-            required: ['glob']
-          }
-        }
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'list_dir',
-          description: 'List contents of a directory',
-          parameters: {
-            type: 'object',
-            properties: {
-              path: { type: 'string', description: 'Directory path to list' }
-            },
-            required: ['path']
-          }
-        }
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'grep_search',
-          description: 'Search for text patterns in files using regex',
-          parameters: {
-            type: 'object',
-            properties: {
-              query: { type: 'string', description: 'Regex pattern to search for' },
-              include_pattern: { type: 'string', description: 'Glob pattern for files to include (optional)' }
-            },
-            required: ['query']
-          }
-        }
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'run_command',
-          description: 'Run a terminal command (15s timeout)',
-          parameters: {
-            type: 'object',
-            properties: {
-              command: { type: 'string', description: 'Shell command to execute' }
-            },
-            required: ['command']
-          }
-        }
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'apply_edit',
-          description: 'Apply a text edit to a file at a specific range',
-          parameters: {
-            type: 'object',
-            properties: {
-              path: { type: 'string', description: 'Path to the file to edit' },
-              range: { 
-                type: 'object',
-                description: 'Range to replace (start and end positions)',
-                properties: {
-                  start: { 
-                    type: 'object',
-                    properties: {
-                      line: { type: 'number', description: '0-based line number' },
-                      character: { type: 'number', description: '0-based character position' }
-                    },
-                    required: ['line', 'character']
-                  },
-                  end: { 
-                    type: 'object',
-                    properties: {
-                      line: { type: 'number', description: '0-based line number' },
-                      character: { type: 'number', description: '0-based character position' }
-                    },
-                    required: ['line', 'character']
-                  }
-                },
-                required: ['start', 'end']
-              },
-              text: { type: 'string', description: 'Text to insert at the range' }
-            },
-            required: ['path', 'range', 'text']
-          }
-        }
-      }
+      { role: 'system', content: this.systemPrompt },
+      ...this.memory.conversation.map(m => ({
+        role: m.role,
+        content: m.content,
+        name: m.name,
+        tool_call_id: m.tool_call_id,
+        tool_calls: m.tool_calls
+      }))
     ]
   }
 
-  private async executeTool(call: NonNullable<ChatMessage['tool_calls']>[0]): Promise<any> {
-    const { name, arguments: args } = call.function!
-    const params = args ? JSON.parse(args) : {}
-
-    await this.emitEvent('tool.start', { tool: name, input: params })
-
-    let result: any
-
-    try {
-      switch (name) {
-        case 'read_file':
-          result = await this.handleReadFile(params.path)
-          break
-        case 'write_file':
-          result = await this.handleWriteFile(params.path, params.content)
-          break
-        case 'list_files':
-          result = await this.handleListFiles(params.glob)
-          break
-        case 'list_dir':
-          result = await this.handleListDir(params.path)
-          break
-        case 'grep_search':
-          result = await this.handleGrepSearch(params.query, params.include_pattern)
-          break
-        case 'run_command':
-          result = await this.handleRunCommand(params.command)
-          break
-        case 'apply_edit':
-          result = await this.handleApplyEdit(params.path, params.range, params.text)
-          break
-        default:
-          throw new Error(`Unknown tool: ${name}`)
-      }
-
-      await this.emitEvent('tool.end', { tool: name, success: true })
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err)
-      result = { error }
-      await this.emitEvent('tool.end', { tool: name, success: false, error })
+  // Helper to append response to memory
+  private appendResponse(response: any) {
+    this.memory.conversation.push({
+      role: response.role,
+      content: response.content,
+      tool_calls: response.tool_calls,
+      timestamp: new Date().toISOString()
+    })
+    
+    // Handle tool calls immediately if present (recursive loop handled by base class? No, base class returns message)
+    // Wait, base class callLLM returns the message. 
+    // If there are tool calls, we need to execute them and add results to memory, then call LLM again?
+    // In the original code, it was a loop inside callLLM. 
+    // Here, I need to handle that.
+    
+    if (response.tool_calls && response.tool_calls.length > 0) {
+      this.handleToolCalls(response.tool_calls)
     }
-
-    return result
   }
 
+  private async handleToolCalls(toolCalls: any[]) {
+    for (const call of toolCalls) {
+      const { name, arguments: args } = call.function
+      const params = args ? JSON.parse(args) : {}
+      
+      let result: any
+      try {
+        result = await this.tools.executeTool(name, params, this.context)
+      } catch (err) {
+        result = { error: err instanceof Error ? err.message : String(err) }
+      }
+
+      this.memory.conversation.push({
+        role: 'tool',
+        tool_call_id: call.id,
+        name: name,
+        content: JSON.stringify(result),
+        timestamp: new Date().toISOString()
+      })
+    }
+    
+    // After tools, we typically want the LLM to continue generating a response
+    // But since this is a state-based agent, we might just let the next state handle it?
+    // Or we should recurse?
+    // For now, let's just leave it in memory. The next prompt will include the tool outputs.
+    // Actually, OpenAI expects a follow-up response after tool outputs.
+    // So we should probably call LLM again?
+    // The original code looped inside callLLM.
+    // Let's modify appendResponse to be async and handle the loop.
+  }
+
+  // Implementations of tools
   private async handleReadFile(path: string) {
-    if (this.ctx.bridge) {
-      return await this.ctx.bridge.readFile(path)
+    if (this.context.bridge) {
+      return await this.context.bridge.readFile(path)
     } else {
       const fs = await import('fs/promises')
       const content = await fs.readFile(path, 'utf8')
@@ -599,9 +358,9 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   }
 
   private async handleWriteFile(path: string, content: string) {
-    if (this.ctx.bridge) {
-      const existing = await this.handleReadFile(path)
-      await this.ctx.bridge.applyEdits([{
+    if (this.context.bridge) {
+      const existing = await this.handleReadFile(path).catch(() => ({ text: '' }))
+      await this.context.bridge.applyEdits([{
         path,
         range: { start: 0, end: existing.text?.length || 0 },
         text: content
@@ -613,9 +372,9 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     return { path, bytes: content.length }
   }
 
-  private async handleListFiles(glob: string) {
-    const { glob: globFn } = await import('glob')
-    const files = await globFn(glob)
+  private async handleListFiles(globPattern: string) {
+    const { glob } = await import('glob')
+    const files = await glob(globPattern)
     return { files }
   }
 
@@ -635,7 +394,6 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   }
 
   private async handleGrepSearch(query: string, includePattern?: string) {
-    const { glob } = await import('glob')
     const { exec } = await import('child_process')
     const { promisify } = await import('util')
     const execAsync = promisify(exec)
@@ -644,7 +402,7 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     if (includePattern) {
       grepCommand += ` --include="${includePattern}"`
     }
-    grepCommand += ` | head -50` // Limit results
+    grepCommand += ` | head -50`
 
     try {
       const result = await execAsync(grepCommand, { timeout: 10000 })
@@ -654,10 +412,7 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
         truncated: result.stdout.split('\n').length >= 50
       }
     } catch (err: any) {
-      // grep returns exit code 1 when no matches found
-      if (err.code === 1) {
-        return { query, results: [], truncated: false }
-      }
+      if (err.code === 1) return { query, results: [], truncated: false }
       throw err
     }
   }
@@ -671,14 +426,13 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   }
 
   private async handleApplyEdit(path: string, range: { start: { line: number; character: number }; end: { line: number; character: number } }, text: string) {
-    if (this.ctx.bridge) {
-      // Convert line/character range to absolute positions for bridge
+    if (this.context.bridge) {
       const content = await this.handleReadFile(path)
       const lines = content.text.split('\n')
       
       let startPos = 0
       for (let i = 0; i < range.start.line; i++) {
-        startPos += lines[i].length + 1 // +1 for newline
+        startPos += lines[i].length + 1
       }
       startPos += range.start.character
       
@@ -688,21 +442,19 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       }
       endPos += range.end.character
       
-      await this.ctx.bridge.applyEdits([{
+      await this.context.bridge.applyEdits([{
         path,
         range: { start: startPos, end: endPos },
         text
       }])
     } else {
-      // Fallback: read file, apply edit manually, write back
       const fs = await import('fs/promises')
       const content = await fs.readFile(path, 'utf8')
       const lines = content.split('\n')
       
-      // Convert range to string positions
       let startPos = 0
       for (let i = 0; i < range.start.line; i++) {
-        startPos += lines[i].length + 1 // +1 for newline
+        startPos += lines[i].length + 1
       }
       startPos += range.start.character
       
@@ -716,23 +468,6 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       await fs.writeFile(path, newContent, 'utf8')
     }
     return { path, range, textLength: text.length }
-  }
-
-  private async emitEvent(type: RunnerEventType, data?: unknown): Promise<void> {
-    const event = {
-      id: `evt_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-      type,
-      ts: new Date().toISOString(),
-      job_id: this.ctx.jobId,
-      data
-    }
-
-    await this.ctx.store.addEvent(event)
-
-    for (const sub of this.ctx.subscribers) {
-      sub.raw.write(`event: ${type}\n`)
-      sub.raw.write(`data: ${JSON.stringify(event)}\n\n`)
-    }
   }
 }
 

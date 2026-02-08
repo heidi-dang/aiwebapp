@@ -1,4 +1,4 @@
-import { AgentDetails, EntityType, RunRecord, SessionEntry, TeamDetails, User, ModelConfig } from './types.js'
+import { AgentDetails, EntityType, RunRecord, SessionEntry, TeamDetails, ToolDetails, User, ModelConfig } from './types.js'
 
 import sqlite3 from 'sqlite3'
 import { open, type Database } from 'sqlite'
@@ -13,12 +13,17 @@ interface StoredSession {
 export interface Store {
   readonly agents: AgentDetails[]
   readonly teams: TeamDetails[]
+  readonly toolbox: ToolDetails[]
 
   listSessions(args: {
     dbId: string
     entityType: EntityType
     componentId: string
   }): Promise<SessionEntry[]>
+
+  listAllSessions(): Promise<SessionEntry[]>
+
+  getSession(sessionId: string): Promise<SessionEntry | null>
 
   getOrCreateSession(args: {
     dbId: string
@@ -62,6 +67,11 @@ export interface Store {
   getModelConfig(agentId: string): Promise<ModelConfig | null>
   validateModelConfig(modelConfig: ModelConfig): Promise<boolean>
   deleteModelConfig(agentId: string): Promise<void>
+
+  // Knowledge Base
+  addKnowledgeDocument(title: string, content: string): Promise<string>
+  addKnowledgeChunk(docId: string, content: string, embedding: number[]): Promise<void>
+  searchKnowledge(embedding: number[], limit: number): Promise<Array<{ docId: string; content: string; score: number }>>
 }
 
 function makeSessionKey(args: {
@@ -80,6 +90,7 @@ function nowSeconds(): number {
 export class InMemoryStore implements Store {
   readonly agents: AgentDetails[]
   readonly teams: TeamDetails[]
+  readonly toolbox: ToolDetails[]
 
   private readonly sessionsByListKey: Map<string, SessionEntry[]> = new Map()
   private readonly sessionsByKey: Map<SessionKey, StoredSession> = new Map()
@@ -104,6 +115,25 @@ export class InMemoryStore implements Store {
         model: { provider: 'mock', model: 'echo', name: 'Mock Echo' }
       }
     ]
+
+    this.toolbox = [
+      {
+        name: 'read_file',
+        description: 'Read a file from the workspace'
+      },
+      {
+        name: 'write_file',
+        description: 'Write a file to the workspace'
+      },
+      {
+        name: 'list_files',
+        description: 'List files in the workspace'
+      },
+      {
+        name: 'run_command',
+        description: 'Run a shell command'
+      }
+    ]
   }
 
   async listSessions(args: {
@@ -113,6 +143,23 @@ export class InMemoryStore implements Store {
   }): Promise<SessionEntry[]> {
     const listKey = `${args.dbId}::${args.entityType}::${args.componentId}`
     return this.sessionsByListKey.get(listKey) ?? []
+  }
+
+  async listAllSessions(): Promise<SessionEntry[]> {
+    const allSessions: SessionEntry[] = []
+    for (const session of this.sessionsByKey.values()) {
+      allSessions.push(session.entry)
+    }
+    return allSessions.sort((a, b) => b.created_at - a.created_at)
+  }
+
+  async getSession(sessionId: string): Promise<SessionEntry | null> {
+    for (const session of this.sessionsByKey.values()) {
+      if (session.entry.session_id === sessionId) {
+        return session.entry
+      }
+    }
+    return null
   }
 
   async getOrCreateSession(args: {
@@ -138,7 +185,9 @@ export class InMemoryStore implements Store {
     const entry: SessionEntry = {
       session_id: sessionId,
       session_name: args.sessionName,
-      created_at: nowSeconds()
+      created_at: nowSeconds(),
+      entity_type: args.entityType,
+      component_id: args.componentId
     }
 
     this.sessionsByKey.set(key, { entry, runs: [] })
@@ -169,7 +218,9 @@ export class InMemoryStore implements Store {
       const entry: SessionEntry = {
         session_id: args.sessionId,
         session_name: 'Session',
-        created_at: nowSeconds()
+        created_at: nowSeconds(),
+        entity_type: args.entityType,
+        component_id: args.componentId
       }
       this.sessionsByKey.set(key, { entry, runs: [args.run] })
       return
@@ -266,11 +317,24 @@ export class InMemoryStore implements Store {
   async deleteModelConfig(agentId: string): Promise<void> {
     // No-op in InMemoryStore
   }
+
+  async addKnowledgeDocument(title: string, content: string): Promise<string> {
+    return 'mock_doc_id'
+  }
+
+  async addKnowledgeChunk(docId: string, content: string, embedding: number[]): Promise<void> {
+    // No-op
+  }
+
+  async searchKnowledge(embedding: number[], limit: number): Promise<Array<{ docId: string; content: string; score: number }>> {
+    return []
+  }
 }
 
 export class SqliteStore implements Store {
   readonly agents: AgentDetails[]
   readonly teams: TeamDetails[]
+  readonly toolbox: ToolDetails[]
 
   private readonly db: Database
 
@@ -292,6 +356,25 @@ export class SqliteStore implements Store {
         name: 'Echo Team',
         db_id: 'db_team_echo',
         model: { provider: 'mock', model: 'echo', name: 'Mock Echo' }
+      }
+    ]
+
+    this.toolbox = [
+      {
+        name: 'read_file',
+        description: 'Read a file from the workspace'
+      },
+      {
+        name: 'write_file',
+        description: 'Write a file to the workspace'
+      },
+      {
+        name: 'list_files',
+        description: 'List files in the workspace'
+      },
+      {
+        name: 'run_command',
+        description: 'Run a shell command'
       }
     ]
   }
@@ -346,7 +429,20 @@ export class SqliteStore implements Store {
         '  model_name TEXT NOT NULL,',
         '  model TEXT NOT NULL',
         ');',
-        'CREATE INDEX IF NOT EXISTS agents_name_idx ON agents (name);'
+        'CREATE INDEX IF NOT EXISTS agents_name_idx ON agents (name);',
+        'CREATE TABLE IF NOT EXISTS knowledge_documents (',
+        '  id TEXT PRIMARY KEY,',
+        '  title TEXT NOT NULL,',
+        '  content TEXT NOT NULL,',
+        '  created_at INTEGER NOT NULL',
+        ');',
+        'CREATE TABLE IF NOT EXISTS knowledge_chunks (',
+        '  id TEXT PRIMARY KEY,',
+        '  doc_id TEXT NOT NULL,',
+        '  content TEXT NOT NULL,',
+        '  embedding TEXT NOT NULL,',
+        '  FOREIGN KEY(doc_id) REFERENCES knowledge_documents(id) ON DELETE CASCADE',
+        ');'
       ].join('\n')
     )
 
@@ -371,8 +467,47 @@ export class SqliteStore implements Store {
       session_id: r.session_id,
       session_name: r.session_name,
       created_at: r.created_at,
-      ...(r.updated_at ? { updated_at: r.updated_at } : {})
+      updated_at: r.updated_at || undefined,
+      entity_type: args.entityType,
+      component_id: args.componentId
     }))
+  }
+
+  async listAllSessions(): Promise<SessionEntry[]> {
+    const rows = await this.db.all<
+      Array<{ session_id: string; session_name: string; created_at: number; updated_at: number | null; entity_type: EntityType; component_id: string }>
+    >(
+      'SELECT session_id, session_name, created_at, updated_at, entity_type, component_id FROM sessions ORDER BY created_at DESC'
+    )
+
+    return rows.map((r) => ({
+      session_id: r.session_id,
+      session_name: r.session_name,
+      created_at: r.created_at,
+      updated_at: r.updated_at || undefined,
+      entity_type: r.entity_type,
+      component_id: r.component_id
+    }))
+  }
+
+  async getSession(sessionId: string): Promise<SessionEntry | null> {
+    const row = await this.db.get<
+      { session_id: string; session_name: string; created_at: number; updated_at: number | null; entity_type: EntityType; component_id: string } | undefined
+    >(
+      'SELECT session_id, session_name, created_at, updated_at, entity_type, component_id FROM sessions WHERE session_id = ?',
+      sessionId
+    )
+
+    if (!row) return null
+
+    return {
+      session_id: row.session_id,
+      session_name: row.session_name,
+      created_at: row.created_at,
+      updated_at: row.updated_at || undefined,
+      entity_type: row.entity_type,
+      component_id: row.component_id
+    }
   }
 
   async getOrCreateSession(args: {
@@ -401,7 +536,9 @@ export class SqliteStore implements Store {
           session_id: existing.session_id,
           session_name: existing.session_name,
           created_at: existing.created_at,
-          ...(existing.updated_at ? { updated_at: existing.updated_at } : {})
+          updated_at: existing.updated_at || undefined,
+          entity_type: args.entityType,
+          component_id: args.componentId
         }
       }
     }
@@ -409,7 +546,9 @@ export class SqliteStore implements Store {
     const entry: SessionEntry = {
       session_id: sessionId,
       session_name: args.sessionName,
-      created_at: nowSeconds()
+      created_at: nowSeconds(),
+      entity_type: args.entityType,
+      component_id: args.componentId
     }
 
     await this.db.run(
@@ -587,6 +726,53 @@ export class SqliteStore implements Store {
     );
     console.log(`Delete result:`, result);
   }
+
+  async addKnowledgeDocument(title: string, content: string): Promise<string> {
+    const id = `doc_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    await this.db.run(
+      'INSERT INTO knowledge_documents (id, title, content, created_at) VALUES (?, ?, ?, ?)',
+      id, title, content, Math.floor(Date.now() / 1000)
+    )
+    return id
+  }
+
+  async addKnowledgeChunk(docId: string, content: string, embedding: number[]): Promise<void> {
+    const id = `chunk_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    await this.db.run(
+      'INSERT INTO knowledge_chunks (id, doc_id, content, embedding) VALUES (?, ?, ?, ?)',
+      id, docId, content, JSON.stringify(embedding)
+    )
+  }
+
+  async searchKnowledge(embedding: number[], limit: number): Promise<Array<{ docId: string; content: string; score: number }>> {
+    // Fetch all chunks (inefficient for large data, but MVP)
+    const chunks = await this.db.all<{ doc_id: string; content: string; embedding: string }[]>(
+      'SELECT doc_id, content, embedding FROM knowledge_chunks'
+    )
+
+    const results = chunks.map(chunk => {
+      const chunkEmbedding = JSON.parse(chunk.embedding) as number[]
+      const score = cosineSimilarity(embedding, chunkEmbedding)
+      return { docId: chunk.doc_id, content: chunk.content, score }
+    })
+
+    // Sort by score descending
+    results.sort((a, b) => b.score - a.score)
+
+    return results.slice(0, limit)
+  }
+}
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
 function safeJsonParse(value: string): unknown {

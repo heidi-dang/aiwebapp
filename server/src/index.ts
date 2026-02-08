@@ -17,7 +17,7 @@ import { registerSessionRoutes } from './routes/sessions.js';
 import { registerRunRoutes } from './routes/runs.js';
 import authRoutes from './routes/auth.js';
 import memoryRoutes from './routes/memory.js';
-import knowledgeRoutes from './routes/knowledge.js';
+import { registerKnowledgeRoutes } from './routes/knowledge.js';
 import { Response } from 'express-serve-static-core';
 
 const PORT = Number(process.env.PORT ?? 7777)
@@ -58,11 +58,11 @@ async function main() {
   // Register additional routes
   app.use('/auth', authRoutes);
   app.use('/memory', memoryRoutes);
-  app.use('/knowledge', knowledgeRoutes);
+  registerKnowledgeRoutes(app, store);
 
   // Register toolbox routes for UI-driven tools (internal)
   const { registerToolboxRoutes } = await import('./routes/toolbox.js')
-  await registerToolboxRoutes(app)
+  await registerToolboxRoutes(app, store)
 
   console.log('RUNNER_URL:', process.env.RUNNER_URL);
 

@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify'
+import { Express } from 'express'
 import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { RunEvent, StreamChunk } from '../types.js'
@@ -14,10 +14,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function writeChunk(replyRaw: NodeJS.WritableStream, chunk: StreamChunk) {
+function writeChunk(res: any, chunk: StreamChunk) {
   // Ensure chunks are newline-delimited so downstream stream parsers
   // can split and parse individual JSON objects incrementally.
-  replyRaw.write(JSON.stringify(chunk) + '\n')
+  res.write(JSON.stringify(chunk) + '\n')
 }
 
 function requireEnv(name: string): string {
@@ -26,18 +26,19 @@ function requireEnv(name: string): string {
   return v
 }
 
-export async function registerRunRoutes(app: FastifyInstance, store: Store) {
+export async function registerRunRoutes(app: Express, store: Store) {
   const RUNNER_URL = requireEnv('RUNNER_URL')
   const RUNNER_TOKEN = process.env.RUNNER_TOKEN ?? 'change_me'
-  app.post('/agents/:agentId/runs', upload.none(), async (req, reply) => {
-    requireOptionalBearerAuth(req, reply)
-    if (reply.sent) return
+  
+  app.post('/agents/:agentId/runs', upload.none(), async (req, res) => {
+    requireOptionalBearerAuth(req, res)
+    if (res.headersSent) return
 
     const { agentId } = req.params as { agentId: string }
     const agent = store.agents.find((a) => a.id === agentId)
     if (!agent || !agent.db_id) {
-      reply.code(404)
-      return { detail: 'Agent not found' }
+      res.status(404).json({ detail: 'Agent not found' })
+      return
     }
 
     const message = (req.body as { message?: string }).message || ''
@@ -70,8 +71,8 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
 
     if (!runnerRes.ok) {
       const text = await runnerRes.text()
-      reply.code(500)
-      return { detail: `Runner error: ${runnerRes.status} ${text}` }
+      res.status(500).json({ detail: `Runner error: ${runnerRes.status} ${text}` })
+      return
     }
 
     const job = await runnerRes.json()
@@ -86,8 +87,8 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
 
     if (!startRes.ok) {
       const text = await startRes.text()
-      reply.code(500)
-      return { detail: `Start error: ${startRes.status} ${text}` }
+      res.status(500).json({ detail: `Start error: ${startRes.status} ${text}` })
+      return
     }
 
     // Stream events from runner
@@ -99,26 +100,25 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
 
     if (!eventsRes.ok) {
       const text = await eventsRes.text()
-      reply.code(500)
-      return { detail: `Events error: ${eventsRes.status} ${text}` }
+      res.status(500).json({ detail: `Events error: ${eventsRes.status} ${text}` })
+      return
     }
 
     const reader = eventsRes.body?.getReader()
     if (!reader) {
-      reply.code(500)
-      return { detail: 'No reader for events' }
+      res.status(500).json({ detail: 'No reader for events' })
+      return
     }
 
     const origin = req.headers.origin
     if (origin) {
-      reply.raw.setHeader('Access-Control-Allow-Origin', origin)
-      reply.raw.setHeader('Access-Control-Allow-Credentials', 'true')
+      res.setHeader('Access-Control-Allow-Origin', origin)
+      res.setHeader('Access-Control-Allow-Credentials', 'true')
     }
-    reply.raw.setHeader('Content-Type', 'application/json; charset=utf-8')
-    reply.raw.setHeader('Cache-Control', 'no-cache')
-    reply.raw.setHeader('Connection', 'keep-alive')
-    reply.hijack()
-    reply.raw.flushHeaders()
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.flushHeaders()
 
     const decoder = new TextDecoder()
     let buffer = ''
@@ -171,7 +171,7 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
               }
             }
 
-            if (chunk) writeChunk(reply.raw, chunk)
+            if (chunk) writeChunk(res, chunk)
           } catch {
             // ignore parse errors
           }
@@ -195,18 +195,18 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       }
     })
 
-    reply.raw.end()
+    res.end()
   })
 
-  app.post('/teams/:teamId/runs', upload.none(), async (req, reply) => {
-    requireOptionalBearerAuth(req, reply)
-    if (reply.sent) return
+  app.post('/teams/:teamId/runs', upload.none(), async (req, res) => {
+    requireOptionalBearerAuth(req, res)
+    if (res.headersSent) return
 
     const { teamId } = req.params as { teamId: string }
     const team = store.teams.find((t) => t.id === teamId)
     if (!team || !team.db_id) {
-      reply.code(404)
-      return { detail: 'Team not found' }
+      res.status(404).json({ detail: 'Team not found' })
+      return
     }
 
     const message = (req.body as { message?: string }).message || ''
@@ -222,13 +222,13 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
 
     const origin = req.headers.origin
     if (origin) {
-      reply.raw.setHeader('Access-Control-Allow-Origin', origin)
-      reply.raw.setHeader('Access-Control-Allow-Credentials', 'true')
+      res.setHeader('Access-Control-Allow-Origin', origin)
+      res.setHeader('Access-Control-Allow-Credentials', 'true')
     }
-    reply.raw.setHeader('Content-Type', 'application/json; charset=utf-8')
-    reply.raw.setHeader('Cache-Control', 'no-cache')
-    reply.raw.setHeader('Connection', 'keep-alive')
-    reply.raw.flushHeaders()
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.flushHeaders()
 
     const started: StreamChunk = {
       event: RunEvent.TeamRunStarted,
@@ -238,7 +238,7 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       team_id: teamId,
       content: ''
     }
-    writeChunk(reply.raw, started)
+    writeChunk(res, started)
 
     const finalText = `Echo: ${message}`
     let current = ''
@@ -254,7 +254,7 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
         team_id: teamId,
         content: current
       }
-      writeChunk(reply.raw, chunk)
+      writeChunk(res, chunk)
       await sleep(60)
     }
 
@@ -266,7 +266,7 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       team_id: teamId,
       content: finalText
     }
-    writeChunk(reply.raw, completed)
+    writeChunk(res, completed)
 
     await store.appendRun({
       dbId: team.db_id,
@@ -280,6 +280,6 @@ export async function registerRunRoutes(app: FastifyInstance, store: Store) {
       }
     })
 
-    reply.raw.end()
+    res.end()
   })
 }

@@ -1,9 +1,9 @@
 import { requireOptionalBearerAuth } from '../auth.js';
 export async function registerTeamRoutes(app, store) {
-    app.get('/teams', async (req, reply) => {
-        requireOptionalBearerAuth(req, reply);
-        if (reply.sent)
+    app.get('/teams', async (req, res) => {
+        requireOptionalBearerAuth(req, res);
+        if (res.headersSent)
             return;
-        return store.teams;
+        res.json(store.teams);
     });
 }
