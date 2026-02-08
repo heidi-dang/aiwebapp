@@ -1,4 +1,4 @@
-import { AgentDetails, EntityType, RunRecord, SessionEntry, TeamDetails, User, ModelConfig, ToolDetails, UserSession, SocialAccount } from './types.js'
+import { AgentDetails, EntityType, RunRecord, SessionEntry, TeamDetails, User, UserSession, SocialAccount, ModelConfig, ToolDetails } from './types.js'
 import path from 'node:path'
 
 import sqlite3 from 'sqlite3'
@@ -64,6 +64,18 @@ export interface Store {
   updateUserLastLogin(id: string): Promise<void>
   getUserCount(): Promise<number>
 
+  // User sessions
+  createUserSession(userId: string, tokenHash: string, expiresAt: number): Promise<UserSession>
+  getUserSessionByTokenHash(tokenHash: string): Promise<UserSession | null>
+  deleteUserSession(tokenHash: string): Promise<boolean>
+  deleteUserSessionsByUserId(userId: string): Promise<boolean>
+
+  // Social accounts
+  createSocialAccount(userId: string, provider: string, providerId: string, providerData?: string): Promise<SocialAccount>
+  getSocialAccountByProvider(provider: string, providerId: string): Promise<SocialAccount | null>
+  getSocialAccountsByUserId(userId: string): Promise<SocialAccount[]>
+  deleteSocialAccount(id: string): Promise<boolean>
+
   // Model configuration
   saveModelConfig(agentId: string, modelConfig: ModelConfig): Promise<void>
   getModelConfig(agentId: string): Promise<ModelConfig | null>
@@ -82,18 +94,6 @@ export interface Store {
   addKnowledgeDocument(title: string, content: string): Promise<string>
   addKnowledgeChunk(docId: string, content: string, embedding: number[]): Promise<void>
   searchKnowledge(embedding: number[], limit: number): Promise<Array<{ docId: string; content: string; score: number }>>
-
-  // User sessions
-  createUserSession(userId: string, tokenHash: string, expiresAt: number): Promise<UserSession>
-  getUserSessionByTokenHash(tokenHash: string): Promise<UserSession | null>
-  deleteUserSession(tokenHash: string): Promise<boolean>
-  deleteUserSessionsByUserId(userId: string): Promise<boolean>
-
-  // Social accounts
-  createSocialAccount(userId: string, provider: string, providerId: string, providerData?: string): Promise<SocialAccount>
-  getSocialAccountByProvider(provider: string, providerId: string): Promise<SocialAccount | null>
-  getSocialAccountsByUserId(userId: string): Promise<SocialAccount[]>
-  deleteSocialAccount(id: string): Promise<boolean>
 }
 
 function makeSessionKey(args: {
@@ -347,13 +347,13 @@ export class InMemoryStore implements Store {
     const createdAt = nowSeconds();
     const role = (await this.getUserCount()) === 0 ? 'admin' : 'user';
     const id = (this.users.length + 1).toString();
-    const user: User = {
-      id,
-      email,
+    const user: User = { 
+      id, 
+      email, 
       name,
       password_hash: hashedPassword,
       email_verified: false,
-      role,
+      role, 
       created_at: createdAt,
       updated_at: createdAt
     };
@@ -378,6 +378,40 @@ export class InMemoryStore implements Store {
 
   async getUserCount(): Promise<number> {
     return this.users.length;
+  }
+
+  // User sessions (stub implementations)
+  async createUserSession(userId: string, tokenHash: string, expiresAt: number): Promise<UserSession> {
+    throw new Error('User sessions not supported in InMemoryStore')
+  }
+
+  async getUserSessionByTokenHash(tokenHash: string): Promise<UserSession | null> {
+    return null
+  }
+
+  async deleteUserSession(tokenHash: string): Promise<boolean> {
+    return false
+  }
+
+  async deleteUserSessionsByUserId(userId: string): Promise<boolean> {
+    return false
+  }
+
+  // Social accounts (stub implementations)
+  async createSocialAccount(userId: string, provider: string, providerId: string, providerData?: string): Promise<SocialAccount> {
+    throw new Error('Social accounts not supported in InMemoryStore')
+  }
+
+  async getSocialAccountByProvider(provider: string, providerId: string): Promise<SocialAccount | null> {
+    return null
+  }
+
+  async getSocialAccountsByUserId(userId: string): Promise<SocialAccount[]> {
+    return []
+  }
+
+  async deleteSocialAccount(id: string): Promise<boolean> {
+    return false
   }
 
   async saveModelConfig(agentId: string, modelConfig: ModelConfig): Promise<void> {
@@ -442,70 +476,6 @@ export class InMemoryStore implements Store {
 
   async updateSessionState(sessionId: string, state: Record<string, any>): Promise<void> {
     // No-op in InMemoryStore
-  }
-
-  // User sessions
-  private userSessions: UserSession[] = []
-  async createUserSession(userId: string, tokenHash: string, expiresAt: number): Promise<UserSession> {
-    const id = (this.userSessions.length + 1).toString()
-    const session: UserSession = {
-      id,
-      user_id: userId,
-      token_hash: tokenHash,
-      expires_at: expiresAt,
-      created_at: nowSeconds()
-    }
-    this.userSessions.push(session)
-    return session
-  }
-  async getUserSessionByTokenHash(tokenHash: string): Promise<UserSession | null> {
-    const session = this.userSessions.find((s) => s.token_hash === tokenHash) || null
-    if (!session) return null
-    if (session.expires_at <= nowSeconds()) return null
-    return session
-  }
-  async deleteUserSession(tokenHash: string): Promise<boolean> {
-    const idx = this.userSessions.findIndex((s) => s.token_hash === tokenHash)
-    if (idx >= 0) {
-      this.userSessions.splice(idx, 1)
-      return true
-    }
-    return false
-  }
-  async deleteUserSessionsByUserId(userId: string): Promise<boolean> {
-    const before = this.userSessions.length
-    this.userSessions = this.userSessions.filter((s) => s.user_id !== userId)
-    return this.userSessions.length < before
-  }
-
-  // Social accounts
-  private socialAccounts: SocialAccount[] = []
-  async createSocialAccount(userId: string, provider: string, providerId: string, providerData?: string): Promise<SocialAccount> {
-    const id = (this.socialAccounts.length + 1).toString()
-    const account: SocialAccount = {
-      id,
-      user_id: userId,
-      provider: provider as 'google' | 'github' | 'apple' | 'microsoft',
-      provider_id: providerId,
-      provider_data: providerData,
-      created_at: nowSeconds()
-    }
-    this.socialAccounts.push(account)
-    return account
-  }
-  async getSocialAccountByProvider(provider: string, providerId: string): Promise<SocialAccount | null> {
-    return this.socialAccounts.find((a) => a.provider === provider && a.provider_id === providerId) || null
-  }
-  async getSocialAccountsByUserId(userId: string): Promise<SocialAccount[]> {
-    return this.socialAccounts.filter((a) => a.user_id === userId)
-  }
-  async deleteSocialAccount(id: string): Promise<boolean> {
-    const idx = this.socialAccounts.findIndex((a) => a.id === id)
-    if (idx >= 0) {
-      this.socialAccounts.splice(idx, 1)
-      return true
-    }
-    return false
   }
 }
 
@@ -860,6 +830,48 @@ export class SqliteStore implements Store {
     return (result.changes ?? 0) > 0
   }
 
+  async createUser(email: string, name: string, hashedPassword: string): Promise<User> {
+    const createdAt = nowSeconds()
+    const role = (await this.getUserCount()) === 0 ? 'admin' : 'user'
+    const result = await this.db.run(
+      `INSERT INTO users (email, name, hashed_password, role, created_at) VALUES (?, ?, ?, ?, ?)`,
+      email,
+      name,
+      hashedPassword,
+      role,
+      createdAt
+    )
+    return {
+      id: result.lastID?.toString() || "0",
+      email,
+      name,
+      role,
+      email_verified: false,
+      created_at: createdAt,
+      updated_at: createdAt
+    }
+  }
+
+  async getUserByEmail(email: string): Promise<User | null> {
+    const row = await this.db.get<User>(`SELECT * FROM users WHERE email = ?`, email)
+    return row || null
+  }
+
+  async getUserById(id: string): Promise<User | null> {
+    const row = await this.db.get<User>(`SELECT * FROM users WHERE id = ?`, id)
+    return row || null
+  }
+
+  async updateUserLastLogin(id: string): Promise<void> {
+    const lastLoginAt = nowSeconds()
+    await this.db.run(`UPDATE users SET last_login_at = ? WHERE id = ?`, lastLoginAt, id)
+  }
+
+  async getUserCount(): Promise<number> {
+    const row = await this.db.get<{ count: number }>(`SELECT COUNT(*) as count FROM users`)
+    return row?.count || 0
+  }
+
   // User sessions
   async createUserSession(userId: string, tokenHash: string, expiresAt: number): Promise<UserSession> {
     const createdAt = nowSeconds()
@@ -878,6 +890,7 @@ export class SqliteStore implements Store {
       created_at: createdAt
     }
   }
+
   async getUserSessionByTokenHash(tokenHash: string): Promise<UserSession | null> {
     const row = await this.db.get<UserSession>(
       `SELECT * FROM user_sessions WHERE token_hash = ? AND expires_at > ?`,
@@ -886,6 +899,7 @@ export class SqliteStore implements Store {
     )
     return row || null
   }
+
   async deleteUserSession(tokenHash: string): Promise<boolean> {
     const result = await this.db.run(
       `DELETE FROM user_sessions WHERE token_hash = ?`,
@@ -893,6 +907,7 @@ export class SqliteStore implements Store {
     )
     return (result.changes ?? 0) > 0
   }
+
   async deleteUserSessionsByUserId(userId: string): Promise<boolean> {
     const result = await this.db.run(
       `DELETE FROM user_sessions WHERE user_id = ?`,
@@ -921,6 +936,7 @@ export class SqliteStore implements Store {
       created_at: createdAt
     }
   }
+
   async getSocialAccountByProvider(provider: string, providerId: string): Promise<SocialAccount | null> {
     const row = await this.db.get<SocialAccount>(
       `SELECT * FROM social_accounts WHERE provider = ? AND provider_id = ?`,
@@ -929,6 +945,7 @@ export class SqliteStore implements Store {
     )
     return row || null
   }
+
   async getSocialAccountsByUserId(userId: string): Promise<SocialAccount[]> {
     const rows = await this.db.all<SocialAccount[]>(
       `SELECT * FROM social_accounts WHERE user_id = ? ORDER BY created_at DESC`,
@@ -936,56 +953,13 @@ export class SqliteStore implements Store {
     )
     return rows || []
   }
+
   async deleteSocialAccount(id: string): Promise<boolean> {
     const result = await this.db.run(
       `DELETE FROM social_accounts WHERE id = ?`,
       id
     )
     return (result.changes ?? 0) > 0
-  }
-  async createUser(email: string, name: string, hashedPassword: string): Promise<User> {
-    const createdAt = nowSeconds()
-    const role = (await this.getUserCount()) === 0 ? 'admin' : 'user'
-    const result = await this.db.run(
-      `INSERT INTO users (email, name, password_hash, role, created_at, updated_at, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      email,
-      name,
-      hashedPassword,
-      role,
-      createdAt,
-      createdAt,
-      false
-    )
-    return {
-      id: result.lastID?.toString() || "0",
-      email,
-      name,
-      password_hash: hashedPassword,
-      email_verified: false,
-      role,
-      created_at: createdAt,
-      updated_at: createdAt
-    }
-  }
-
-  async getUserByEmail(email: string): Promise<User | null> {
-    const row = await this.db.get<User>(`SELECT * FROM users WHERE email = ?`, email)
-    return row || null
-  }
-
-  async getUserById(id: string): Promise<User | null> {
-    const row = await this.db.get<User>(`SELECT * FROM users WHERE id = ?`, id)
-    return row || null
-  }
-
-  async updateUserLastLogin(id: string): Promise<void> {
-    const lastLoginAt = nowSeconds()
-    await this.db.run(`UPDATE users SET last_login_at = ? WHERE id = ?`, lastLoginAt, id)
-  }
-
-  async getUserCount(): Promise<number> {
-    const row = await this.db.get<{ count: number }>(`SELECT COUNT(*) as count FROM users`)
-    return row?.count || 0
   }
 
   async saveModelConfig(agentId: string, modelConfig: ModelConfig): Promise<void> {
