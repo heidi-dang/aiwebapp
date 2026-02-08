@@ -743,3 +743,23 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 **Last Updated**: February 6, 2026
 **Version**: 1.0.0
+
+## Updates
+
+### Landing Page
+- The landing page is now hosted on port `6868` and accessible at [https://heidiai.com.au](https://heidiai.com.au).
+- The landing page includes a modern, responsive design with links to the main AI platform and user registration/login.
+
+### User Registration/Login
+- A new service for user registration and login is hosted on port `3006` and accessible at [https://user.heidi.com.au](https://user.heidi.com.au).
+- The landing page's "Sign Up" and "Login" buttons redirect users to this service.
+
+### Updated Port Mappings
+- **Landing Page**: Port `6868` ([https://heidiai.com.au](https://heidiai.com.au))
+- **Main App UI**: Port `3000` ([https://ai.heidi.com.au](https://ai.heidi.com.au))
+- **API**: Port `3001` ([https://api.heidi.com.au](https://api.heidi.com.au))
+- **Code**: Port `3002` ([https://code.heidi.com.au](https://code.heidi.com.au))
+- **User Registration/Login**: Port `3006` ([https://user.heidi.com.au](https://user.heidi.com.au))
+
+### Developer Notification
+- Please note that the landing page is now hosted on port `6868`. Update your local configurations and workflows accordingly.
