@@ -1,7 +1,5 @@
 import { requireOptionalBearerAuth } from '../auth.js';
 import { RunEvent } from '../types.js';
-import multer from 'multer';
-const upload = multer();
 function nowSeconds() {
     return Math.floor(Date.now() / 1000);
 }
@@ -22,7 +20,7 @@ function requireEnv(name) {
 export async function registerRunRoutes(app, store) {
     const RUNNER_URL = requireEnv('RUNNER_URL');
     const RUNNER_TOKEN = process.env.RUNNER_TOKEN ?? 'change_me';
-    app.post('/agents/:agentId/runs', upload.none(), async (req, reply) => {
+    app.post('/agents/:agentId/runs', async (req, reply) => {
         requireOptionalBearerAuth(req, reply);
         if (reply.sent)
             return;
@@ -32,8 +30,9 @@ export async function registerRunRoutes(app, store) {
             reply.code(404);
             return { detail: 'Agent not found' };
         }
-        const message = req.body.message || '';
-        const sessionId = req.body.session_id || '';
+        const body = (req.body ?? {});
+        const message = body.message || '';
+        const sessionId = body.session_id || '';
         const created = await store.getOrCreateSession({
             dbId: agent.db_id,
             entityType: 'agent',
@@ -179,7 +178,7 @@ export async function registerRunRoutes(app, store) {
         });
         reply.raw.end();
     });
-    app.post('/teams/:teamId/runs', upload.none(), async (req, reply) => {
+    app.post('/teams/:teamId/runs', async (req, reply) => {
         requireOptionalBearerAuth(req, reply);
         if (reply.sent)
             return;
@@ -189,8 +188,9 @@ export async function registerRunRoutes(app, store) {
             reply.code(404);
             return { detail: 'Team not found' };
         }
-        const message = req.body.message || '';
-        const sessionId = req.body.session_id || '';
+        const body = (req.body ?? {});
+        const message = body.message || '';
+        const sessionId = body.session_id || '';
         const created = await store.getOrCreateSession({
             dbId: team.db_id,
             entityType: 'team',

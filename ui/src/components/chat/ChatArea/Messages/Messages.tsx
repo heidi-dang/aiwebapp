@@ -114,8 +114,8 @@ const AgentMessageWrapper = ({ message }: MessageWrapperProps) => {
             {message.tool_calls.map((toolCall, index) => (
               <ToolComponent
                 key={
-                  toolCall.tool_call_id ||
-                  `${toolCall.tool_name}-${toolCall.created_at}-${index}`
+                  toolCall.id ||
+                  `${toolCall.function?.name || 'unknown'}-${index}`
                 }
                 tools={toolCall}
               />
@@ -149,7 +149,7 @@ const Reasonings: FC<ReasoningProps> = ({ reasoning }) => (
 
 const ToolComponent = memo(({ tools }: ToolCallProps) => (
   <div className="cursor-default rounded-full bg-accent px-2 py-1.5 text-xs">
-    <p className="font-dmmono uppercase text-primary/80">{tools.tool_name}</p>
+    <p className="font-dmmono uppercase text-primary/80">{tools.function?.name || 'Unknown Tool'}</p>
   </div>
 ))
 ToolComponent.displayName = 'ToolComponent'

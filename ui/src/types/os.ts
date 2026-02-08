@@ -1,14 +1,10 @@
 export interface ToolCall {
-  role: 'user' | 'tool' | 'system' | 'assistant'
-  content: string | null
-  tool_call_id: string
-  tool_name: string
-  tool_args: Record<string, string>
-  tool_call_error: boolean
-  metrics: {
-    time: number
+  function: {
+    arguments: string
+    name: string
   }
-  created_at: number
+  id: string
+  type: string
 }
 
 export interface ReasoningSteps {

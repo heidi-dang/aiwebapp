@@ -4,9 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
+    "dev:3006": "next dev -p 3006",
     "dev:phase2": "next dev -p 3200",
     "build": "next build",
     "start": "next start",
+    "start:3006": "next start -p 3006",
     "smoke": "node smoke.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
@@ -45,6 +47,7 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "array.prototype.findlast": "^1.2.5",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
