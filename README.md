@@ -4,8 +4,8 @@ A comprehensive AI-powered web application for managing and interacting with aut
 
 ## Websites
 
-- **Main Website**: [https://heidi.com.au](https://heidi.com.au) - Landing page with company information
-- **AI Platform**: [https://ai.heidi.com.au](https://ai.heidi.com.au) - Full AI web application
+- **Main Website**: [https://heidiai.com.au](https://heidiai.com.au) - Landing page with company information
+- **AI Platform**: [https://ai.heidiai.com.au](https://ai.heidiai.com.au) - Full AI web application
 
 ## Features
 
