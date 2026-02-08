@@ -1,4 +1,5 @@
-import { AgentDetails, EntityType, RunRecord, SessionEntry, TeamDetails, ToolDetails, User, ModelConfig } from './types.js'
+import { AgentDetails, EntityType, RunRecord, SessionEntry, TeamDetails, User, UserSession, SocialAccount, ModelConfig, ToolDetails } from './types.js'
+import path from 'node:path'
 
 import sqlite3 from 'sqlite3'
 import { open, type Database } from 'sqlite'
@@ -63,6 +64,18 @@ export interface Store {
   updateUserLastLogin(id: string): Promise<void>
   getUserCount(): Promise<number>
 
+  // User sessions
+  createUserSession(userId: string, tokenHash: string, expiresAt: number): Promise<UserSession>
+  getUserSessionByTokenHash(tokenHash: string): Promise<UserSession | null>
+  deleteUserSession(tokenHash: string): Promise<boolean>
+  deleteUserSessionsByUserId(userId: string): Promise<boolean>
+
+  // Social accounts
+  createSocialAccount(userId: string, provider: string, providerId: string, providerData?: string): Promise<SocialAccount>
+  getSocialAccountByProvider(provider: string, providerId: string): Promise<SocialAccount | null>
+  getSocialAccountsByUserId(userId: string): Promise<SocialAccount[]>
+  deleteSocialAccount(id: string): Promise<boolean>
+
   // Model configuration
   saveModelConfig(agentId: string, modelConfig: ModelConfig): Promise<void>
   getModelConfig(agentId: string): Promise<ModelConfig | null>
@@ -107,12 +120,35 @@ export class InMemoryStore implements Store {
   private users: User[] = []
 
   constructor() {
+    const rootDir = path.resolve(process.cwd(), '..')
     this.agents = [
       {
         id: 'agent_echo',
         name: 'Echo Agent',
         db_id: 'db_echo',
-        model: { provider: 'mock', model: 'echo', name: 'Mock Echo' }
+        model: { provider: 'mock', model: 'echo', name: 'Mock Echo' },
+        base_dir: rootDir
+      },
+      {
+        id: 'agent_ui',
+        name: 'UI Agent',
+        db_id: 'db_ui',
+        model: { provider: 'mock', model: 'echo', name: 'Mock Echo' },
+        base_dir: path.join(rootDir, 'ui')
+      },
+      {
+        id: 'agent_server',
+        name: 'Server Agent',
+        db_id: 'db_server',
+        model: { provider: 'mock', model: 'echo', name: 'Mock Echo' },
+        base_dir: path.join(rootDir, 'server')
+      },
+      {
+        id: 'agent_runner',
+        name: 'Runner Agent',
+        db_id: 'db_runner',
+        model: { provider: 'mock', model: 'echo', name: 'Mock Echo' },
+        base_dir: path.join(rootDir, 'runner')
       }
     ]
 
@@ -311,13 +347,15 @@ export class InMemoryStore implements Store {
     const createdAt = nowSeconds();
     const role = (await this.getUserCount()) === 0 ? 'admin' : 'user';
     const id = (this.users.length + 1).toString();
-    const user: User = {
-      id,
-      email,
+    const user: User = { 
+      id, 
+      email, 
       name,
-      role,
-      hashed_password: hashedPassword,
-      created_at: createdAt
+      password_hash: hashedPassword,
+      email_verified: false,
+      role, 
+      created_at: createdAt,
+      updated_at: createdAt
     };
     this.users.push(user);
     return user;
@@ -340,6 +378,40 @@ export class InMemoryStore implements Store {
 
   async getUserCount(): Promise<number> {
     return this.users.length;
+  }
+
+  // User sessions (stub implementations)
+  async createUserSession(userId: string, tokenHash: string, expiresAt: number): Promise<UserSession> {
+    throw new Error('User sessions not supported in InMemoryStore')
+  }
+
+  async getUserSessionByTokenHash(tokenHash: string): Promise<UserSession | null> {
+    return null
+  }
+
+  async deleteUserSession(tokenHash: string): Promise<boolean> {
+    return false
+  }
+
+  async deleteUserSessionsByUserId(userId: string): Promise<boolean> {
+    return false
+  }
+
+  // Social accounts (stub implementations)
+  async createSocialAccount(userId: string, provider: string, providerId: string, providerData?: string): Promise<SocialAccount> {
+    throw new Error('Social accounts not supported in InMemoryStore')
+  }
+
+  async getSocialAccountByProvider(provider: string, providerId: string): Promise<SocialAccount | null> {
+    return null
+  }
+
+  async getSocialAccountsByUserId(userId: string): Promise<SocialAccount[]> {
+    return []
+  }
+
+  async deleteSocialAccount(id: string): Promise<boolean> {
+    return false
   }
 
   async saveModelConfig(agentId: string, modelConfig: ModelConfig): Promise<void> {
@@ -774,7 +846,9 @@ export class SqliteStore implements Store {
       email,
       name,
       role,
-      created_at: createdAt
+      email_verified: false,
+      created_at: createdAt,
+      updated_at: createdAt
     }
   }
 
@@ -796,6 +870,96 @@ export class SqliteStore implements Store {
   async getUserCount(): Promise<number> {
     const row = await this.db.get<{ count: number }>(`SELECT COUNT(*) as count FROM users`)
     return row?.count || 0
+  }
+
+  // User sessions
+  async createUserSession(userId: string, tokenHash: string, expiresAt: number): Promise<UserSession> {
+    const createdAt = nowSeconds()
+    const result = await this.db.run(
+      `INSERT INTO user_sessions (user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)`,
+      userId,
+      tokenHash,
+      expiresAt,
+      createdAt
+    )
+    return {
+      id: result.lastID?.toString() || "0",
+      user_id: userId,
+      token_hash: tokenHash,
+      expires_at: expiresAt,
+      created_at: createdAt
+    }
+  }
+
+  async getUserSessionByTokenHash(tokenHash: string): Promise<UserSession | null> {
+    const row = await this.db.get<UserSession>(
+      `SELECT * FROM user_sessions WHERE token_hash = ? AND expires_at > ?`,
+      tokenHash,
+      nowSeconds()
+    )
+    return row || null
+  }
+
+  async deleteUserSession(tokenHash: string): Promise<boolean> {
+    const result = await this.db.run(
+      `DELETE FROM user_sessions WHERE token_hash = ?`,
+      tokenHash
+    )
+    return (result.changes ?? 0) > 0
+  }
+
+  async deleteUserSessionsByUserId(userId: string): Promise<boolean> {
+    const result = await this.db.run(
+      `DELETE FROM user_sessions WHERE user_id = ?`,
+      userId
+    )
+    return (result.changes ?? 0) > 0
+  }
+
+  // Social accounts
+  async createSocialAccount(userId: string, provider: string, providerId: string, providerData?: string): Promise<SocialAccount> {
+    const createdAt = nowSeconds()
+    const result = await this.db.run(
+      `INSERT INTO social_accounts (user_id, provider, provider_id, provider_data, created_at) VALUES (?, ?, ?, ?, ?)`,
+      userId,
+      provider,
+      providerId,
+      providerData,
+      createdAt
+    )
+    return {
+      id: result.lastID?.toString() || "0",
+      user_id: userId,
+      provider: provider as 'google' | 'github' | 'apple' | 'microsoft',
+      provider_id: providerId,
+      provider_data: providerData,
+      created_at: createdAt
+    }
+  }
+
+  async getSocialAccountByProvider(provider: string, providerId: string): Promise<SocialAccount | null> {
+    const row = await this.db.get<SocialAccount>(
+      `SELECT * FROM social_accounts WHERE provider = ? AND provider_id = ?`,
+      provider,
+      providerId
+    )
+    return row || null
+  }
+
+  async getSocialAccountsByUserId(userId: string): Promise<SocialAccount[]> {
+    const rows = await this.db.all<SocialAccount[]>(
+      `SELECT * FROM social_accounts WHERE user_id = ? ORDER BY created_at DESC`,
+      userId
+    )
+    return rows || []
+  }
+
+  async deleteSocialAccount(id: string): Promise<boolean> {
+    const result = await this.db.run(
+      `DELETE FROM social_accounts WHERE id = ?`,
+      id
+    )
+    return (result.changes ?? 0) > 0
   }
 
   async saveModelConfig(agentId: string, modelConfig: ModelConfig): Promise<void> {

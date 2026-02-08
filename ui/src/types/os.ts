@@ -1,14 +1,21 @@
 export interface ToolCall {
-  role: 'user' | 'tool' | 'system' | 'assistant'
-  content: string | null
-  tool_call_id: string
-  tool_name: string
-  tool_args: Record<string, string>
-  tool_call_error: boolean
-  metrics: {
+  role?: 'user' | 'tool' | 'system' | 'assistant'
+  content?: string | null
+  tool_call_id?: string
+  tool_name?: string
+  tool_args?: Record<string, string>
+  tool_call_error?: boolean
+  metrics?: {
     time: number
   }
-  created_at: number
+  created_at?: number
+  // Optional OpenAI-style fields for compatibility
+  function?: {
+    arguments: string
+    name: string
+  }
+  id?: string
+  type?: string
 }
 
 export interface ReasoningSteps {
@@ -44,8 +51,8 @@ interface ModelMessage {
   name: string | null
   role: string
   tool_args?: unknown
-  tool_call_id: string | null
-  tool_calls: Array<{
+  tool_call_id?: string | null
+  tool_calls?: Array<{
     function: {
       arguments: string
       name: string
@@ -67,6 +74,15 @@ export interface Agent {
   description: string
   model: Model
   storage?: boolean
+  base_dir?: string
+}
+
+export interface AgentDetails {
+  id: string
+  name?: string
+  db_id?: string
+  model?: Model
+  base_dir?: string
 }
 
 export interface Team {
@@ -177,9 +193,19 @@ export interface AgentExtraData {
   references?: ReferenceData[]
 }
 
-export interface AgentExtraData {
-  reasoning_messages?: ReasoningMessage[]
-  references?: ReferenceData[]
+// Reference data used by the UI to display agent citations
+export interface Reference {
+  name: string
+  content: string
+  meta_data: {
+    chunk?: number | string
+    [key: string]: unknown
+  }
+}
+
+export interface ReferenceData {
+  query: string
+  references: Reference[]
 }
 
 export interface ReasoningMessage {
@@ -197,36 +223,44 @@ export interface ReasoningMessage {
 export interface ChatMessage {
   role: 'user' | 'agent' | 'system' | 'tool'
   content: string
-  streamingError?: boolean
   created_at: number
+  streamingError?: boolean
   tool_calls?: ToolCall[]
-  extra_data?: {
-    reasoning_steps?: ReasoningSteps[]
-    reasoning_messages?: ReasoningMessage[]
-    references?: ReferenceData[]
-    runner_job_id?: string
-  }
-  images?: ImageData[]
+  extra_data?: (AgentExtraData & { runner_job_id?: string; [key: string]: unknown })
   videos?: VideoData[]
+  images?: ImageData[]
   audio?: AudioData[]
   response_audio?: ResponseAudio
 }
 
-export interface AgentDetails {
-  id: string
-  name?: string
-  db_id?: string
-  // Model
-  model?: Model
+export interface Sessions {
+  data: SessionEntry[]
+}
+
+export interface SessionEntry {
+  session_id: string
+  session_name: string
+  created_at: number
+  updated_at?: number
 }
 
 export interface TeamDetails {
   id: string
   name?: string
   db_id?: string
-
-  // Model
   model?: Model
+}
+
+export interface ChatEntry {
+  run_input?: string
+  created_at: number
+  content?: string | object
+  tools?: ToolCall[]
+  extra_data?: AgentExtraData
+  images?: ImageData[]
+  videos?: VideoData[]
+  audio?: AudioData[]
+  response_audio?: ResponseAudio
 }
 
 export interface ImageData {
@@ -248,62 +282,4 @@ export interface AudioData {
   content?: string
   channels?: number
   sample_rate?: number
-}
-
-export interface ReferenceData {
-  query: string
-  references: Reference[]
-  time?: number
-}
-
-export interface Reference {
-  content: string
-  meta_data: {
-    chunk: number
-    chunk_size: number
-  }
-  name: string
-}
-
-export interface SessionEntry {
-  session_id: string
-  session_name: string
-  created_at: number
-  updated_at?: number
-}
-
-export interface Pagination {
-  page: number
-  limit: number
-  total_pages: number
-  total_count: number
-}
-
-export interface Sessions extends SessionEntry {
-  data: SessionEntry[]
-  meta: Pagination
-}
-
-export interface ChatEntry {
-  message: {
-    role: 'user' | 'system' | 'tool' | 'assistant'
-    content: string
-    created_at: number
-  }
-  response: {
-    content: string
-    tools?: ToolCall[]
-    extra_data?: {
-      reasoning_steps?: ReasoningSteps[]
-      reasoning_messages?: ReasoningMessage[]
-      references?: ReferenceData[]
-    }
-    images?: ImageData[]
-    videos?: VideoData[]
-    audio?: AudioData[]
-    response_audio?: {
-      transcript?: string
-    }
-    created_at: number
-  }
 }
