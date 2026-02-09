@@ -28,8 +28,8 @@ import { registerEvaluationRoutes } from './routes/evaluation.js';
 import { registerTracingRoutes } from './routes/tracing.js';
 import { registerReasoningRoutes } from './routes/reasoning.js';
 
-const PORT = Number(process.env.PORT ?? 3001)
-const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000'
+const PORT = Number(process.env.PORT ?? 4001)
+const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:4000'
 const EXTRA_ORIGINS = [
   'https://heidiai.com.au',
   'https://www.heidiai.com.au',

@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
     ]
   },
   async rewrites() {
-    const runnerUrl = process.env.RUNNER_URL ?? 'http://localhost:3002'
+    const runnerUrl = process.env.RUNNER_URL ?? 'http://localhost:4002'
     return [
       {
         source: '/runner/:path*',

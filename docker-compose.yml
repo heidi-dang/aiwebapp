@@ -3,11 +3,11 @@ services:
     image: heididang/aiwebapp-server:latest
     build: ./server
     ports:
-      - "3001:3001"
+      - "4001:4001"
     environment:
-      - PORT=3001
-      - CORS_ORIGIN=http://localhost:3000
-      - RUNNER_URL=http://runner:3002
+      - PORT=4001
+      - CORS_ORIGIN=http://localhost:4000
+      - RUNNER_URL=http://runner:4002
       - CHROMA_URL=http://chroma:8000
       - SQLITE_PATH=/app/data/server.db
     volumes:
@@ -18,10 +18,10 @@ services:
     image: heididang/aiwebapp-runner:latest
     build: ./runner
     ports:
-      - "3002:3002"
+      - "4002:4002"
     environment:
-      - PORT=3002
-      - CORS_ORIGIN=http://localhost:3000
+      - PORT=4002
+      - CORS_ORIGIN=http://localhost:4000
       - RUNNER_DB=/app/data/runner.db
       - RUNNER_TOKEN=dev_token_123
       - RUNNER_PERSIST=true
@@ -42,12 +42,12 @@ services:
     build:
       context: ./ui
       args:
-        NEXT_PUBLIC_API_URL: http://localhost:3001
+        NEXT_PUBLIC_API_URL: http://localhost:4001
     ports:
-      - "3000:3000"
+      - "4000:4000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:3001
-      - RUNNER_URL=http://runner:3002
+      - NEXT_PUBLIC_API_URL=http://localhost:4001
+      - RUNNER_URL=http://runner:4002
     depends_on:
       - server
       - runner

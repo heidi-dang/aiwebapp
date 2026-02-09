@@ -52,12 +52,16 @@ const SessionItem = ({
 
   const handleDeleteSession = async () => {
     if (!(agentId || teamId || dbId)) return
+    const componentId = mode === 'team' ? teamId ?? '' : agentId ?? ''
+    if (!componentId) return
     setIsDeleting(true)
     try {
       const response = await deleteSessionAPI(
         selectedEndpoint,
         dbId ?? '',
         session_id,
+        mode,
+        componentId,
         authToken
       )
 

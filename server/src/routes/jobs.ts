@@ -4,7 +4,7 @@ import { z } from 'zod'
 
 export async function registerJobRoutes(app: any, store: Store) {
   // Store runner URL and token for job cancellation
-  const RUNNER_URL = process.env.RUNNER_URL ?? 'http://localhost:7778'
+  const RUNNER_URL = process.env.RUNNER_URL ?? 'http://localhost:4002'
   const RUNNER_TOKEN = process.env.RUNNER_TOKEN ?? 'change_me'
 
   app.post('/jobs/:id/cancel', async (req: any, res: any) => {

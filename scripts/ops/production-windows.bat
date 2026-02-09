@@ -192,7 +192,7 @@ if "%result%"=="" (
 
 call :get_env_value "%ENV_FILE%" "PORT"
 if "%result%"=="" (
-    call :prompt_value "Enter production UI port" "80"
+    call :prompt_value "Enter production UI port" "4000"
     set PORT=%result%
     echo PORT=%PORT% >> "%ENV_FILE%"
 ) else (
@@ -202,7 +202,7 @@ set "UI_PORT=%PORT%"
 
 call :get_env_value "%ENV_FILE%" "SERVER_PORT"
 if "%result%"=="" (
-    call :prompt_value "Enter production Server port" "3001"
+    call :prompt_value "Enter production Server port" "4001"
     set SERVER_PORT=%result%
     echo SERVER_PORT=%SERVER_PORT% >> "%ENV_FILE%"
 ) else (
@@ -211,7 +211,7 @@ if "%result%"=="" (
 
 call :get_env_value "%ENV_FILE%" "RUNNER_PORT"
 if "%result%"=="" (
-    call :prompt_value "Enter production Runner port" "3002"
+    call :prompt_value "Enter production Runner port" "4002"
     set RUNNER_PORT=%result%
     echo RUNNER_PORT=%RUNNER_PORT% >> "%ENV_FILE%"
 ) else (
