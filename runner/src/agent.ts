@@ -6,6 +6,7 @@
 import type { JobContext, JobInput } from './executor.js'
 import type { RunnerEventType } from './db.js'
 import { OllamaClient, createOllamaClientFromEnv } from './ollama.js'
+import { GitService } from './services/git.js'
 
 export type AgentState = 'planning' | 'code_generation' | 'code_execution' | 'review' | 'iterate' | 'finish'
 
@@ -45,9 +46,12 @@ export class CoderAgent {
   private currentIteration = 0
   private messages: ChatMessage[] = []
   private ollama: OllamaClient | null = null
+  private gitService: GitService
 
   constructor(private ctx: JobContext) {
     this.ollama = createOllamaClientFromEnv()
+    const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
+    this.gitService = new GitService(baseDir)
     this.initializeMessages()
     this.loadMemory()
   }
@@ -572,6 +576,57 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             required: ['path', 'range', 'text']
           }
         }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_commit',
+          description: 'Stage all files and commit changes with a message',
+          parameters: {
+            type: 'object',
+            properties: {
+              message: { type: 'string', description: 'Commit message' }
+            },
+            required: ['message']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_diff',
+          description: 'Show changes between commits or working tree',
+          parameters: {
+            type: 'object',
+            properties: {
+              target: { type: 'string', description: 'Target to diff against (default: HEAD)' }
+            }
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_log',
+          description: 'Show recent commit history',
+          parameters: {
+            type: 'object',
+            properties: {
+              limit: { type: 'number', description: 'Number of commits to show' }
+            }
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_undo',
+          description: 'Undo the last commit (soft reset)',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
       }
     ]
   }
@@ -606,6 +661,18 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
           break
         case 'apply_edit':
           result = await this.handleApplyEdit(params.path, params.range, params.text)
+          break
+        case 'git_commit':
+          result = await this.handleGitCommit(params.message)
+          break
+        case 'git_diff':
+          result = await this.handleGitDiff(params.target)
+          break
+        case 'git_log':
+          result = await this.handleGitLog(params.limit)
+          break
+        case 'git_undo':
+          result = await this.handleGitUndo()
           break
         default:
           throw new Error(`Unknown tool: ${name}`)
@@ -749,6 +816,27 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       await fs.writeFile(path, newContent, 'utf8')
     }
     return { path, range, textLength: text.length }
+  }
+
+  private async handleGitCommit(message: string) {
+    await this.gitService.add()
+    const hash = await this.gitService.commit(message)
+    return { hash, message }
+  }
+
+  private async handleGitDiff(target?: string) {
+    const diff = await this.gitService.diff(target)
+    return { diff }
+  }
+
+  private async handleGitLog(limit?: number) {
+    const log = await this.gitService.log(limit)
+    return { log }
+  }
+
+  private async handleGitUndo() {
+    await this.gitService.undo()
+    return { success: true, message: 'Undid last commit' }
   }
 
   private async emitEvent(type: RunnerEventType, data?: unknown): Promise<void> {
