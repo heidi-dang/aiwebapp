@@ -591,6 +591,20 @@ export class SqliteStore implements Store {
         '  content TEXT NOT NULL,',
         '  created_at INTEGER NOT NULL',
         ');',
+        'CREATE TABLE IF NOT EXISTS organizations (',
+        '  id TEXT PRIMARY KEY,',
+        '  name TEXT NOT NULL,',
+        '  created_at INTEGER NOT NULL',
+        ');',
+        'CREATE TABLE IF NOT EXISTS organization_members (',
+        '  org_id TEXT NOT NULL,',
+        '  user_id TEXT NOT NULL,',
+        '  role TEXT NOT NULL,', // admin, editor, viewer
+        '  joined_at INTEGER NOT NULL,',
+        '  PRIMARY KEY (org_id, user_id),',
+        '  FOREIGN KEY(org_id) REFERENCES organizations(id) ON DELETE CASCADE,',
+        '  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE',
+        ');',
         'CREATE TABLE IF NOT EXISTS user_facts (',
         '  id TEXT PRIMARY KEY,',
         '  user_id TEXT NOT NULL,',
@@ -1119,6 +1133,42 @@ export class SqliteStore implements Store {
       id
     )
     return (result.changes ?? 0) > 0
+  }
+
+  // --- Organizations & RBAC ---
+  async createOrganization(name: string, ownerId: string): Promise<string> {
+    const orgId = `org_${Date.now()}_${Math.random().toString(16).slice(2)}`
+    await this.db.run(
+      'INSERT INTO organizations (id, name, created_at) VALUES (?, ?, ?)',
+      orgId, name, nowSeconds()
+    )
+    await this.addOrgMember(orgId, ownerId, 'admin')
+    return orgId
+  }
+
+  async addOrgMember(orgId: string, userId: string, role: 'admin' | 'editor' | 'viewer'): Promise<void> {
+    await this.db.run(
+      'INSERT INTO organization_members (org_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)',
+      orgId, userId, role, nowSeconds()
+    )
+  }
+
+  async getOrgRole(orgId: string, userId: string): Promise<string | null> {
+    const row = await this.db.get<{ role: string }>(
+      'SELECT role FROM organization_members WHERE org_id = ? AND user_id = ?',
+      orgId, userId
+    )
+    return row ? row.role : null
+  }
+
+  async getUserOrgs(userId: string): Promise<Array<{ id: string; name: string; role: string }>> {
+    return this.db.all(
+      `SELECT o.id, o.name, m.role 
+       FROM organizations o 
+       JOIN organization_members m ON o.id = m.org_id 
+       WHERE m.user_id = ?`,
+      userId
+    )
   }
 }
 
