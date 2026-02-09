@@ -157,8 +157,17 @@ export class GuardrailService {
     }
 
     // Check file operations
-    if (toolName === 'write_file' || toolName === 'apply_edit') {
+    if (toolName === 'write_file' || toolName === 'apply_edit' || toolName === 'read_file') {
       const path = args.path || ''
+      
+      // Prevent directory traversal
+      if (path.includes('..')) {
+        return {
+          allowed: false,
+          reason: 'Path traversal detected (..)'
+        }
+      }
+
       const restrictedPaths = [
         '/etc/',
         '/usr/bin/',
