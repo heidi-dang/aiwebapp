@@ -8,6 +8,8 @@ import type { RunnerEventType } from './db.js'
 import { OllamaClient, createOllamaClientFromEnv } from './ollama.js'
 import { GitService } from './services/git.js'
 import { RepoMapper } from './services/repo-map.js'
+import { WebService } from './services/web.js'
+import { MemoryService } from './services/memory.js'
 
 export type AgentState = 'planning' | 'code_generation' | 'code_execution' | 'review' | 'iterate' | 'finish'
 
@@ -49,12 +51,16 @@ export class CoderAgent {
   private ollama: OllamaClient | null = null
   private gitService: GitService
   private repoMapper: RepoMapper
+  private webService: WebService
+  private memoryService: MemoryService
 
   constructor(private ctx: JobContext) {
     this.ollama = createOllamaClientFromEnv()
     const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
     this.gitService = new GitService(baseDir)
     this.repoMapper = new RepoMapper(baseDir)
+    this.webService = new WebService()
+    this.memoryService = new MemoryService(baseDir)
     this.initializeMessages()
     this.loadMemory()
   }
@@ -670,6 +676,49 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             properties: {}
           }
         }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'web_fetch',
+          description: 'Fetch and extract text from a URL',
+          parameters: {
+            type: 'object',
+            properties: {
+              url: { type: 'string', description: 'URL to fetch' }
+            },
+            required: ['url']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'memory_store',
+          description: 'Store valuable information in long-term memory',
+          parameters: {
+            type: 'object',
+            properties: {
+              content: { type: 'string', description: 'Information to store' },
+              tags: { type: 'array', items: { type: 'string' }, description: 'Tags for retrieval' }
+            },
+            required: ['content']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'memory_search',
+          description: 'Search long-term memory',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search query' }
+            },
+            required: ['query']
+          }
+        }
       }
     ]
   }
@@ -722,6 +771,15 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
           break
         case 'run_lint':
           result = await this.handleRunLint()
+          break
+        case 'web_fetch':
+          result = await this.handleWebFetch(params.url)
+          break
+        case 'memory_store':
+          result = await this.handleMemoryStore(params.content, params.tags)
+          break
+        case 'memory_search':
+          result = await this.handleMemorySearch(params.query)
           break
         default:
           throw new Error(`Unknown tool: ${name}`)
@@ -912,6 +970,21 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     } catch (err) {
       return { error: 'Could not read package.json' }
     }
+  }
+
+  private async handleWebFetch(url: string) {
+    const text = await this.webService.fetchPage(url)
+    return { url, text }
+  }
+
+  private async handleMemoryStore(content: string, tags?: string[]) {
+    await this.memoryService.store(content, tags)
+    return { success: true, message: 'Stored in memory' }
+  }
+
+  private async handleMemorySearch(query: string) {
+    const results = await this.memoryService.search(query)
+    return { query, results }
   }
 
   private async emitEvent(type: RunnerEventType, data?: unknown): Promise<void> {
