@@ -1183,7 +1183,7 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   private async handleSearchKnowledge(query: string) {
     // Call server to search knowledge base
     // We assume the runner can talk to the server API
-    const serverUrl = process.env.SERVER_URL || 'http://localhost:3001'
+    const serverUrl = process.env.SERVER_URL || 'http://localhost:4001'
     try {
       const response = await fetch(`${serverUrl}/knowledge/search`, {
         method: 'POST',

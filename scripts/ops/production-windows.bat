@@ -305,7 +305,7 @@ echo.
 echo Checking availability of critical ports...
 set PORTS_OK=true
 
-for %%p in (3000 3001 3002 3003 3004 3005 3006 6868 8080) do (
+for %%p in (4000 4001 4002 4003 4004 4005 4006 6868 8080) do (
     netstat -an | findstr "0.0.0.0:%%p [::]:%%p " | findstr "LISTENING" >nul
     if !errorlevel! equ 0 (
         echo.

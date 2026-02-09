@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fetch from 'node-fetch'
 
-const RUNNER_URL = process.env.RUNNER_URL || process.env.NEXT_PUBLIC_RUNNER_URL || 'http://localhost:3002'
+const RUNNER_URL = process.env.RUNNER_URL || process.env.NEXT_PUBLIC_RUNNER_URL || 'http://localhost:4002'
 const TOKEN = process.env.RUNNER_TOKEN || 'change_me'
 
 function headers() {

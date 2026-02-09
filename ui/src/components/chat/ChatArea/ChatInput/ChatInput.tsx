@@ -80,7 +80,7 @@ const ChatInput = () => {
   )
 
   useEffect(() => {
-    if (envAiApiUrl && (selectedEndpoint === 'http://localhost:3001' || !selectedEndpoint)) {
+    if (envAiApiUrl && (selectedEndpoint === 'http://localhost:4001' || !selectedEndpoint)) {
       setSelectedEndpoint(envAiApiUrl)
     }
   }, [envAiApiUrl, selectedEndpoint, setSelectedEndpoint])

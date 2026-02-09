@@ -62,8 +62,8 @@ const server = http.createServer(async (req, res) => {
       let html = await fs.readFile(fullPath, 'utf8')
       if (isLocal) {
         html = html
-          .replaceAll('https://ai.heidi.com.au', 'http://localhost:3000')
-          .replaceAll('https://user.heidiai.com.au', 'http://localhost:3000/register')
+          .replaceAll('https://ai.heidi.com.au', 'http://localhost:4000')
+          .replaceAll('https://user.heidiai.com.au', 'http://localhost:4000/register')
       }
       res.end(html, 'utf8')
       return
