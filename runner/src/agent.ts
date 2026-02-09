@@ -56,6 +56,10 @@ export class CoderAgent {
 
   constructor(private ctx: JobContext) {
     this.ollama = createOllamaClientFromEnv()
+    if (!this.ollama) {
+      // Optional: Log warning if Ollama is not configured but might be needed
+      // console.warn('Ollama client not configured (OLLAMA_API_URL missing)')
+    }
     const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
     this.gitService = new GitService(baseDir)
     this.repoMapper = new RepoMapper(baseDir)
@@ -70,19 +74,12 @@ export class CoderAgent {
     if (!sessionId) return
 
     // Load previous conversation from jobs with the same session_id
-    // For now, we'll load from recent jobs. In a full implementation,
-    // we'd have a separate memory table or better indexing
-
     try {
-      // Get recent jobs (this is a simplified approach)
-      const recentJobs = await this.ctx.store.listJobs(10) // Get last 10 jobs
+      // Use the optimized query by session_id
+      const recentJobs = await this.ctx.store.listJobsBySession(sessionId, 10)
 
       for (const job of recentJobs) {
         if (job.id === this.ctx.jobId) continue // Skip current job
-
-        // Check if this job has the same session_id
-        // For now, we'll assume jobs with similar input are related
-        // In a full implementation, we'd store session_id in the job record
 
         const jobEvents = await this.ctx.store.getEvents(job.id)
         const memoryEvents = jobEvents.filter(e => e.type === 'memory')

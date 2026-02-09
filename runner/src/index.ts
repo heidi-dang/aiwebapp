@@ -41,7 +41,28 @@ function sendSse(reply: FastifyReply, event: RunnerEvent) {
 }
 
 // In-memory subscriber tracking (SSE connections per job)
+// Using a simple object as a lock for subscriber operations to prevent race conditions
 const jobSubscribers = new Map<string, Set<FastifyReply>>()
+const subscriberLock = new Map<string, Promise<void>>()
+
+async function withSubscriberLock(jobId: string, action: () => Promise<void> | void) {
+  // Simple mutex for job-specific subscriber operations
+  while (subscriberLock.has(jobId)) {
+    await subscriberLock.get(jobId)
+  }
+  
+  let resolveLock: () => void
+  const lockPromise = new Promise<void>(resolve => { resolveLock = resolve })
+  subscriberLock.set(jobId, lockPromise)
+  
+  try {
+    await action()
+  } finally {
+    subscriberLock.delete(jobId)
+    resolveLock!()
+  }
+}
+
 // Active job handles for cancellation/timeout
 const jobHandles = new Map<string, { timeoutHandle?: NodeJS.Timeout; cancel: () => void; controller: AbortController }>()
 
@@ -124,7 +145,9 @@ async function main() {
     const input = req.body?.input
 
     await store.createJob(id, input, timeoutMs)
-    jobSubscribers.set(id, new Set())
+    await withSubscriberLock(id, () => {
+      jobSubscribers.set(id, new Set())
+    })
 
     return {
       id,
@@ -158,7 +181,11 @@ async function main() {
       return reply.code(429).send({ detail: 'Runner busy' })
     }
 
-    const subscribers = jobSubscribers.get(jobId) ?? new Set()
+    let subscribers: Set<FastifyReply> | undefined
+    await withSubscriberLock(jobId, () => {
+      subscribers = jobSubscribers.get(jobId) ?? new Set()
+    })
+    
     const input: JobInput = job.input ? JSON.parse(job.input) : {}
 
     // Set up timeout if specified
@@ -169,13 +196,17 @@ async function main() {
     const cleanup = (status: JobStatus) => {
       if (timeoutHandle) clearTimeout(timeoutHandle)
       jobHandles.delete(jobId)
-      jobSubscribers.delete(jobId)
-
-      // Close SSE connections
-      for (const sub of subscribers) {
-        sub.raw.end()
-      }
-      subscribers.clear()
+      
+      withSubscriberLock(jobId, () => {
+        const subs = jobSubscribers.get(jobId)
+        if (subs) {
+          // Close SSE connections
+          for (const sub of subs) {
+            sub.raw.end()
+          }
+          jobSubscribers.delete(jobId)
+        }
+      })
     }
 
     if (job.timeout_ms && job.timeout_ms > 0) {
@@ -194,7 +225,9 @@ async function main() {
           job_id: jobId
         }
         await store.addEvent(timeoutEvent)
-        for (const sub of subscribers) sendSse(sub, timeoutEvent)
+        if (subscribers) {
+          for (const sub of subscribers) sendSse(sub, timeoutEvent)
+        }
 
         const doneEvent: RunnerEvent = {
           id: randomId('evt'),
@@ -204,7 +237,9 @@ async function main() {
           data: { status: 'timeout' }
         }
         await store.addEvent(doneEvent)
-        for (const sub of subscribers) sendSse(sub, doneEvent)
+        if (subscribers) {
+          for (const sub of subscribers) sendSse(sub, doneEvent)
+        }
 
         cleanup('timeout')
         completionMutex = false
@@ -224,19 +259,25 @@ async function main() {
       }
     })
 
-    // Execute job asynchronously with proper error handling
-    executeJob(store, jobId, subscribers, input, (status: JobStatus) => {
-      // Use mutex to prevent race condition with timeout handler
-      if (jobCompleted || completionMutex) return
-      completionMutex = true
-      jobCompleted = true
-      cleanup(status)
-      completionMutex = false
-    }, controller.signal).catch((err) => {
-      console.error(`Job ${jobId} failed:`, err)
-      if (!jobCompleted) {
-        jobCompleted = true
-        cleanup('error')
+    // Execute job asynchronously with proper error handling (Fire-and-forget)
+    // We don't await this because we want to return the job ID immediately
+    Promise.resolve().then(async () => {
+      try {
+        await executeJob(store, jobId, subscribers ?? new Set(), input, (status: JobStatus) => {
+          // Use mutex to prevent race condition with timeout handler
+          if (jobCompleted || completionMutex) return
+          completionMutex = true
+          jobCompleted = true
+          cleanup(status)
+          completionMutex = false
+        }, controller.signal)
+      } catch (err) {
+        // This catch block handles errors that might escape executeJob's internal try/catch
+        console.error(`Job ${jobId} execution failed ungracefully:`, err)
+        if (!jobCompleted) {
+          jobCompleted = true
+          cleanup('error')
+        }
       }
     })
 
@@ -269,8 +310,14 @@ async function main() {
     }
     await store.addEvent(cancelEvent)
 
-    const subscribers = jobSubscribers.get(jobId) ?? new Set()
-    for (const sub of subscribers) sendSse(sub, cancelEvent)
+    let subscribers: Set<FastifyReply> | undefined
+    await withSubscriberLock(jobId, () => {
+      subscribers = jobSubscribers.get(jobId) ?? new Set()
+    })
+    
+    if (subscribers) {
+      for (const sub of subscribers) sendSse(sub, cancelEvent)
+    }
 
     const doneEvent: RunnerEvent = {
       id: randomId('evt'),
@@ -280,9 +327,16 @@ async function main() {
       data: { status: 'cancelled' }
     }
     await store.addEvent(doneEvent)
-    for (const sub of subscribers) sendSse(sub, doneEvent)
-    for (const sub of subscribers) sub.raw.end()
-    subscribers.clear()
+    
+    await withSubscriberLock(jobId, () => {
+      const subs = jobSubscribers.get(jobId)
+      if (subs) {
+        for (const sub of subs) sendSse(sub, doneEvent)
+        for (const sub of subs) sub.raw.end()
+        subs.clear()
+      }
+      jobSubscribers.delete(jobId)
+    })
 
     jobHandles.delete(jobId)
 
@@ -335,24 +389,29 @@ async function main() {
     }
 
     // Subscribe to new events
-    let subscribers = jobSubscribers.get(jobId)
-    if (!subscribers) {
-      subscribers = new Set()
-      jobSubscribers.set(jobId, subscribers)
-    }
-    subscribers.add(reply)
+    await withSubscriberLock(jobId, () => {
+      let subscribers = jobSubscribers.get(jobId)
+      if (!subscribers) {
+        subscribers = new Set()
+        jobSubscribers.set(jobId, subscribers)
+      }
+      subscribers.add(reply)
+    })
 
     // Heartbeat to keep connection alive
     const heartbeat = setInterval(() => {
       reply.raw.write(':heartbeat\n\n')
     }, 15000)
 
-    req.raw.on('close', () => {
+    req.raw.on('close', async () => {
       clearInterval(heartbeat)
-      subscribers?.delete(reply)
-      if (subscribers && subscribers.size === 0) {
-        jobSubscribers.delete(jobId)
-      }
+      await withSubscriberLock(jobId, () => {
+        const subscribers = jobSubscribers.get(jobId)
+        subscribers?.delete(reply)
+        if (subscribers && subscribers.size === 0) {
+          jobSubscribers.delete(jobId)
+        }
+      })
     })
 
     return reply
