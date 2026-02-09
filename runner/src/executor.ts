@@ -34,6 +34,8 @@ export interface JobInput {
   tools?: string[]
   provider?: string
   model?: string
+  planner_model?: string
+  writer_model?: string
   session_id?: string
   team_agents?: Array<{id: string, provider?: string, model?: string}>
   base_dir?: string

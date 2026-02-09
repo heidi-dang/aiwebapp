@@ -321,6 +321,14 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     const maxRetries = 3
     let lastError: Error | null = null
 
+    // Determine model based on state (Architect/Editor pattern)
+    let model = this.ctx.input.model || 'gpt-4o'
+    if (this.state === 'planning' && this.ctx.input.planner_model) {
+      model = this.ctx.input.planner_model
+    } else if (this.state !== 'planning' && this.ctx.input.writer_model) {
+      model = this.ctx.input.writer_model
+    }
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const res = await fetch(`${process.env.AI_API_URL}/v1/chat/completions`, {
@@ -331,7 +339,7 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             ...(process.env.AI_API_KEY && { 'X-API-Key': process.env.AI_API_KEY })
           },
           body: JSON.stringify({
-            model: this.ctx.input.model || 'gpt-4o',
+            model,
             messages: this.messages,
             tools,
             tool_choice: 'auto',
