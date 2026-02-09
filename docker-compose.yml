@@ -1,0 +1,47 @@
+services:
+  server:
+    image: heididang/aiwebapp-server:latest
+    build: ./server
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - CORS_ORIGIN=http://localhost:3000
+      - RUNNER_URL=http://runner:3002
+      - SQLITE_PATH=/app/data/server.db
+    volumes:
+      - server_data:/app/data
+      - ./server/logs:/app/logs
+
+  runner:
+    image: heididang/aiwebapp-runner:latest
+    build: ./runner
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - CORS_ORIGIN=http://localhost:3000
+      - RUNNER_DB=/app/data/runner.db
+      - RUNNER_TOKEN=dev_token_123
+      - RUNNER_PERSIST=true
+    volumes:
+      - runner_data:/app/data
+
+  ui:
+    image: heididang/aiwebapp-ui:latest
+    build:
+      context: ./ui
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3001
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+      - RUNNER_URL=http://runner:3002
+    depends_on:
+      - server
+      - runner
+
+volumes:
+  server_data:
+  runner_data:
