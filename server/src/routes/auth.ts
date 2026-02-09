@@ -208,7 +208,7 @@ export default function createAuthRoutes(store: Store) {
     })
 
     app.get('/me', async (req, reply) => {
-      const token = getBearerToken((req.headers as any)?.authorization)
+      const token = getBearerToken(req.headers.authorization)
       if (!token) return reply.code(401).send({ error: 'Missing bearer token' })
 
       const user = await auth.authenticate(token)
@@ -218,15 +218,15 @@ export default function createAuthRoutes(store: Store) {
     })
 
     app.post('/logout', async (req, reply) => {
-      const token = getBearerToken((req.headers as any)?.authorization)
+      const token = getBearerToken(req.headers.authorization)
       if (!token) return reply.code(401).send({ error: 'Missing bearer token' })
 
       const ok = await auth.logout(token)
       return reply.send({ ok })
     })
 
-    app.get('/oauth/:provider/start', async (req, reply) => {
-      const providerRaw = String((req.params as any)?.provider || '')
+    app.get<{ Params: { provider: string } }>('/oauth/:provider/start', async (req, reply) => {
+      const providerRaw = req.params.provider
       if (!isOAuthProvider(providerRaw)) return reply.code(404).send({ error: 'Unknown provider' })
       const provider = providerRaw
 
@@ -299,8 +299,8 @@ export default function createAuthRoutes(store: Store) {
       return reply.code(500).send({ error: 'Unsupported provider' })
     })
 
-    app.get('/oauth/:provider/callback', async (req, reply) => {
-      const providerRaw = String((req.params as any)?.provider || '')
+    app.get<{ Params: { provider: string } }>('/oauth/:provider/callback', async (req, reply) => {
+      const providerRaw = req.params.provider
       if (!isOAuthProvider(providerRaw)) return reply.code(404).send('Unknown provider')
       const provider = providerRaw
 
