@@ -22,7 +22,7 @@ import { registerSkillsRoutes } from './routes/skills.js';
 import { registerEvaluationRoutes } from './routes/evaluation.js';
 import { registerTracingRoutes } from './routes/tracing.js';
 import { registerReasoningRoutes } from './routes/reasoning.js';
-const PORT = Number(process.env.PORT ?? 7777);
+const PORT = Number(process.env.PORT ?? 3001);
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000';
 const EXTRA_ORIGINS = [
     'https://heidiai.com.au',

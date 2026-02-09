@@ -1,5 +1,4 @@
 import path from 'node:path';
-import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import { sessionCache } from './session_cache.js';
 function makeSessionKey(args) {
@@ -341,6 +340,15 @@ export class SqliteStore {
         ];
     }
     static async create(sqlitePath) {
+        let sqlite3Mod;
+        try {
+            sqlite3Mod = await import('sqlite3');
+        }
+        catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`SQLite driver unavailable (${message})`);
+        }
+        const sqlite3 = sqlite3Mod?.default ?? sqlite3Mod;
         const db = await open({
             filename: sqlitePath,
             driver: sqlite3.Database
