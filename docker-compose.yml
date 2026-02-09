@@ -53,6 +53,13 @@ services:
       - server
       - runner
 
+  sandbox:
+    image: heididang/aiwebapp-sandbox:latest
+    build: ./sandbox
+    # We don't expose ports or start it automatically as a service
+    # This entry ensures 'docker compose build' creates the image
+    profiles: ["donotstart"] 
+
 volumes:
   server_data:
   runner_data:

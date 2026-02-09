@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 const execAsync = promisify(exec);
 
 export class SandboxService {
-  private readonly image = 'node:20-slim';
+  private readonly image = 'heididang/aiwebapp-sandbox:latest';
 
   /**
    * Create a new ephemeral sandbox container for a job
@@ -13,22 +13,15 @@ export class SandboxService {
   async createSandbox(jobId: string): Promise<string> {
     const containerName = `sandbox_${jobId}`;
     
-    // We start a container that stays alive. 'tail -f /dev/null' is a common trick.
-    // We mount a volume or set working directory if needed.
-    // For now, ephemeral workspace.
-    
     // Security:
-    // - --network none (optional, but we probably want web access for now as per phase 13)
     // - --cpus 1.0
     // - --memory 512m
-    // - --rm (automatically remove when stopped? No, we want manual control to persist across multiple execs)
     
     const command = `docker run -d \
       --name ${containerName} \
       --cpus 1.0 \
       --memory 512m \
-      ${this.image} \
-      tail -f /dev/null`;
+      ${this.image}`;
 
     try {
       await execAsync(command);
