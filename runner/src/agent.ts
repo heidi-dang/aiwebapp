@@ -14,6 +14,9 @@ import { approvalService } from './services/approval.js'
 import { llmService } from './llm/index.js'
 import type { ChatMessage } from './llm/types.js'
 
+import { tracingService } from './tracing.js'
+import { SpanStatusCode } from '@opentelemetry/api'
+
 export type AgentState = 'planning' | 'code_generation' | 'code_execution' | 'review' | 'iterate' | 'finish'
 
 export interface AgentMemory {
@@ -138,33 +141,60 @@ Be thorough and systematic in your approach.`
   }
 
   async run(): Promise<void> {
-    // Inject repo map into system prompt
-    try {
-      const map = await this.repoMapper.generateMap()
-      if (this.messages.length > 0 && this.messages[0].role === 'system') {
-        this.messages[0].content += `\n\nCurrent Repository Map:\n${map}`
+    const tracer = tracingService.getTracer()
+    return tracer.startActiveSpan('CoderAgent.run', async (span) => {
+      span.setAttribute('job_id', this.ctx.jobId)
+      
+      try {
+        // Inject repo map into system prompt
+        const mapSpan = tracer.startSpan('generate_repo_map')
+        try {
+          const map = await this.repoMapper.generateMap()
+          if (this.messages.length > 0 && this.messages[0].role === 'system') {
+            this.messages[0].content += `\n\nCurrent Repository Map:\n${map}`
+          }
+          mapSpan.setStatus({ code: SpanStatusCode.OK })
+        } catch (err) {
+          console.warn('Failed to generate repo map:', err)
+          mapSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(err) })
+        } finally {
+          mapSpan.end()
+        }
+
+        while (this.state !== 'finish' && this.currentIteration < this.maxIterations) {
+          if (this.ctx.aborted) {
+            await this.emitEvent('job.cancelled')
+            span.setAttribute('aborted', true)
+            return
+          }
+          
+          const iterSpan = tracer.startSpan(`iteration_${this.currentIteration}`)
+          iterSpan.setAttribute('state', this.state)
+          
+          await this.processState()
+          
+          iterSpan.end()
+          this.currentIteration++
+        }
+
+        // Save memory before finishing
+        await this.saveMemory()
+
+        if (this.state === 'finish') {
+          await this.emitEvent('done', { message: 'Task completed successfully' })
+          span.setStatus({ code: SpanStatusCode.OK })
+        } else {
+          await this.emitEvent('done', { message: 'Task completed after max iterations' })
+          span.setStatus({ code: SpanStatusCode.OK, message: 'Max iterations reached' })
+        }
+      } catch (err) {
+        span.recordException(err instanceof Error ? err : new Error(String(err)))
+        span.setStatus({ code: SpanStatusCode.ERROR })
+        throw err
+      } finally {
+        span.end()
       }
-    } catch (err) {
-      console.warn('Failed to generate repo map:', err)
-    }
-
-    while (this.state !== 'finish' && this.currentIteration < this.maxIterations) {
-      if (this.ctx.aborted) {
-        await this.emitEvent('job.cancelled')
-        return
-      }
-      await this.processState()
-      this.currentIteration++
-    }
-
-    // Save memory before finishing
-    await this.saveMemory()
-
-    if (this.state === 'finish') {
-      await this.emitEvent('done', { message: 'Task completed successfully' })
-    } else {
-      await this.emitEvent('done', { message: 'Task completed after max iterations' })
-    }
+    })
   }
 
   private async processState(): Promise<void> {

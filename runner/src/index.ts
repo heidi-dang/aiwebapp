@@ -1,3 +1,6 @@
+import { tracingService } from './tracing.js';
+tracingService.start();
+
 import 'dotenv/config'
 
 import Fastify from 'fastify'
