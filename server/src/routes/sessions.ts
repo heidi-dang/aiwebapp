@@ -2,6 +2,7 @@ import { requireOptionalBearerAuth } from '../auth.js'
 import { Store } from '../storage.js'
 import { z } from 'zod'
 import { sessionCache } from '../session_cache.js'
+import { Summarizer } from '../services/summarizer.js'
 
 const renameSessionSchema = z.object({
   name: z.string().min(1).max(100)
@@ -12,6 +13,8 @@ const sessionStateSchema = z.object({
 })
 
 export async function registerSessionRoutes(app: any, store: Store) {
+  const summarizer = new Summarizer(store)
+
   app.get('/sessions', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
@@ -39,6 +42,21 @@ export async function registerSessionRoutes(app: any, store: Store) {
       return
     }
     res.json(session)
+  })
+
+  app.get('/sessions/:id/runs', async (req: any, res: any) => {
+    requireOptionalBearerAuth(req, res)
+    if (res.headersSent) return
+    const session = await store.getSession(req.params.id)
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' })
+      return
+    }
+    
+    const runs = await store.getRuns({
+      sessionId: req.params.id
+    })
+    res.json(runs)
   })
 
   app.patch('/sessions/:id/rename', async (req: any, res: any) => {
@@ -93,6 +111,30 @@ export async function registerSessionRoutes(app: any, store: Store) {
 
     await store.updateSessionState(req.params.id, parsed.data.state)
     res.json({ success: true, state: parsed.data.state })
+  })
+
+  app.post('/sessions/:id/summarize', async (req: any, res: any) => {
+    requireOptionalBearerAuth(req, res)
+    if (res.headersSent) return
+
+    const session = await store.getSession(req.params.id)
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' })
+      return
+    }
+
+    try {
+      const summary = await summarizer.summarizeSession(req.params.id)
+      
+      // Update session state with summary
+      const state = (await store.getSessionState(req.params.id)) || {}
+      state.summary = summary
+      await store.updateSessionState(req.params.id, state)
+      
+      res.json({ success: true, summary })
+    } catch (error) {
+      res.status(500).json({ error: 'Summarization failed', details: error instanceof Error ? error.message : String(error) })
+    }
   })
 
   app.get('/sessions/cache/stats', async (req: any, res: any) => {
