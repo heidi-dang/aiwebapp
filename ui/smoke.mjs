@@ -1,4 +1,4 @@
-const base = (process.env.BASE_URL || process.argv[2] || 'http://localhost:3000').replace(/\/$/, '')
+const base = (process.env.BASE_URL || process.argv[2] || 'http://localhost:4000').replace(/\/$/, '')
 
 async function main() {
   let res
