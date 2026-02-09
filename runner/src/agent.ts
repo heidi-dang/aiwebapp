@@ -9,6 +9,7 @@ import { GitService } from './services/git.js'
 import { RepoMapper } from './services/repo-map.js'
 import { WebService } from './services/web.js'
 import { MemoryService } from './services/memory.js'
+import { ContextManager } from './services/context.js'
 import { llmService } from './llm/index.js'
 import type { ChatMessage } from './llm/types.js'
 
@@ -41,6 +42,7 @@ export class CoderAgent {
   private repoMapper: RepoMapper
   private webService: WebService
   private memoryService: MemoryService
+  private contextManager: ContextManager
 
   constructor(private ctx: JobContext) {
     const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
@@ -48,6 +50,7 @@ export class CoderAgent {
     this.repoMapper = new RepoMapper(baseDir)
     this.webService = new WebService()
     this.memoryService = new MemoryService(baseDir)
+    this.contextManager = new ContextManager(llmService)
     this.initializeMessages()
     this.loadMemory()
   }
@@ -327,7 +330,10 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const response = await llmService.chat(llmConfig, this.messages, tools)
+        // Compress context before sending
+        const compressedMessages = await this.contextManager.compress(this.messages)
+        
+        const response = await llmService.chat(llmConfig, compressedMessages, tools)
         
         // Normalize response if needed (LLMService returns ChatResponse which is compatible with ChatMessage mostly)
         // ChatResponse doesn't have 'name' or 'tool_call_id' usually, but 'tool_calls' matches.
