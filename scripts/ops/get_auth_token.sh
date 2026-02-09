@@ -13,7 +13,7 @@ USERNAME="admin"
 PASSWORD="password"
 
 # Define the authentication endpoint
-AUTH_URL="http://localhost:3001/auth/login"
+AUTH_URL="http://localhost:4001/auth/login"
 
 # Make the POST request to get the token
 RESPONSE=$(curl -s -X POST $AUTH_URL \

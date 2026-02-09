@@ -8,11 +8,11 @@ This document outlines the steps to demonstrate the full capabilities of the AI 
     ```bash
     npm start
     ```
-    *   UI: http://localhost:3000
-    *   Server: http://localhost:3001
-    *   Runner: http://localhost:3002
+    *   UI: http://localhost:4000
+    *   Server: http://localhost:4001
+    *   Runner: http://localhost:4002
 
-2.  **Browser**: Open http://localhost:3000 in your browser.
+2.  **Browser**: Open http://localhost:4000 in your browser.
 
 ## Scene 1: Agent Creation
 

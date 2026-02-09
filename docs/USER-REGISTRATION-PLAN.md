@@ -167,8 +167,8 @@ MICROSOFT_CLIENT_ID=your_microsoft_client_id
 MICROSOFT_CLIENT_SECRET=your_microsoft_client_secret
 
 # Callback URLs
-OAUTH_CALLBACK_URL=http://localhost:3001/auth/oauth
-FRONTEND_URL=http://localhost:3000
+OAUTH_CALLBACK_URL=http://localhost:4001/auth/oauth
+FRONTEND_URL=http://localhost:4000
 ```
 
 ### Dependencies
