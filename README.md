@@ -103,7 +103,7 @@ git clone https://github.com/heidi-dang/aiwebapp.git
 cd aiwebapp
 
 # Start all services with hot reload (guided)
-./hotreload-script.sh
+npm run dev:guided
 ```
 
 This script will:

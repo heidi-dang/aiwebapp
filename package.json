@@ -6,6 +6,7 @@
     "setup": "npm install && npm run bootstrap && npm run init:env",
     "bootstrap": "npm --prefix server install && npm --prefix runner install && npm --prefix ui install",
     "landing": "node landing/server.mjs",
+    "dev:guided": "bash scripts/ops/hotreload.sh",
     "dev": "concurrently -k -n landing,server,runner,ui -c cyan,blue,magenta,green \"npm run landing\" \"npm --prefix server run dev\" \"npm --prefix runner run dev\" \"npm --prefix ui run dev\"",
     "dev:phase2": "concurrently -k -n server,runner,ui -c blue,magenta,green \"PORT=3201 RUNNER_URL=http://localhost:3202 RUNNER_TOKEN=test_runner_token_123 CORS_ORIGIN=http://localhost:3200 npm --prefix server run dev\" \"PORT=3202 RUNNER_PERSIST=false RUNNER_TOKEN=test_runner_token_123 CORS_ORIGIN=http://localhost:3200 npm --prefix runner run dev\" \"PORT=3200 NEXT_PUBLIC_API_URL=http://localhost:3201 RUNNER_BASE_URL=http://localhost:3202 RUNNER_TOKEN=test_runner_token_123 npm --prefix ui run dev:phase2\"",
     "build": "npm run bootstrap && npm --prefix server run build && npm --prefix runner run build && npm --prefix ui run build",
