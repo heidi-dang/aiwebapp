@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     make \
     g++ \
     curl \
+    docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
