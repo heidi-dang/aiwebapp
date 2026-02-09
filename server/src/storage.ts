@@ -13,8 +13,8 @@ interface StoredSession {
 }
 
 export interface Store {
-  readonly agents: AgentDetails[]
-  readonly teams: TeamDetails[]
+  agents: AgentDetails[]
+  teams: TeamDetails[]
   readonly toolbox: ToolDetails[]
 
   listSessions(args: {
@@ -94,6 +94,9 @@ export interface Store {
   addKnowledgeDocument(title: string, content: string): Promise<string>
   addKnowledgeChunk(docId: string, content: string, embedding: number[]): Promise<void>
   searchKnowledge(embedding: number[], limit: number): Promise<Array<{ docId: string; content: string; score: number }>>
+
+  // Agent management
+  createAgent(agent: AgentDetails): Promise<void>
 }
 
 function makeSessionKey(args: {
@@ -110,8 +113,8 @@ function nowSeconds(): number {
 }
 
 export class InMemoryStore implements Store {
-  readonly agents: AgentDetails[]
-  readonly teams: TeamDetails[]
+  agents: AgentDetails[]
+  teams: TeamDetails[]
   readonly toolbox: ToolDetails[]
 
   private readonly sessionsByListKey: Map<string, SessionEntry[]> = new Map()
@@ -477,11 +480,15 @@ export class InMemoryStore implements Store {
   async updateSessionState(sessionId: string, state: Record<string, any>): Promise<void> {
     // No-op in InMemoryStore
   }
+
+  async createAgent(agent: AgentDetails): Promise<void> {
+    this.agents.push(agent)
+  }
 }
 
 export class SqliteStore implements Store {
-  readonly agents: AgentDetails[]
-  readonly teams: TeamDetails[]
+  agents: AgentDetails[]
+  teams: TeamDetails[]
   readonly toolbox: ToolDetails[]
 
   private readonly db: Database
@@ -1097,6 +1104,19 @@ export class SqliteStore implements Store {
     results.sort((a: { score: number }, b: { score: number }) => b.score - a.score)
 
     return results.slice(0, limit)
+  }
+
+  async createAgent(agent: AgentDetails): Promise<void> {
+    this.agents.push(agent)
+    await this.db.run(
+      `INSERT INTO agents (id, name, db_id, model_provider, model_name, model) VALUES (?, ?, ?, ?, ?, ?)`,
+      agent.id,
+      agent.name || agent.id,
+      agent.db_id || '',
+      agent.model?.provider || '',
+      agent.model?.name || '',
+      agent.model?.model || ''
+    )
   }
 }
 

@@ -35,6 +35,7 @@ const ChatInput = () => {
   const {
     chatInputRef,
     selectedEndpoint,
+    setSelectedEndpoint,
     authToken,
     selectedModel,
     setSelectedModel,
@@ -77,6 +78,12 @@ const ChatInput = () => {
   const [copilotLastCheckedAt, setCopilotLastCheckedAt] = useState<Date | null>(
     null
   )
+
+  useEffect(() => {
+    if (envAiApiUrl && (selectedEndpoint === 'http://localhost:3001' || !selectedEndpoint)) {
+      setSelectedEndpoint(envAiApiUrl)
+    }
+  }, [envAiApiUrl, selectedEndpoint, setSelectedEndpoint])
 
   function copyOutput() {
     if (!toolOutput) return
