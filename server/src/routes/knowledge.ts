@@ -1,11 +1,12 @@
 
 import { Store } from '../storage.js';
-import { getEmbedding } from '../llm.js';
 import { z } from 'zod';
+import { vectorService } from '../services/vector.js';
 
 const addDocSchema = z.object({
   title: z.string(),
   content: z.string(),
+  metadata: z.record(z.any()).optional()
 });
 
 const searchSchema = z.object({
@@ -22,20 +23,27 @@ export function registerKnowledgeRoutes(app: any, store: Store) {
       return;
     }
 
-    const { title, content } = result.data;
+    const { title, content, metadata } = result.data;
 
     try {
-      // 1. Save document
+      // 1. Save document metadata to SQLite
       const docId = await store.addKnowledgeDocument(title, content);
 
       // 2. Chunk content (simple splitting by newline or length for MVP)
       const chunks = content.split('\n\n').filter((c: string) => c.trim().length > 0);
 
-      // 3. Embed and save chunks
+      // 3. Embed and save chunks to ChromaDB
+      let chunkIndex = 0;
       for (const chunk of chunks) {
         if (chunk.trim().length < 10) continue; // Skip very short chunks
-        const embedding = await getEmbedding(chunk);
-        await store.addKnowledgeChunk(docId, chunk, embedding);
+        
+        const chunkId = `${docId}_${chunkIndex++}`;
+        await vectorService.addDocument(chunkId, chunk, {
+          docId,
+          title,
+          index: chunkIndex,
+          ...metadata
+        });
       }
 
       res.json({ id: docId, message: 'Document added and indexed' });
@@ -56,8 +64,7 @@ export function registerKnowledgeRoutes(app: any, store: Store) {
     const { query, limit } = result.data;
 
     try {
-      const embedding = await getEmbedding(query);
-      const results = await store.searchKnowledge(embedding, limit);
+      const results = await vectorService.query(query, limit);
       res.json({ results });
     } catch (err: any) {
       console.error('Search failed:', err);

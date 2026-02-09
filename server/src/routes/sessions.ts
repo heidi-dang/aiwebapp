@@ -41,7 +41,36 @@ export async function registerSessionRoutes(app: any, store: Store) {
       res.status(404).json({ error: 'Session not found' })
       return
     }
+    
+    // Phase 15: Check organization access if org_id is present in session metadata
+    // For now, we assume public or user-owned. Real RBAC check would go here.
+    
     res.json(session)
+  })
+
+  // Phase 15: Share Session
+  app.post('/sessions/:id/share', async (req: any, res: any) => {
+    requireOptionalBearerAuth(req, res)
+    if (res.headersSent) return
+    
+    const { orgId, role } = req.body // e.g. "editor", "viewer"
+    
+    const session = await store.getSession(req.params.id)
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' })
+      return
+    }
+
+    // Update session metadata to include orgId
+    // In a real implementation, we'd have a separate table for session_shares
+    // For MVP, we'll store it in session state
+    const state = (await store.getSessionState(req.params.id)) || {}
+    state.sharedWith = state.sharedWith || []
+    state.sharedWith.push({ orgId, role, sharedAt: Date.now() })
+    
+    await store.updateSessionState(req.params.id, state)
+    
+    res.json({ success: true, message: 'Session shared' })
   })
 
   app.get('/sessions/:id/runs', async (req: any, res: any) => {

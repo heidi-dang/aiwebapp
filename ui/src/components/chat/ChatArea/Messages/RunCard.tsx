@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useStore } from '@/store'
-import { cancelJob } from '@/lib/runner/client'
+import { cancelJob, approveJob } from '@/lib/runner/client'
 import Icon from '@/components/ui/icon'
 import { Button } from '@/components/ui/button'
 import type { RunState } from '@/lib/runner/types'
@@ -121,6 +121,12 @@ function ToolTimeline({
   )
 }
 
+interface ApprovalState {
+  tokenId: string
+  description: string
+  type: string
+}
+
 export default function RunCard({ jobId }: { jobId: string }) {
   const { runs, runUi, setRunCollapsed } = useStore()
   const run = runs[jobId]
@@ -128,12 +134,15 @@ export default function RunCard({ jobId }: { jobId: string }) {
   const [tools, setTools] = useState<Map<string, ToolState>>(new Map())
   const [planSteps, setPlanSteps] = useState<Array<{ tool: string; description: string }>>([])
   const [planMessage, setPlanMessage] = useState<string>('')
+  const [pendingApproval, setPendingApproval] = useState<ApprovalState | null>(null)
+  const [approving, setApproving] = useState(false)
 
   useEffect(() => {
     if (!run) return
     const newTools = new Map<string, ToolState>()
     const newPlanSteps: Array<{ tool: string; description: string }> = []
     let newPlanMessage = ''
+    let currentApproval: ApprovalState | null = null
 
     run.events.forEach((evt) => {
       const { type, payload } = evt
@@ -190,12 +199,43 @@ export default function RunCard({ jobId }: { jobId: string }) {
         ;(existing as ToolState).refusedReason = (payload as any).reason
         newTools.set(name, existing)
       }
+
+      // Handle approvals
+      if (type === 'approval.request' && payload) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const p = payload as any
+        currentApproval = {
+          tokenId: p.tokenId,
+          description: p.description,
+          type: p.type
+        }
+      }
+      if (type === 'approval.response' && payload) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const p = payload as any
+        if (currentApproval?.tokenId === p.tokenId) {
+          currentApproval = null
+        }
+      }
     })
 
     setTools(newTools)
     setPlanSteps(newPlanSteps)
     setPlanMessage(newPlanMessage)
+    setPendingApproval(currentApproval)
   }, [run])
+
+  const handleApprove = async (approved: boolean) => {
+    if (!pendingApproval) return
+    setApproving(true)
+    try {
+      await approveJob(jobId, pendingApproval.tokenId, approved)
+    } catch (err) {
+      console.error('Approval failed:', err)
+    } finally {
+      setApproving(false)
+    }
+  }
 
   if (!run) {
     return (
@@ -267,6 +307,38 @@ export default function RunCard({ jobId }: { jobId: string }) {
               <div className="text-xs font-medium uppercase text-primary">Tools</div>
               <div className="mt-2">
                 <ToolTimeline tools={tools} />
+              </div>
+            </div>
+          )}
+
+          {pendingApproval && (
+            <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 p-3" data-testid="approval-card">
+              <div className="flex items-center gap-2 text-yellow-400">
+                <Icon type="warning" size="xs" />
+                <span className="text-xs font-medium uppercase">Approval Required</span>
+              </div>
+              <div className="mt-2 text-xs text-yellow-200">
+                {pendingApproval.description}
+              </div>
+              <div className="mt-3 flex gap-2">
+                <Button
+                  size="sm"
+                  variant="default"
+                  className="bg-yellow-600 hover:bg-yellow-500 text-white"
+                  onClick={() => handleApprove(true)}
+                  disabled={approving}
+                >
+                  {approving ? 'Approving...' : 'Approve'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10"
+                  onClick={() => handleApprove(false)}
+                  disabled={approving}
+                >
+                  Reject
+                </Button>
               </div>
             </div>
           )}

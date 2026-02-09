@@ -1,3 +1,6 @@
+import { tracingService } from './tracing.js';
+tracingService.start();
+
 import 'dotenv/config'
 
 import Fastify from 'fastify'
@@ -111,19 +114,13 @@ async function main() {
     }
   })
 
-  app.addHook('onRequest', async (req: FastifyRequest) => {
-    console.log('Incoming request:', req.method, req.url);
-  })
-
   // Health check
   app.get('/health', async (req, reply) => {
-    console.log('Health check endpoint hit');
     return { ok: true, persist: USE_SQLITE }
   })
 
   // Test endpoint
   app.get('/test', async (req, reply) => {
-    console.log('Test endpoint hit');
     return { message: 'Test endpoint is working' };
   });
 

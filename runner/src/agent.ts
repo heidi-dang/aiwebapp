@@ -14,6 +14,9 @@ import { approvalService } from './services/approval.js'
 import { llmService } from './llm/index.js'
 import type { ChatMessage } from './llm/types.js'
 
+import { tracingService } from './tracing.js'
+import { SpanStatusCode } from '@opentelemetry/api'
+
 export type AgentState = 'planning' | 'code_generation' | 'code_execution' | 'review' | 'iterate' | 'finish'
 
 export interface AgentMemory {
@@ -138,33 +141,60 @@ Be thorough and systematic in your approach.`
   }
 
   async run(): Promise<void> {
-    // Inject repo map into system prompt
-    try {
-      const map = await this.repoMapper.generateMap()
-      if (this.messages.length > 0 && this.messages[0].role === 'system') {
-        this.messages[0].content += `\n\nCurrent Repository Map:\n${map}`
+    const tracer = tracingService.getTracer()
+    return tracer.startActiveSpan('CoderAgent.run', async (span) => {
+      span.setAttribute('job_id', this.ctx.jobId)
+      
+      try {
+        // Inject repo map into system prompt
+        const mapSpan = tracer.startSpan('generate_repo_map')
+        try {
+          const map = await this.repoMapper.generateMap()
+          if (this.messages.length > 0 && this.messages[0].role === 'system') {
+            this.messages[0].content += `\n\nCurrent Repository Map:\n${map}`
+          }
+          mapSpan.setStatus({ code: SpanStatusCode.OK })
+        } catch (err) {
+          console.warn('Failed to generate repo map:', err)
+          mapSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(err) })
+        } finally {
+          mapSpan.end()
+        }
+
+        while (this.state !== 'finish' && this.currentIteration < this.maxIterations) {
+          if (this.ctx.aborted) {
+            await this.emitEvent('job.cancelled')
+            span.setAttribute('aborted', true)
+            return
+          }
+          
+          const iterSpan = tracer.startSpan(`iteration_${this.currentIteration}`)
+          iterSpan.setAttribute('state', this.state)
+          
+          await this.processState()
+          
+          iterSpan.end()
+          this.currentIteration++
+        }
+
+        // Save memory before finishing
+        await this.saveMemory()
+
+        if (this.state === 'finish') {
+          await this.emitEvent('done', { message: 'Task completed successfully' })
+          span.setStatus({ code: SpanStatusCode.OK })
+        } else {
+          await this.emitEvent('done', { message: 'Task completed after max iterations' })
+          span.setStatus({ code: SpanStatusCode.OK, message: 'Max iterations reached' })
+        }
+      } catch (err) {
+        span.recordException(err instanceof Error ? err : new Error(String(err)))
+        span.setStatus({ code: SpanStatusCode.ERROR })
+        throw err
+      } finally {
+        span.end()
       }
-    } catch (err) {
-      console.warn('Failed to generate repo map:', err)
-    }
-
-    while (this.state !== 'finish' && this.currentIteration < this.maxIterations) {
-      if (this.ctx.aborted) {
-        await this.emitEvent('job.cancelled')
-        return
-      }
-      await this.processState()
-      this.currentIteration++
-    }
-
-    // Save memory before finishing
-    await this.saveMemory()
-
-    if (this.state === 'finish') {
-      await this.emitEvent('done', { message: 'Task completed successfully' })
-    } else {
-      await this.emitEvent('done', { message: 'Task completed after max iterations' })
-    }
+    })
   }
 
   private async processState(): Promise<void> {
@@ -709,6 +739,66 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             required: ['query']
           }
         }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'search_knowledge',
+          description: 'Search the vector knowledge base for relevant code snippets or documentation',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search query' }
+            },
+            required: ['query']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'search_web',
+          description: 'Search the web for documentation or technical solutions (via DuckDuckGo)',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search query' }
+            },
+            required: ['query']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'run_sql_query',
+          description: 'Execute a SQL query against a database',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'SQL query to execute' },
+              connection_string: { type: 'string', description: 'Database connection string (optional, uses env if not provided)' }
+            },
+            required: ['query']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'call_api',
+          description: 'Make an external API call',
+          parameters: {
+            type: 'object',
+            properties: {
+              method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE'], description: 'HTTP method' },
+              url: { type: 'string', description: 'Full URL' },
+              headers: { type: 'object', description: 'JSON object of headers' },
+              body: { type: 'string', description: 'Request body' }
+            },
+            required: ['method', 'url']
+          }
+        }
       }
     ]
   }
@@ -771,6 +861,18 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
           break
         case 'memory_search':
           result = await this.handleMemorySearch(params.query)
+          break
+        case 'search_knowledge':
+          result = await this.handleSearchKnowledge(params.query)
+          break
+        case 'search_web':
+          result = await this.handleSearchWeb(params.query)
+          break
+        case 'run_sql_query':
+          result = await this.handleRunSqlQuery(params.query, params.connection_string)
+          break
+        case 'call_api':
+          result = await this.handleCallApi(params.method, params.url, params.headers, params.body)
           break
         default:
           throw new Error(`Unknown tool: ${name}`)
@@ -1020,6 +1122,82 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   private async handleMemorySearch(query: string) {
     const results = await this.memoryService.search(query)
     return { query, results }
+  }
+
+  private async handleSearchWeb(query: string) {
+    // Use DuckDuckGo HTML search for simplicity (no API key required)
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
+    const text = await this.webService.fetchPage(url)
+    // Extract results (simple regex parsing)
+    // This is brittle but works for MVP without external paid API
+    // Real implementation should use SerpApi or similar
+    return { query, raw_html_snippet: text.slice(0, 2000), note: 'For better results, upgrade to SerpApi' }
+  }
+
+  private async handleRunSqlQuery(query: string, connectionString?: string) {
+    // For MVP, we only support SQLite local or the internal DB
+    // Security: Only allow SELECT statements
+    if (!query.trim().toLowerCase().startsWith('select')) {
+      return { error: 'Only SELECT statements are allowed in this tool' }
+    }
+
+    if (!connectionString) {
+      // Use internal runner DB as default for demo purposes?
+      // Or return error that connection string is needed
+      return { error: 'Connection string is required' }
+    }
+    
+    // In a real implementation, we'd use 'pg' or 'mysql2' or 'sqlite3' based on connection string
+    // Here we'll just mock it or return a placeholder
+    return { 
+      query, 
+      result: 'SQL execution not fully implemented in this MVP. Please upgrade to Phase 13 Complete.',
+      status: 'simulated'
+    }
+  }
+
+  private async handleCallApi(method: string, url: string, headers?: any, body?: string) {
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: headers || { 'Content-Type': 'application/json' },
+        body: body
+      })
+      const text = await response.text()
+      let json
+      try {
+        json = JSON.parse(text)
+      } catch {
+        // ignore
+      }
+      return {
+        status: response.status,
+        statusText: response.statusText,
+        data: json || text
+      }
+    } catch (err) {
+      return { error: `API call failed: ${err instanceof Error ? err.message : String(err)}` }
+    }
+  }
+
+  private async handleSearchKnowledge(query: string) {
+    // Call server to search knowledge base
+    // We assume the runner can talk to the server API
+    const serverUrl = process.env.SERVER_URL || 'http://localhost:3001'
+    try {
+      const response = await fetch(`${serverUrl}/knowledge/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, limit: 5 })
+      })
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`)
+      }
+      const data = await response.json()
+      return data
+    } catch (err) {
+      return { error: `Failed to search knowledge: ${err instanceof Error ? err.message : String(err)}` }
+    }
   }
 
   private async emitEvent(type: RunnerEventType, data?: unknown): Promise<void> {

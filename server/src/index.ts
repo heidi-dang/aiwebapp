@@ -1,3 +1,6 @@
+import { tracingService } from './tracing.js';
+tracingService.start();
+
 import dotenv from 'dotenv'
 import path from 'path';
 import { fileURLToPath } from 'url';
