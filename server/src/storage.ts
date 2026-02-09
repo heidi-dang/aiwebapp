@@ -528,6 +528,14 @@ export class SqliteStore implements Store {
   }
 
   static async create(sqlitePath: string): Promise<SqliteStore> {
+    let sqlite3Mod: any
+    try {
+      sqlite3Mod = await import('sqlite3')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      throw new Error(`SQLite driver unavailable (${message})`)
+    }
+    const sqlite3 = sqlite3Mod?.default ?? sqlite3Mod
     const db = await open({
       filename: sqlitePath,
       driver: sqlite3.Database

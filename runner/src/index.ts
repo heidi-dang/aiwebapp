@@ -13,10 +13,11 @@ function requireEnv(name: string): string {
   return v
 }
 
-const PORT = Number(process.env.PORT ?? 8788)
+const PORT = Number(process.env.PORT ?? 3002)
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000'
 const DB_PATH = process.env.RUNNER_DB ?? './runner.db'
 const USE_SQLITE = process.env.RUNNER_PERSIST !== 'false'
+const MAX_CONCURRENCY = Number(process.env.RUNNER_MAX_CONCURRENCY ?? 2)
 
 function nowIso() {
   return new Date().toISOString()
@@ -42,7 +43,7 @@ function sendSse(reply: FastifyReply, event: RunnerEvent) {
 // In-memory subscriber tracking (SSE connections per job)
 const jobSubscribers = new Map<string, Set<FastifyReply>>()
 // Active job handles for cancellation/timeout
-const jobHandles = new Map<string, { timeoutHandle?: NodeJS.Timeout; cancel: () => void }>()
+const jobHandles = new Map<string, { timeoutHandle?: NodeJS.Timeout; cancel: () => void; controller: AbortController }>()
 
 async function main() {
   const RUNNER_TOKEN = requireEnv('RUNNER_TOKEN')
@@ -51,7 +52,13 @@ async function main() {
   let store: JobStore
   if (USE_SQLITE) {
     console.log(`Using SQLite store: ${DB_PATH}`)
-    store = await createSqliteStore(DB_PATH)
+    try {
+      store = await createSqliteStore(DB_PATH)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.warn(`SQLite store failed (${message}); falling back to in-memory store`)
+      store = createInMemoryStore()
+    }
   } else {
     console.log('Using in-memory store')
     store = createInMemoryStore()
@@ -147,6 +154,9 @@ async function main() {
     const job = await store.getJob(jobId)
     if (!job) return reply.code(404).send({ detail: 'Job not found' })
     if (job.status !== 'pending') return reply.code(400).send({ detail: 'Job not pending' })
+    if (jobHandles.size >= MAX_CONCURRENCY) {
+      return reply.code(429).send({ detail: 'Runner busy' })
+    }
 
     const subscribers = jobSubscribers.get(jobId) ?? new Set()
     const input: JobInput = job.input ? JSON.parse(job.input) : {}
@@ -159,6 +169,7 @@ async function main() {
     const cleanup = (status: JobStatus) => {
       if (timeoutHandle) clearTimeout(timeoutHandle)
       jobHandles.delete(jobId)
+      jobSubscribers.delete(jobId)
 
       // Close SSE connections
       for (const sub of subscribers) {
@@ -200,11 +211,15 @@ async function main() {
       }, job.timeout_ms)
     }
 
+    const controller = new AbortController()
+
     jobHandles.set(jobId, {
       timeoutHandle,
+      controller,
       cancel: () => {
         if (!jobCompleted) {
           jobCompleted = true
+          controller.abort()
         }
       }
     })
@@ -217,7 +232,7 @@ async function main() {
       jobCompleted = true
       cleanup(status)
       completionMutex = false
-    }).catch((err) => {
+    }, controller.signal).catch((err) => {
       console.error(`Job ${jobId} failed:`, err)
       if (!jobCompleted) {
         jobCompleted = true
@@ -314,6 +329,11 @@ async function main() {
     const events = await store.getEvents(jobId)
     for (const ev of events) sendSse(reply, ev)
 
+    if (job.status !== 'pending' && job.status !== 'running') {
+      reply.raw.end()
+      return reply
+    }
+
     // Subscribe to new events
     let subscribers = jobSubscribers.get(jobId)
     if (!subscribers) {
@@ -330,6 +350,9 @@ async function main() {
     req.raw.on('close', () => {
       clearInterval(heartbeat)
       subscribers?.delete(reply)
+      if (subscribers && subscribers.size === 0) {
+        jobSubscribers.delete(jobId)
+      }
     })
 
     return reply

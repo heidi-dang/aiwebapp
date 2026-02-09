@@ -18,7 +18,7 @@ A comprehensive AI-powered web application for managing and interacting with aut
 - 🎨 **Modern UI**: Built with Next.js 15, Tailwind CSS, and shadcn/ui components
 - 🗄️ **SQLite Database**: Lightweight, file-based database for data persistence
 - 🔒 **TypeScript**: Full type safety across the entire stack
-- 🚀 **Hot Reload Development**: Concurrent development servers with automatic port fallback
+- 🚀 **Hot Reload Development**: Guided startup scripts with strict local ports
 - 🛠️ **Toolbox CLI**: Developer utilities for file operations, searching, and safe command execution
 - 🌐 **Copilot Integration**: Direct integration with GitHub Copilot via VSCode extension bridge
 
@@ -33,19 +33,17 @@ This application consists of three main services that communicate via HTTP APIs:
 ### Data Flow
 
 ```
-UI (Port 3000+) ↔ Server (Port 3001+) ↔ Runner (Port 3002+)
+UI (Port 3000) ↔ Server (Port 3001) ↔ Runner (Port 3002)
     ↑                                               ↑
     └─────────────── Copilot API Bridge ────────────┘
 ```
-
-**Note**: Ports start from the defaults shown but automatically increment (3000-3050) if the default ports are in use, ensuring compatibility with shared development environments.
 
 ### Service URLs and APIs
 
 For tunneling or external access, the following services and endpoints are available:
 
-#### UI Service (Port 3000+)
-- **URL**: `http://localhost:{PORT}` (dev) / `https://ai.heidi.com.au` (prod)
+#### UI Service (Port 3000)
+- **URL**: `http://localhost:3000` (dev) / `https://ai.heidi.com.au` (prod)
 - **Purpose**: Web interface for chat and agent management
 - **Key Routes**:
   - `/` - Main chat interface
@@ -53,8 +51,8 @@ For tunneling or external access, the following services and endpoints are avail
   - `/api/runner/*` - Proxy to runner service
   - `/api/toolbox/*` - Developer toolbox endpoints
 
-#### Server API (Port 3001+)
-- **URL**: `http://localhost:{PORT}` (dev) / `https://api.ai.heidi.com.au` (prod)
+#### Server API (Port 3001)
+- **URL**: `http://localhost:3001` (dev) / `https://api.ai.heidi.com.au` (prod)
 - **Purpose**: REST API for data management
 - **Key Endpoints**:
   - `GET /health` - Health check
@@ -67,8 +65,8 @@ For tunneling or external access, the following services and endpoints are avail
   - `GET/POST /api/knowledge` - Knowledge base
   - `GET/POST /api/toolbox` - Developer utilities
 
-#### Runner Service (Port 3002+)
-- **URL**: `http://localhost:{PORT}` (dev) / `https://runner.ai.heidi.com.au` (prod)
+#### Runner Service (Port 3002)
+- **URL**: `http://localhost:3002` (dev) / `https://runner.ai.heidi.com.au` (prod)
 - **Purpose**: Agent execution and job processing
 - **Key Endpoints**:
   - `GET /health` - Health check
@@ -76,8 +74,8 @@ For tunneling or external access, the following services and endpoints are avail
   - `GET/POST /api/jobs` - Job management (create, list, start, cancel, delete)
   - `GET /api/jobs/{id}/events` - Server-Sent Events stream for job updates
 
-#### Copilot API Bridge (Port 4000)
-- **URL**: `http://localhost:4000` (dev) / `https://copilot.ai.heidi.com.au` (prod)
+#### Copilot API Bridge (Port 8080)
+- **URL**: `http://localhost:8080` (dev) / `https://copilot.ai.heidi.com.au` (prod)
 - **Purpose**: VS Code Copilot integration
 - **Key Endpoints**:
   - `GET /v1/models` - Available models
@@ -104,15 +102,14 @@ The easiest way to get started is using the hot reload development script:
 git clone https://github.com/heidi-dang/aiwebapp.git
 cd aiwebapp
 
-# Start all services with hot reload
-./hotreload-test.sh
+# Start all services with hot reload (guided)
+./hotreload-script.sh
 ```
 
 This script will:
 - ✅ Install dependencies for all services (optional prompt)
-- ✅ Find available ports (3000-3050 range with fallback)
 - ✅ Configure environment variables automatically
-- ✅ Start all three services concurrently
+- ✅ Start landing + server + runner + UI
 - ✅ Set up logging and health checks
 - ✅ Provide access URLs
 
@@ -121,18 +118,9 @@ This script will:
 - Server: `http://localhost:3001`
 - Runner: `http://localhost:3002`
 
-### Registration Page (UI Port 3006)
+### Registration Page
 
-This branch includes a simple registration page:
-
-- **Register URL:** `http://localhost:3006/register`
-
-To run the UI on port 3006 (without changing the default dev scripts), use:
-
-```bash
-cd ui
-npm run dev:3006
-```
+- **Register URL:** `http://localhost:3000/register`
 
 ### OAuth Social Login
 
@@ -153,7 +141,7 @@ Configure in `server/.env`:
 
 ```bash
 # Needed when running behind a public URL / tunnel so redirect_uri matches exactly
-SERVER_PUBLIC_URL=http://localhost:7777
+SERVER_PUBLIC_URL=http://localhost:3001
 
 # Recommended: secret used to sign/verify OAuth state
 OAUTH_STATE_SECRET=change_me
@@ -215,26 +203,6 @@ Important:
 - These `*:phase2` scripts are intended for local development convenience on shared machines.
 - The default scripts (`dev`, `start`, `smoke`) and production environment configuration remain unchanged and should follow the main branch defaults.
 
-### Branch-Only Dev Scripts (UI 3006)
-
-If you want to run the full stack while keeping the UI specifically on port 3006, use these additional scripts:
-
-```bash
-npm run dev:ui3006
-```
-
-Production-style start (UI on 3006):
-
-```bash
-npm run start:ui3006
-```
-
-Smoke tests for this port set:
-
-```bash
-npm run smoke:ui3006
-```
-
 ### Production Deployment
 
 For production deployment to https://ai.heidi.com.au:
@@ -288,10 +256,10 @@ npm install -g ngrok
 ngrok config add-authtoken YOUR_TOKEN
 
 # Start tunnel to Copilot bridge
-./setup-tunnel.sh
+./scripts/ops/setup-tunnel.sh
 
 # Update environment
-./update-env-with-tunnel.sh
+./scripts/ops/update-env-with-tunnel.sh
 ```
 
 #### Option 2: Cloudflare Tunnel
@@ -304,10 +272,10 @@ ngrok config add-authtoken YOUR_TOKEN
 cloudflared tunnel login
 
 # Start tunnel
-./setup-cloudflared-tunnel.sh
+./scripts/ops/setup-cloudflared-tunnel.sh
 
 # Update environment
-./update-env-with-cloudflared.sh
+./scripts/ops/update-env-with-cloudflared.sh
 ```
 
 ### Testing Copilot Connection
@@ -322,7 +290,7 @@ curl http://localhost:3000/api/copilot/v1/models
 
 ## Tunneling for Remote Access
 
-For full remote access to the application (not just Copilot), you'll need to tunnel all three main services. The ports are dynamic (starting from 3000, 3001, 3002) and will be displayed when starting the services.
+For full remote access to the application (not just Copilot), tunnel the three main services (UI 3000, API 3001, Runner 3002).
 
 ### Using ngrok for All Services
 
@@ -356,7 +324,7 @@ cloudflared tunnel --url http://localhost:3002  # Runner
 # Configure DNS and update environment variables as above
 ```
 
-**Note**: Always check the actual ports used by running `./hotreload-test.sh` or `./production.sh` and update tunnel configurations accordingly.
+**Note**: Use `./hotreload-script.sh` for dev and `./production.sh` for production-style local runs.
 
 ## Ollama Integration
 
@@ -464,29 +432,19 @@ AI_API_URL=https://your-copilot-tunnel.com
 
 ### Hot Reload Development
 
-The `hotreload-test.sh` script provides the optimal development experience:
+The guided hot reload script provides the optimal development experience:
 
 ```bash
-./hotreload-test.sh
+./hotreload-script.sh
 ```
 
 **Features:**
-- Automatic port detection (3000-3050 range)
-- Concurrent service startup
-- Live log tailing with colored output
+- Strict local ports (6868/3000/3001/3002)
+- Guided prompts for env + optional checks
+- Live log tailing
 - Health checks for all services
 - Automatic environment configuration
 - Clean shutdown on Ctrl+C
-
-**Important for Shared Development Environments:**
-
-Since multiple developers may work on the same physical machine, the script allows automatic port fallback if default ports (3000-3002) are in use. However, when preparing code for PR/merge to main:
-
-- Reset all ports back to the original defaults (UI: 3000, Server: 3001, Runner: 3002) in the script.
-- Ensure any environment variables implemented in `.env` files are included in `hotreload-test.sh` and `production.sh` for consistency.
-- Test with the standard ports to avoid CI issues.
-
-This ensures compatibility and prevents port conflicts in production or CI.
 
 **Log Output:**
 ```
@@ -546,11 +504,11 @@ npm run toolbox:smoke
 ```
 
 This script:
-- ✅ Installs dependencies
-- ✅ Builds all services
-- ✅ Sets up environment files
-- ✅ Starts production servers
-- ✅ Provides access URLs
+- Installs dependencies (prompted)
+- Initializes env files from examples (prompted)
+- Builds all services (prompted)
+- Starts landing + server + runner + UI
+- Runs health checks and optional smoke tests
 
 ### Manual Production Setup
 
@@ -564,14 +522,11 @@ npm run start
 
 ### Port Configuration
 
-**Development (hotreload-test.sh):**
-- UI: 3000 (fallback: 3000-3050)
-- Server: 3001 (fallback: 3001-3050)
-- Runner: 3002 (fallback: 3002-3050)
-
-**Production:**
-- Configure custom ports in environment variables
-- Ensure ports are available and not conflicting
+**Local defaults (strict):**
+- Landing: 6868
+- UI: 3000
+- Server: 3001
+- Runner: 3002
 
 ## API Documentation
 
@@ -670,27 +625,29 @@ aiwebapp/
 │   │   ├── executor.ts    # Agent workflow execution
 │   │   ├── agent.ts       # Agent logic
 │   │   └── bridge.ts      # VSCode bridge integration
-│   ├── .env              # Runner environment
-│   ├── runner.db         # SQLite database
+│   ├── .env              # Runner environment (created by init script)
 │   ├── package.json
 │   └── tsconfig.json
-├── .dev/                   # Development documentation
-│   └── tasks/             # Task tracking
+├── landing/               # Landing page (Port 6868)
+│   ├── index.html
+│   └── server.mjs
 ├── .github/
 │   └── workflows/         # CI/CD pipelines
 ├── scripts/               # Development utilities
 │   ├── check-tools.js
+│   ├── init-env.js
 │   └── toolbox.js
+│   └── ops/               # Optional ops/tunnel helpers
+│       ├── setup-tunnel.sh
+│       ├── update-env-with-tunnel.sh
+│       ├── setup-cloudflared-tunnel.sh
+│       └── update-env-with-cloudflared.sh
 ├── config/                # Configuration files
 │   └── allowed-commands.json
-├── logs/                  # Development logs
-├── tmp/                   # Temporary files
-├── hotreload-test.sh     # Development startup script
+├── docs/                  # Project documentation
+├── hotreload-script.sh   # Guided dev startup (recommended)
+├── hotreload-test.sh     # Guided dev startup (core script)
 ├── production.sh         # Production deployment script
-├── setup-tunnel.sh       # ngrok tunnel setup
-├── setup-cloudflared-tunnel.sh  # Cloudflare tunnel setup
-├── update-env-with-tunnel.sh    # Environment updates
-├── update-env-with-cloudflared.sh
 ├── package.json          # Root package.json
 └── README.md
 ```
@@ -790,7 +747,7 @@ curl http://localhost:3002/health
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/yourusername/aiwebapp.git`
-3. Set up development: `./hotreload-test.sh`
+3. Set up development: `./hotreload-script.sh`
 4. Create feature branch: `git checkout -b feature/your-feature`
 5. Make changes and test
 6. Commit with conventional commits
@@ -810,32 +767,9 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Support
 
-- 📖 **Documentation**: Check `.dev/` folder for detailed guides
+- 📖 **Documentation**: Check `docs/` for project guides
 - 🐛 **Issues**: Create GitHub issues for bugs and features
 - 💬 **Discussions**: Use GitHub discussions for questions
 - 📧 **Contact**: heidi@heidiai.com.au
 
 ---
-
-**Last Updated**: February 6, 2026
-**Version**: 1.0.0
-
-## Updates
-
-### Landing Page
-- The landing page is now hosted on port `6868` and accessible at [https://heidiai.com.au](https://heidiai.com.au).
-- The landing page includes a modern, responsive design with links to the main AI platform and user registration/login.
-
-### User Registration/Login
-- A new service for user registration and login is hosted on port `3006` and accessible at [https://user.heidi.com.au](https://user.heidi.com.au).
-- The landing page's "Sign Up" and "Login" buttons redirect users to this service.
-
-### Updated Port Mappings
-- **Landing Page**: Port `6868` ([https://heidiai.com.au](https://heidiai.com.au))
-- **Main App UI**: Port `3000` ([https://ai.heidi.com.au](https://ai.heidi.com.au))
-- **API**: Port `3001` ([https://api.heidi.com.au](https://api.heidi.com.au))
-- **Code**: Port `3002` ([https://code.heidi.com.au](https://code.heidi.com.au))
-- **User Registration/Login**: Port `3006` ([https://user.heidi.com.au](https://user.heidi.com.au))
-
-### Developer Notification
-- Please note that the landing page is now hosted on port `6868`. Update your local configurations and workflows accordingly.

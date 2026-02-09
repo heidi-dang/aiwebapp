@@ -1,7 +1,6 @@
 /**
  * Phase 5: SQLite persistence for runner jobs and events
  */
-import sqlite3 from 'sqlite3'
 import { open, type Database } from 'sqlite'
 
 export type JobStatus = 'pending' | 'running' | 'done' | 'cancelled' | 'timeout' | 'error'
@@ -57,6 +56,15 @@ export interface JobStore {
 }
 
 export async function createSqliteStore(dbPath: string): Promise<JobStore> {
+  let sqlite3Mod: any
+  try {
+    sqlite3Mod = await import('sqlite3')
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new Error(`SQLite driver unavailable (${message})`)
+  }
+  const sqlite3 = sqlite3Mod?.default ?? sqlite3Mod
+
   const db: Database = await open({
     filename: dbPath,
     driver: sqlite3.Database
