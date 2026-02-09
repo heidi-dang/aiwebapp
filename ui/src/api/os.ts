@@ -39,6 +39,30 @@ export const getAgentsAPI = async (
   }
 }
 
+export const createAgentAPI = async (
+  endpoint: string,
+  agent: AgentDetails,
+  authToken?: string
+): Promise<AgentDetails | null> => {
+  const url = APIRoutes.GetAgents(endpoint) // Re-use /agents endpoint for POST
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: createHeaders(authToken),
+      body: JSON.stringify(agent)
+    })
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: response.statusText }))
+      toast.error(`Failed to create agent: ${err.error || response.statusText}`)
+      return null
+    }
+    return await response.json()
+  } catch (e) {
+    toast.error(`Error creating agent: ${e instanceof Error ? e.message : String(e)}`)
+    return null
+  }
+}
+
 export const getStatusAPI = async (
   base: string,
   authToken?: string
