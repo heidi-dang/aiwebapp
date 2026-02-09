@@ -27,6 +27,7 @@ services:
       - RUNNER_PERSIST=true
     volumes:
       - runner_data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
 
   chroma:
     image: chromadb/chroma:latest
