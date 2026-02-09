@@ -723,6 +723,52 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             required: ['query']
           }
         }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'search_web',
+          description: 'Search the web for documentation or technical solutions (via DuckDuckGo)',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search query' }
+            },
+            required: ['query']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'run_sql_query',
+          description: 'Execute a SQL query against a database',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'SQL query to execute' },
+              connection_string: { type: 'string', description: 'Database connection string (optional, uses env if not provided)' }
+            },
+            required: ['query']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'call_api',
+          description: 'Make an external API call',
+          parameters: {
+            type: 'object',
+            properties: {
+              method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE'], description: 'HTTP method' },
+              url: { type: 'string', description: 'Full URL' },
+              headers: { type: 'object', description: 'JSON object of headers' },
+              body: { type: 'string', description: 'Request body' }
+            },
+            required: ['method', 'url']
+          }
+        }
       }
     ]
   }
@@ -788,6 +834,15 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
           break
         case 'search_knowledge':
           result = await this.handleSearchKnowledge(params.query)
+          break
+        case 'search_web':
+          result = await this.handleSearchWeb(params.query)
+          break
+        case 'run_sql_query':
+          result = await this.handleRunSqlQuery(params.query, params.connection_string)
+          break
+        case 'call_api':
+          result = await this.handleCallApi(params.method, params.url, params.headers, params.body)
           break
         default:
           throw new Error(`Unknown tool: ${name}`)
@@ -1037,6 +1092,62 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   private async handleMemorySearch(query: string) {
     const results = await this.memoryService.search(query)
     return { query, results }
+  }
+
+  private async handleSearchWeb(query: string) {
+    // Use DuckDuckGo HTML search for simplicity (no API key required)
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
+    const text = await this.webService.fetchPage(url)
+    // Extract results (simple regex parsing)
+    // This is brittle but works for MVP without external paid API
+    // Real implementation should use SerpApi or similar
+    return { query, raw_html_snippet: text.slice(0, 2000), note: 'For better results, upgrade to SerpApi' }
+  }
+
+  private async handleRunSqlQuery(query: string, connectionString?: string) {
+    // For MVP, we only support SQLite local or the internal DB
+    // Security: Only allow SELECT statements
+    if (!query.trim().toLowerCase().startsWith('select')) {
+      return { error: 'Only SELECT statements are allowed in this tool' }
+    }
+
+    if (!connectionString) {
+      // Use internal runner DB as default for demo purposes?
+      // Or return error that connection string is needed
+      return { error: 'Connection string is required' }
+    }
+    
+    // In a real implementation, we'd use 'pg' or 'mysql2' or 'sqlite3' based on connection string
+    // Here we'll just mock it or return a placeholder
+    return { 
+      query, 
+      result: 'SQL execution not fully implemented in this MVP. Please upgrade to Phase 13 Complete.',
+      status: 'simulated'
+    }
+  }
+
+  private async handleCallApi(method: string, url: string, headers?: any, body?: string) {
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: headers || { 'Content-Type': 'application/json' },
+        body: body
+      })
+      const text = await response.text()
+      let json
+      try {
+        json = JSON.parse(text)
+      } catch {
+        // ignore
+      }
+      return {
+        status: response.status,
+        statusText: response.statusText,
+        data: json || text
+      }
+    } catch (err) {
+      return { error: `API call failed: ${err instanceof Error ? err.message : String(err)}` }
+    }
   }
 
   private async handleSearchKnowledge(query: string) {
