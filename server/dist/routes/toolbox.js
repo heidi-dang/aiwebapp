@@ -64,10 +64,62 @@ async function loadAllowlist() {
         return [];
     }
 }
+function isLocalRequest(req) {
+    const host = String(req?.headers?.host ?? '');
+    const ip = String(req?.ip ?? req?.socket?.remoteAddress ?? req?.connection?.remoteAddress ?? '');
+    return host.includes('localhost') || host.includes('127.0.0.1') || ip.includes('127.0.0.1') || ip.includes('::1');
+}
+const toolboxRate = new Map();
+function getClientKey(req) {
+    const ip = String(req?.ip ?? req?.socket?.remoteAddress ?? req?.connection?.remoteAddress ?? 'unknown');
+    const ua = String(req?.headers?.['user-agent'] ?? '');
+    return `${ip}|${ua.slice(0, 64)}`;
+}
+function enforceRateLimit(req, res) {
+    const maxPerMinute = Number(process.env.TOOLBOX_RATE_LIMIT_PER_MINUTE ?? 60);
+    const now = Date.now();
+    const key = getClientKey(req);
+    const cur = toolboxRate.get(key);
+    if (!cur || now - cur.windowStart >= 60_000) {
+        toolboxRate.set(key, { windowStart: now, count: 1 });
+        return true;
+    }
+    cur.count++;
+    if (cur.count > maxPerMinute) {
+        res.status(429).json({ error: 'Rate limit exceeded' });
+        return false;
+    }
+    return true;
+}
+function isRestrictedPath(p) {
+    const lowered = p.toLowerCase();
+    if (lowered === '.env' || lowered.endsWith('/.env') || lowered.endsWith('\\.env'))
+        return true;
+    if (lowered.includes('/.env.') || lowered.includes('\\.env.'))
+        return true;
+    if (lowered.includes('logs/') || lowered.includes('logs\\'))
+        return true;
+    if (lowered.includes('node_modules/') || lowered.includes('node_modules\\'))
+        return true;
+    if (lowered.includes('.git/') || lowered.includes('.git\\'))
+        return true;
+    if (lowered.includes('dist/') || lowered.includes('dist\\'))
+        return true;
+    if (lowered.includes('.next/') || lowered.includes('.next\\'))
+        return true;
+    if (lowered.endsWith('package-lock.json'))
+        return true;
+    return false;
+}
 export async function registerToolboxRoutes(app, store) {
     app.get('/toolbox', async (req, res) => {
         requireOptionalBearerAuth(req, res);
         if (res.headersSent)
+            return;
+        if (!process.env.OS_SECURITY_KEY && !isLocalRequest(req)) {
+            return res.status(401).json({ error: 'Refused: OS_SECURITY_KEY not set for non-local request' });
+        }
+        if (!enforceRateLimit(req, res))
             return;
         res.json(store.toolbox);
     });
@@ -75,6 +127,15 @@ export async function registerToolboxRoutes(app, store) {
         requireOptionalBearerAuth(req, res);
         if (res.headersSent)
             return;
+        if (!process.env.OS_SECURITY_KEY && !isLocalRequest(req)) {
+            return res.status(401).json({ error: 'Refused: OS_SECURITY_KEY not set for non-local request' });
+        }
+        if (!enforceRateLimit(req, res))
+            return;
+        const contentLength = Number(req.headers?.['content-length'] ?? 0);
+        if (contentLength > Number(process.env.TOOLBOX_MAX_BODY_BYTES ?? 1_000_000)) {
+            return res.status(413).json({ error: 'Payload too large' });
+        }
         const body = (req.body ?? {});
         const tool = String(body.tool ?? '');
         const params = (body.params ?? {});
@@ -84,7 +145,7 @@ export async function registerToolboxRoutes(app, store) {
                 if (!p || p.includes('..') || path.isAbsolute(p)) {
                     return res.status(400).json({ error: 'Invalid path' });
                 }
-                if (p.includes('.git') || p.includes('node_modules')) {
+                if (isRestrictedPath(p)) {
                     return res.status(403).json({ error: 'Refused to read suspicious path' });
                 }
                 try {
@@ -101,8 +162,12 @@ export async function registerToolboxRoutes(app, store) {
                 if (!p || p.includes('..') || path.isAbsolute(p)) {
                     return res.status(400).json({ error: 'Invalid path' });
                 }
-                if (p.includes('.git') || p.includes('node_modules')) {
+                if (isRestrictedPath(p)) {
                     return res.status(403).json({ error: 'Refused to write suspicious path' });
+                }
+                const maxBytes = Number(process.env.TOOLBOX_MAX_WRITE_BYTES ?? 512_000);
+                if (Buffer.byteLength(content, 'utf8') > maxBytes) {
+                    return res.status(413).json({ error: 'Content too large' });
                 }
                 await fs.writeFile(p, content, 'utf8');
                 return res.json({ success: true, result: { path: p } });
@@ -110,7 +175,7 @@ export async function registerToolboxRoutes(app, store) {
             if (tool === 'list_files') {
                 const pattern = String(params.glob ?? '**/*');
                 const entries = await new Promise((resolve, reject) => {
-                    glob(pattern, { cwd: process.cwd() }, (err, matches) => {
+                    glob(pattern, { cwd: process.cwd(), ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/.next/**', '**/logs/**'] }, (err, matches) => {
                         if (err)
                             reject(err);
                         else
@@ -124,7 +189,7 @@ export async function registerToolboxRoutes(app, store) {
                 if (!p || p.includes('..') || path.isAbsolute(p)) {
                     return res.status(400).json({ error: 'Invalid path' });
                 }
-                if (p.includes('.git') || p.includes('node_modules')) {
+                if (isRestrictedPath(p)) {
                     return res.status(403).json({ error: 'Refused to list suspicious path' });
                 }
                 const entries = await fs.readdir(p, { withFileTypes: true });
