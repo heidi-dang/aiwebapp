@@ -1013,6 +1013,9 @@ export async function executeJob(
       if (input.provider === 'copilotapi') {
         console.log(`[Runner] Using Copilot API for job ${jobId}`);
         await executeWithCopilotApi(ctx);
+      } else if (input.provider === 'agent') {
+        console.log(`[Runner] Using CoderAgent for job ${jobId}`);
+        await runCoderAgent(ctx);
       } else if (input.provider === 'ollama') {
         console.log(`[Runner] Using Ollama for job ${jobId}`);
         await executeWithOllama(ctx);

@@ -14,6 +14,7 @@ import { approvalService } from './services/approval.js'
 import { llmService } from './llm/index.js'
 import type { ChatMessage } from './llm/types.js'
 
+import { sandboxService } from './services/sandbox.js'
 import { tracingService } from './tracing.js'
 import { SpanStatusCode } from '@opentelemetry/api'
 
@@ -146,6 +147,26 @@ Be thorough and systematic in your approach.`
       span.setAttribute('job_id', this.ctx.jobId)
       
       try {
+        // Initialize Sandbox
+        const sandboxSpan = tracer.startSpan('init_sandbox')
+        try {
+          // Mount the repo root into the sandbox so scripts are available
+          const path = await import('path')
+          // Assuming runner is running in /runner, root is ..
+          // If base_dir is provided in input, use that, otherwise infer from CWD
+          const workspaceRoot = this.ctx.input.base_dir || path.resolve(process.cwd(), '..')
+          
+          await sandboxService.createSandbox(this.ctx.jobId, workspaceRoot)
+          sandboxSpan.setStatus({ code: SpanStatusCode.OK })
+        } catch (err) {
+          console.error('Failed to create sandbox:', err)
+          sandboxSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(err) })
+          // Fail the job if sandbox creation fails
+          throw err
+        } finally {
+          sandboxSpan.end()
+        }
+
         // Inject repo map into system prompt
         const mapSpan = tracer.startSpan('generate_repo_map')
         try {
@@ -192,6 +213,12 @@ Be thorough and systematic in your approach.`
         span.setStatus({ code: SpanStatusCode.ERROR })
         throw err
       } finally {
+        // Destroy Sandbox
+        try {
+          await sandboxService.destroySandbox(this.ctx.jobId)
+        } catch (err) {
+          console.warn('Failed to destroy sandbox:', err)
+        }
         span.end()
       }
     })
@@ -892,9 +919,13 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     if (this.ctx.bridge) {
       return await this.ctx.bridge.readFile(path)
     } else {
-      const fs = await import('fs/promises')
-      const content = await fs.readFile(path, 'utf8')
-      return { path, text: content }
+      // Read from Sandbox
+      try {
+        const text = await sandboxService.readFile(this.ctx.jobId, path)
+        return { path, text }
+      } catch (err) {
+        throw new Error(`Failed to read file ${path} from sandbox: ${err instanceof Error ? err.message : String(err)}`)
+      }
     }
   }
 
@@ -907,58 +938,90 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
         text: content
       }])
     } else {
-      const fs = await import('fs/promises')
-      await fs.writeFile(path, content, 'utf8')
+      // Write to Sandbox
+      try {
+        await sandboxService.writeFile(this.ctx.jobId, path, content)
+      } catch (err) {
+        throw new Error(`Failed to write file ${path} to sandbox: ${err instanceof Error ? err.message : String(err)}`)
+      }
     }
     return { path, bytes: content.length }
   }
 
   private async handleListFiles(glob: string) {
-    const { glob: globFn } = await import('glob')
-    const files = await globFn(glob)
+    // List files in Sandbox using 'find' or similar, since glob package works on local fs
+    // For MVP, we can try to use 'find' command via execCommand
+    // Or we can assume 'ls -R'
+    // Let's use a simple 'find . -name "glob_pattern"' logic approximation or just list all files
+    // Actually, handling full glob support in shell is tricky without 'glob' lib.
+    // We can run a node script inside the sandbox?
+    // For now, let's just use 'find . -name ...' if the glob is simple, or just list all files if it's **/*
+    
+    let command = 'find . -type f'
+    if (glob && glob !== '**/*') {
+       // Very basic glob to find conversion (imperfect)
+       // e.g. src/*.ts -> src -name "*.ts"
+       const namePart = glob.split('/').pop()
+       if (namePart && namePart.includes('*')) {
+         command += ` -name "${namePart}"`
+       }
+    }
+    // Limit output
+    command += ' | head -n 100'
+
+    const result = await sandboxService.execCommand(this.ctx.jobId, command)
+    if (result.exitCode !== 0) {
+        throw new Error(`Failed to list files: ${result.stderr}`)
+    }
+    
+    const files = result.stdout.split('\n').filter(f => f.trim()).map(f => f.replace(/^\.\//, ''))
     return { files }
   }
 
   private async handleListDir(path: string) {
-    const fs = await import('fs/promises')
-    const entries = await fs.readdir(path, { withFileTypes: true })
-    const entryDetails = await Promise.all(entries.map(async (entry) => {
-      const fullPath = `${path}/${entry.name}`
-      const stats = entry.isFile() ? await fs.stat(fullPath) : null
-      return {
-        name: entry.name,
-        type: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other',
-        size: stats?.size
-      }
+    // List dir in Sandbox
+    const command = `ls -la "${path}"`
+    const result = await sandboxService.execCommand(this.ctx.jobId, command)
+    
+    if (result.exitCode !== 0) {
+         throw new Error(`Failed to list directory: ${result.stderr}`)
+    }
+    
+    // Parse ls output? Or just return raw output for now?
+    // The original returned structured data.
+    // Let's return a simplified structure based on parsing ls -la is hard/brittle.
+    // Better: run a python one-liner or node script if available.
+    // Fallback: just return the stdout as 'entries' text for the LLM to read.
+    // But the tool definition says it returns objects.
+    
+    // Let's use 'ls -p' to distinguish directories
+    const lsRes = await sandboxService.execCommand(this.ctx.jobId, `ls -p "${path}"`)
+    if (lsRes.exitCode !== 0) throw new Error(lsRes.stderr)
+        
+    const entries = lsRes.stdout.split('\n').filter(Boolean).map(name => ({
+        name: name.replace(/\/$/, ''),
+        type: name.endsWith('/') ? 'directory' : 'file',
+        size: 0 // We skip size for now to keep it simple
     }))
-    return { path, entries: entryDetails }
+    
+    return { path, entries }
   }
 
   private async handleGrepSearch(query: string, includePattern?: string) {
-    const { glob } = await import('glob')
-    const { exec } = await import('child_process')
-    const { promisify } = await import('util')
-    const execAsync = promisify(exec)
-
     let grepCommand = `grep -r -n "${query.replace(/"/g, '\\"')}" .`
     if (includePattern) {
       grepCommand += ` --include="${includePattern}"`
     }
-    grepCommand += ` | head -50` // Limit results
+    grepCommand += ` | head -50`
 
-    try {
-      const result = await execAsync(grepCommand, { timeout: 10000 })
-      return {
+    const result = await sandboxService.execCommand(this.ctx.jobId, grepCommand)
+    // grep returns 1 if not found, which is fine
+    
+    const lines = result.stdout.split('\n').filter(line => line.trim())
+    return {
         query,
-        results: result.stdout.split('\n').filter(line => line.trim()),
-        truncated: result.stdout.split('\n').length >= 50
-      }
-    } catch (err: any) {
-      // grep returns exit code 1 when no matches found
-      if (err.code === 1) {
-        return { query, results: [], truncated: false }
-      }
-      throw err
+        results: lines,
+        truncated: lines.length >= 50
     }
   }
 
@@ -988,11 +1051,18 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       }
     }
 
-    const { exec } = await import('child_process')
-    const { promisify } = await import('util')
-    const execAsync = promisify(exec)
+    // Execute in Sandbox
     try {
-      const result = await execAsync(command, { timeout: 15000 })
+      // Default cwd to /app/workspace or similar if we set it up
+      const result = await sandboxService.execCommand(this.ctx.jobId, command)
+      if (result.exitCode !== 0) {
+        return { 
+            stdout: result.stdout, 
+            stderr: result.stderr, 
+            error: `Command failed with exit code ${result.exitCode}`,
+            exitCode: result.exitCode 
+        }
+      }
       return { stdout: result.stdout, stderr: result.stderr }
     } catch (err: any) {
       return { stdout: err.stdout || '', stderr: err.stderr || err.message, error: err.message }

@@ -114,7 +114,17 @@ type StreamCallbacks = {
 
 export function streamJobEvents(jobId: string, cb: StreamCallbacks) {
   const url = base(`/api/jobs/${encodeURIComponent(jobId)}/events`)
-  const es = new EventSource(url)
+  // SSE requires the full URL if we are not on the same origin, but here we are using a proxy.
+  // EventSource in browser sends cookies automatically for same-origin.
+  // If we are proxying, we need to ensure the cookies/auth are handled.
+  // Since our proxy handles auth token injection (if we passed it), but EventSource API doesn't support custom headers easily.
+  // The proxy at /api/runner/* uses the server-side RUNNER_TOKEN.
+  // The client doesn't need to send extra headers if the proxy handles it.
+  
+  // However, EventSource might fail if the server closes connection abruptly or returns 404/500.
+  // Let's add more robust error handling.
+  
+  const es = new EventSource(url, { withCredentials: true })
 
   const seen = new Set<string>()
 
