@@ -14,5 +14,5 @@ COPY --from=builder /app/dist ./dist
 # Create logs directory
 RUN mkdir -p logs
 
-EXPOSE 3001
+EXPOSE 4001
 CMD ["npm", "start"]

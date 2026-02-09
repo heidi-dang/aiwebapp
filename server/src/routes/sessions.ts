@@ -41,11 +41,49 @@ export async function registerSessionRoutes(app: any, store: Store) {
       res.status(404).json({ error: 'Session not found' })
       return
     }
-    
+
     // Phase 15: Check organization access if org_id is present in session metadata
     // For now, we assume public or user-owned. Real RBAC check would go here.
-    
+
     res.json(session)
+  })
+
+  app.delete('/sessions/:id', async (req: any, res: any) => {
+    requireOptionalBearerAuth(req, res)
+    if (res.headersSent) return
+
+    const sessionId = req.params.id
+    const query = (req.query ?? {}) as Record<string, string>
+    const dbId = String(query.db_id ?? '').trim()
+    const entityType = String(query.type ?? '').trim() as 'agent' | 'team'
+    const componentId = String(query.component_id ?? '').trim()
+
+    if (!dbId || !entityType || !componentId) {
+      res.status(400).json({
+        error: 'Missing required query params: db_id, type, component_id'
+      })
+      return
+    }
+    if (entityType !== 'agent' && entityType !== 'team') {
+      res.status(400).json({ error: 'Invalid type; must be agent or team' })
+      return
+    }
+
+    const deleted = await store.deleteSession({
+      dbId,
+      entityType,
+      componentId,
+      sessionId
+    })
+    if (!deleted) {
+      res.status(404).json({ error: 'Session not found' })
+      return
+    }
+
+    sessionCache.deleteSession(sessionId)
+    sessionCache.deleteSessionList('all_sessions')
+
+    res.status(204).send()
   })
 
   // Phase 15: Share Session

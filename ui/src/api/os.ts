@@ -134,10 +134,14 @@ export const deleteSessionAPI = async (
   base: string,
   dbId: string,
   sessionId: string,
+  entityType: 'agent' | 'team',
+  componentId: string,
   authToken?: string
 ) => {
   const queryParams = new URLSearchParams()
   if (dbId) queryParams.append('db_id', dbId)
+  queryParams.set('type', entityType)
+  queryParams.set('component_id', componentId)
   const response = await fetch(
     `${APIRoutes.DeleteSession(base, sessionId)}?${queryParams.toString()}`,
     {
@@ -173,18 +177,19 @@ export const getTeamsAPI = async (
 
 export const deleteTeamSessionAPI = async (
   base: string,
+  dbId: string,
   teamId: string,
   sessionId: string,
   authToken?: string
 ) => {
-  const response = await fetch(
-    APIRoutes.DeleteTeamSession(base, teamId, sessionId),
-    {
-      method: 'DELETE',
-      headers: createHeaders(authToken)
-    }
+  const response = await deleteSessionAPI(
+    base,
+    dbId,
+    sessionId,
+    'team',
+    teamId,
+    authToken
   )
-
   if (!response.ok) {
     throw new Error(`Failed to delete team session: ${response.statusText}`)
   }

@@ -17,8 +17,8 @@ function requireEnv(name: string): string {
   return v
 }
 
-const PORT = Number(process.env.PORT ?? 3002)
-const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000'
+const PORT = Number(process.env.PORT ?? 4002)
+const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:4000'
 const DB_PATH = process.env.RUNNER_DB ?? './runner.db'
 const USE_SQLITE = process.env.RUNNER_PERSIST !== 'false'
 const MAX_CONCURRENCY = Number(process.env.RUNNER_MAX_CONCURRENCY ?? 2)
@@ -100,7 +100,7 @@ async function main() {
   })
 
   await app.register(cors, {
-    origin: [CORS_ORIGIN, 'http://localhost:3000', 'http://localhost:3001'],
+    origin: [CORS_ORIGIN, 'http://localhost:4000', 'http://localhost:4001'],
     credentials: true,
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']

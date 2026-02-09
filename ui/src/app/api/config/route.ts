@@ -21,7 +21,7 @@ function deriveSubdomainUrl(subdomain: string, hostHeader: string | null) {
   const hostname = stripWww(stripPort(hostHeader))
   if (!hostname || isLocalHostname(hostname)) {
     if (subdomain === 'copilot') return 'http://localhost:8080'
-    if (subdomain === 'api') return 'http://localhost:3001'
+    if (subdomain === 'api') return 'http://localhost:4001'
     return null
   }
   return `https://${subdomain}.${hostname}`
@@ -36,7 +36,7 @@ export async function GET() {
     hostHeader?.includes('localhost') || hostHeader?.includes('127.0.0.1')
 
   const derivedApiUrl = isLocal
-    ? 'http://localhost:3001'
+    ? 'http://localhost:4001'
     : deriveSubdomainUrl('api', hostHeader)
   const derivedAiApiUrl = isLocal
     ? 'http://localhost:8080'
@@ -45,14 +45,14 @@ export async function GET() {
   const envApi = process.env.NEXT_PUBLIC_API_URL ?? ''
   const envAiApi = process.env.NEXT_PUBLIC_AI_API_URL ?? ''
 
-  const apiUrl = envApi || derivedApiUrl || 'http://localhost:3001'
+  const apiUrl = envApi || derivedApiUrl || 'http://localhost:4001'
 
   const aiApiUrl = envAiApi || derivedAiApiUrl || null
 
   const payload = {
     apiUrl,
     aiApiUrl,
-    runnerBaseUrl: process.env.RUNNER_BASE_URL ?? 'http://localhost:3002',
+    runnerBaseUrl: process.env.RUNNER_BASE_URL ?? 'http://localhost:4002',
     hasEnvToken: !!process.env.NEXT_PUBLIC_OS_SECURITY_KEY
   }
 
