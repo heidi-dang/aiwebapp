@@ -6,6 +6,10 @@
 import type { JobContext, JobInput } from './executor.js'
 import type { RunnerEventType } from './db.js'
 import { OllamaClient, createOllamaClientFromEnv } from './ollama.js'
+import { GitService } from './services/git.js'
+import { RepoMapper } from './services/repo-map.js'
+import { WebService } from './services/web.js'
+import { MemoryService } from './services/memory.js'
 
 export type AgentState = 'planning' | 'code_generation' | 'code_execution' | 'review' | 'iterate' | 'finish'
 
@@ -45,9 +49,18 @@ export class CoderAgent {
   private currentIteration = 0
   private messages: ChatMessage[] = []
   private ollama: OllamaClient | null = null
+  private gitService: GitService
+  private repoMapper: RepoMapper
+  private webService: WebService
+  private memoryService: MemoryService
 
   constructor(private ctx: JobContext) {
     this.ollama = createOllamaClientFromEnv()
+    const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
+    this.gitService = new GitService(baseDir)
+    this.repoMapper = new RepoMapper(baseDir)
+    this.webService = new WebService()
+    this.memoryService = new MemoryService(baseDir)
     this.initializeMessages()
     this.loadMemory()
   }
@@ -141,6 +154,16 @@ Be thorough and systematic in your approach.`
   }
 
   async run(): Promise<void> {
+    // Inject repo map into system prompt
+    try {
+      const map = await this.repoMapper.generateMap()
+      if (this.messages.length > 0 && this.messages[0].role === 'system') {
+        this.messages[0].content += `\n\nCurrent Repository Map:\n${map}`
+      }
+    } catch (err) {
+      console.warn('Failed to generate repo map:', err)
+    }
+
     while (this.state !== 'finish' && this.currentIteration < this.maxIterations) {
       await this.processState()
       this.currentIteration++
@@ -234,13 +257,13 @@ Generate the code now.`
     const execPrompt = `Execute and test the generated code.
 - If it's a script, run it with the appropriate runtime (node for .js, python for .py, etc.)
 - If it's a web application, check if it can be built/started
-- If there are tests, run them
+- **Run Tests/Lint**: Use 'run_test' and 'run_lint' tools if available to verify correctness.
 - Check for any runtime errors or issues
 - Verify the code works as expected and fulfills the user's request
 
 User request: "${this.ctx.input.message || this.ctx.input.instruction}"
 
-Execute the code and report the results.`
+Execute the code and report the results. If tests fail, try to fix the code.`
 
     this.messages.push({ role: 'user', content: execPrompt })
 
@@ -304,6 +327,14 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     const maxRetries = 3
     let lastError: Error | null = null
 
+    // Determine model based on state (Architect/Editor pattern)
+    let model = this.ctx.input.model || 'gpt-4o'
+    if (this.state === 'planning' && this.ctx.input.planner_model) {
+      model = this.ctx.input.planner_model
+    } else if (this.state !== 'planning' && this.ctx.input.writer_model) {
+      model = this.ctx.input.writer_model
+    }
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const res = await fetch(`${process.env.AI_API_URL}/v1/chat/completions`, {
@@ -314,7 +345,7 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             ...(process.env.AI_API_KEY && { 'X-API-Key': process.env.AI_API_KEY })
           },
           body: JSON.stringify({
-            model: this.ctx.input.model || 'gpt-4o',
+            model,
             messages: this.messages,
             tools,
             tool_choice: 'auto',
@@ -572,6 +603,122 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             required: ['path', 'range', 'text']
           }
         }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_commit',
+          description: 'Stage all files and commit changes with a message',
+          parameters: {
+            type: 'object',
+            properties: {
+              message: { type: 'string', description: 'Commit message' }
+            },
+            required: ['message']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_diff',
+          description: 'Show changes between commits or working tree',
+          parameters: {
+            type: 'object',
+            properties: {
+              target: { type: 'string', description: 'Target to diff against (default: HEAD)' }
+            }
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_log',
+          description: 'Show recent commit history',
+          parameters: {
+            type: 'object',
+            properties: {
+              limit: { type: 'number', description: 'Number of commits to show' }
+            }
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_undo',
+          description: 'Undo the last commit (soft reset)',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'run_test',
+          description: 'Run project tests (e.g. npm test)',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'run_lint',
+          description: 'Run project linter (e.g. npm run lint)',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'web_fetch',
+          description: 'Fetch and extract text from a URL',
+          parameters: {
+            type: 'object',
+            properties: {
+              url: { type: 'string', description: 'URL to fetch' }
+            },
+            required: ['url']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'memory_store',
+          description: 'Store valuable information in long-term memory',
+          parameters: {
+            type: 'object',
+            properties: {
+              content: { type: 'string', description: 'Information to store' },
+              tags: { type: 'array', items: { type: 'string' }, description: 'Tags for retrieval' }
+            },
+            required: ['content']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'memory_search',
+          description: 'Search long-term memory',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search query' }
+            },
+            required: ['query']
+          }
+        }
       }
     ]
   }
@@ -606,6 +753,33 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
           break
         case 'apply_edit':
           result = await this.handleApplyEdit(params.path, params.range, params.text)
+          break
+        case 'git_commit':
+          result = await this.handleGitCommit(params.message)
+          break
+        case 'git_diff':
+          result = await this.handleGitDiff(params.target)
+          break
+        case 'git_log':
+          result = await this.handleGitLog(params.limit)
+          break
+        case 'git_undo':
+          result = await this.handleGitUndo()
+          break
+        case 'run_test':
+          result = await this.handleRunTest()
+          break
+        case 'run_lint':
+          result = await this.handleRunLint()
+          break
+        case 'web_fetch':
+          result = await this.handleWebFetch(params.url)
+          break
+        case 'memory_store':
+          result = await this.handleMemoryStore(params.content, params.tags)
+          break
+        case 'memory_search':
+          result = await this.handleMemorySearch(params.query)
           break
         default:
           throw new Error(`Unknown tool: ${name}`)
@@ -749,6 +923,68 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       await fs.writeFile(path, newContent, 'utf8')
     }
     return { path, range, textLength: text.length }
+  }
+
+  private async handleGitCommit(message: string) {
+    await this.gitService.add()
+    const hash = await this.gitService.commit(message)
+    return { hash, message }
+  }
+
+  private async handleGitDiff(target?: string) {
+    const diff = await this.gitService.diff(target)
+    return { diff }
+  }
+
+  private async handleGitLog(limit?: number) {
+    const log = await this.gitService.log(limit)
+    return { log }
+  }
+
+  private async handleGitUndo() {
+    await this.gitService.undo()
+    return { success: true, message: 'Undid last commit' }
+  }
+
+  private async handleRunTest() {
+    return this.runPackageScript('test')
+  }
+
+  private async handleRunLint() {
+    return this.runPackageScript('lint')
+  }
+
+  private async runPackageScript(scriptName: string) {
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    const baseDir = this.ctx.input.base_dir && this.ctx.input.base_dir.trim() ? this.ctx.input.base_dir : process.cwd()
+    const pkgPath = path.join(baseDir, 'package.json')
+
+    try {
+      const content = await fs.readFile(pkgPath, 'utf8')
+      const pkg = JSON.parse(content)
+      if (pkg.scripts && pkg.scripts[scriptName]) {
+        return await this.handleRunCommand(`npm run ${scriptName}`)
+      }
+      return { error: `No "${scriptName}" script found in package.json` }
+    } catch (err) {
+      return { error: 'Could not read package.json' }
+    }
+  }
+
+  private async handleWebFetch(url: string) {
+    const text = await this.webService.fetchPage(url)
+    return { url, text }
+  }
+
+  private async handleMemoryStore(content: string, tags?: string[]) {
+    await this.memoryService.store(content, tags)
+    return { success: true, message: 'Stored in memory' }
+  }
+
+  private async handleMemorySearch(query: string) {
+    const results = await this.memoryService.search(query)
+    return { query, results }
   }
 
   private async emitEvent(type: RunnerEventType, data?: unknown): Promise<void> {
