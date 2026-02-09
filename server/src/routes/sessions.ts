@@ -15,6 +15,17 @@ export async function registerSessionRoutes(app: any, store: Store) {
   app.get('/sessions', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return
+    const query = (req.query ?? {}) as Record<string, unknown>
+    const dbId = String(query.db_id ?? '')
+    const entityType = String(query.type ?? '')
+    const componentId = String(query.component_id ?? '')
+
+    if (dbId && entityType && componentId) {
+      const data = await store.listSessions({ dbId, entityType: entityType as any, componentId })
+      res.json({ data })
+      return
+    }
+
     const sessions = await store.listAllSessions()
     res.json(sessions)
   })

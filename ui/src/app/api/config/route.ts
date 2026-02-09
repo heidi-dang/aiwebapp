@@ -52,7 +52,7 @@ export async function GET() {
   const payload = {
     apiUrl,
     aiApiUrl,
-    runnerBaseUrl: process.env.RUNNER_BASE_URL ?? 'http://localhost:8788',
+    runnerBaseUrl: process.env.RUNNER_BASE_URL ?? 'http://localhost:3002',
     hasEnvToken: !!process.env.NEXT_PUBLIC_OS_SECURITY_KEY
   }
 

@@ -970,7 +970,8 @@ export async function executeJob(
   jobId: string,
   subscribers: Set<FastifyReply>,
   input: JobInput,
-  onComplete: (status: JobStatus) => void
+  onComplete: (status: JobStatus) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const bridge = createBridgeClientFromEnv()
 
@@ -983,7 +984,19 @@ export async function executeJob(
     aborted: false
   }
 
+  if (signal) {
+    if (signal.aborted) ctx.aborted = true
+    signal.addEventListener('abort', () => {
+      ctx.aborted = true
+    })
+  }
+
   try {
+    if (ctx.aborted) {
+      onComplete('cancelled')
+      return
+    }
+
     // Emit job started
     await store.updateJobStatus(jobId, 'running', nowIso())
     await emitEvent(ctx, 'job.started', { input })
@@ -1024,8 +1037,14 @@ export async function executeJob(
       await store.updateJobStatus(jobId, 'done', undefined, nowIso())
       await emitEvent(ctx, 'done', { status: 'done' })
       onComplete('done')
+    } else {
+      onComplete('cancelled')
     }
   } catch (err) {
+    if (ctx.aborted) {
+      onComplete('cancelled')
+      return
+    }
     // Error occurred
     await store.updateJobStatus(jobId, 'error', undefined, nowIso())
     await emitEvent(ctx, 'error', { message: err instanceof Error ? err.message : String(err) })

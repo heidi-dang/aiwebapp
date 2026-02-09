@@ -82,6 +82,10 @@ export class LRUCache<K, V> {
     this.accessOrder.length = 0
   }
 
+  cleanup(): void {
+    this.cleanupExpired()
+  }
+
   size(): number {
     return this.cache.size
   }
@@ -144,6 +148,13 @@ export class SessionCache {
   constructor(maxSessions: number = 1000, ttl: number = 3600000) {
     this.sessionCache = new LRUCache(maxSessions, ttl)
     this.sessionListCache = new LRUCache(maxSessions, ttl)
+
+    const intervalMs = Math.min(ttl, 5 * 60 * 1000)
+    const handle = setInterval(() => {
+      this.sessionCache.cleanup()
+      this.sessionListCache.cleanup()
+    }, intervalMs)
+    if (typeof (handle as any).unref === 'function') (handle as any).unref()
   }
 
   // Session cache methods

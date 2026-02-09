@@ -1,15 +1,11 @@
-# hotreload-test.sh
-# Starts UI, server, and runner with hot-reload in development,
-# captures logs, chooses fallback ports (3000-3050) to avoid EADDRINUSE,
-# and tails logs with a cleanup trap.
+#!/usr/bin/env bash
+set -e
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
 LOG_DIR="logs"
 mkdir -p "$LOG_DIR"
-
-MAX_PORT=3050
 
 prompt_user() {
     local message="$1"
@@ -36,6 +32,20 @@ prompt_value() {
     printf '%s' "$resp"
 }
 
+step() {
+    echo ""
+    echo "== $1 =="
+}
+
+die() {
+    echo "ERROR: $1"
+    exit 1
+}
+
+have_cmd() {
+    command -v "$1" >/dev/null 2>&1
+}
+
 get_env_value() {
     local file="$1" key="$2"
     [ -f "$file" ] || return 0
@@ -55,34 +65,11 @@ set_env_value() {
     fi
 }
 
-find_free_port() {
-    local start=$1
-    local max=${2:-$MAX_PORT}
-    shift 2 || true
-    local exclude=("$@")
-    local port=$start
-    while [ "$port" -le "$max" ]; do
-        # skip excluded ports
-        local skip=0
-        for e in "${exclude[@]}"; do
-            [ "$e" = "$port" ] && skip=1 && break
-        done
-        [ "$skip" -eq 1 ] && port=$((port+1)) && continue
-
-        if ! lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-            printf '%s' "$port"
-            return 0
-        fi
-        port=$((port+1))
-    done
-    return 1
-}
-
 cleanup() {
-    echo "\nStopping services..."
-    # kill background tails/processes launched by this script
+    echo ""
+    echo "Stopping services..."
     pkill -P $$ || true
-    for pid in "${SERVER_PID:-}" "${UI_PID:-}" "${RUNNER_PID:-}"; do
+    for pid in "${LANDING_PID:-}" "${SERVER_PID:-}" "${UI_PID:-}" "${RUNNER_PID:-}"; do
         [ -n "${pid:-}" ] && kill "$pid" 2>/dev/null || true
     done
     sleep 0.5
@@ -91,30 +78,49 @@ cleanup() {
 
 trap cleanup INT TERM EXIT
 
-echo "📍 aiwebapp root: $ROOT_DIR"
+LANDING_PORT=6868
+UI_PORT=3000
+SERVER_PORT=3001
+RUNNER_PORT=3002
+
+step "Hot Reload (Local Dev)"
+echo "Ports:"
+echo "  Landing: http://localhost:$LANDING_PORT"
+echo "  UI:      http://localhost:$UI_PORT"
+echo "  API:     http://localhost:$SERVER_PORT"
+echo "  Runner:  http://localhost:$RUNNER_PORT"
+echo "  Ollama:  http://localhost:11434"
+echo "  Proxy:   http://localhost:8080"
+echo ""
+echo "Root: $ROOT_DIR"
 
 if [ ! -d server ] || [ ! -d ui ] || [ ! -d runner ]; then
-    echo "❌ This script must be run from the aiwebapp root directory containing server, ui, runner"
-    exit 1
+    die "This script must be run from the aiwebapp root directory containing server, ui, runner"
 fi
 
+step "Preflight Checks"
+if ! have_cmd npm; then
+    die "npm is required (install Node.js first)."
+fi
+
+if have_cmd lsof; then
+    for p in "$LANDING_PORT" "$UI_PORT" "$SERVER_PORT" "$RUNNER_PORT"; do
+        if lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then
+            die "Port $p is already in use. Stop the process using it and retry."
+        fi
+    done
+else
+    echo "WARN: lsof not found; skipping port availability checks."
+fi
+
+step "Dependencies"
 if prompt_user "Install dependencies for all services now?" "n"; then
-    (cd server && npm ci)
-    (cd ui && npm ci)
-    (cd runner && npm ci)
+    (cd server && npm ci) || die "server npm ci failed"
+    (cd ui && npm ci) || die "ui npm ci failed"
+    (cd runner && npm ci) || die "runner npm ci failed"
 fi
 
-echo "Starting services with port fallback (3000..$MAX_PORT)..."
-
-# UI: prefers 3000
-UI_PORT=$(find_free_port 3000 "$MAX_PORT") || { echo "No free UI port"; exit 1; }
-# Server: prefers 3001, avoid UI_PORT
-SERVER_PORT=$(find_free_port 3001 "$MAX_PORT" "$UI_PORT") || { echo "No free Server port"; exit 1; }
-# Runner: prefers 3002, avoid UI and Server
-RUNNER_PORT=$(find_free_port 3002 "$MAX_PORT" "$UI_PORT" "$SERVER_PORT") || { echo "No free Runner port"; exit 1; }
-
-echo "UI -> $UI_PORT, Server -> $SERVER_PORT, Runner -> $RUNNER_PORT"
-
+step "Environment Setup"
 server_env_file="server/.env"
 if [ ! -f "$server_env_file" ] && [ -f "server/.env.example" ]; then
     cp server/.env.example "$server_env_file"
@@ -162,13 +168,12 @@ if prompt_user "Configure OAuth providers now?" "n"; then
     [ -n "${apple_secret:-}" ] && set_env_value "$server_env_file" "APPLE_CLIENT_SECRET" "$apple_secret"
 fi
 
-echo "Clearing logs..."
+step "UI + Runner Local Settings"
 : > "$LOG_DIR/server.log"
 : > "$LOG_DIR/ui.log"
 : > "$LOG_DIR/runner.log"
+: > "$LOG_DIR/landing.log"
 
-# Ensure UI's env points to the runner started by this script.
-# Preserve existing values if present.
 if [ -f ui/.env.local ]; then
     existing_token=$(grep -m1 '^RUNNER_TOKEN=' ui/.env.local | cut -d'=' -f2- || true)
     existing_ai_api_url=$(grep -m1 '^NEXT_PUBLIC_AI_API_URL=' ui/.env.local | cut -d'=' -f2- || true)
@@ -177,24 +182,21 @@ else
     existing_ai_api_url=""
 fi
 
-# Default AI API URL should work for both local dev and remote clients.
-# If you don't have a tunnel/domain, override in ui/.env.local before running this script.
-AI_API_PUBLIC_URL=${existing_ai_api_url:-https://copilot.heidiai.com.au}
-AI_API_URL=${AI_API_PUBLIC_URL:-http://192.168.1.16:8080}
-echo "# Managed by hotreload-test.sh" > ui/.env.local
-echo "# Optional: UI auth token for AgentOS requests" >> ui/.env.local
-echo "# NEXT_PUBLIC_OS_SECURITY_KEY=your_token_here" >> ui/.env.local
-echo >> ui/.env.local
-echo "# API URL set to the actual server port" >> ui/.env.local
-echo "NEXT_PUBLIC_AI_API_URL=$AI_API_PUBLIC_URL" >> ui/.env.local
-echo >> ui/.env.local
-echo "RUNNER_URL=http://localhost:$RUNNER_PORT" >> ui/.env.local
-echo "RUNNER_TOKEN=${existing_token:-change_me}" >> ui/.env.local
+AI_API_PUBLIC_URL=${existing_ai_api_url:-http://localhost:8080}
+AI_API_URL=${AI_API_PUBLIC_URL:-http://localhost:8080}
 
-# Set RUNNER_TOKEN for the runner process
+cat > ui/.env.local << EOF
+# Managed by hotreload-test.sh
+# NEXT_PUBLIC_OS_SECURITY_KEY=your_token_here
+
+NEXT_PUBLIC_AI_API_URL=$AI_API_PUBLIC_URL
+
+RUNNER_URL=http://localhost:$RUNNER_PORT
+RUNNER_TOKEN=${existing_token:-change_me}
+EOF
+
 RUNNER_TOKEN=${existing_token:-change_me}
 
-# Read bridge config from runner/.env if present
 if [ -f runner/.env ]; then
     bridge_url=$(grep -m1 '^BRIDGE_URL=' runner/.env | cut -d'=' -f2- || true)
     bridge_token=$(grep -m1 '^BRIDGE_TOKEN=' runner/.env | cut -d'=' -f2- || true)
@@ -202,39 +204,64 @@ fi
 BRIDGE_URL=${bridge_url:-}
 BRIDGE_TOKEN=${bridge_token:-}
 
-# Helper to run a command using `ato` if available, otherwise fall back to nohup+disown.
-# Usage: run_with_ato <logfile> <command-as-string>
+step "Optional Dependencies Check"
+if have_cmd curl; then
+    proxy_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://localhost:8080" 2>/dev/null || echo 000)
+    ollama_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://localhost:11434/api/tags" 2>/dev/null || echo 000)
+    if [ "$proxy_code" = "000" ]; then
+        echo "WARN: Proxy not reachable at http://localhost:8080 (ok if you're not using Copilot API)."
+    fi
+    if [ "$ollama_code" = "000" ]; then
+        echo "WARN: Ollama not reachable at http://localhost:11434 (ok if you're not using Ollama provider)."
+    fi
+else
+    echo "WARN: curl not found; skipping proxy/ollama checks."
+fi
+
 run_with_ato() {
     local logfile="$1"; shift
     local cmd="$*"
+    local pid
     if command -v ato >/dev/null 2>&1; then
-        echo "[ATO] running via ato: $cmd"
-        # try to use ato to run the command; capture pid
         ato bash -lc "$cmd" >>"$logfile" 2>&1 &
         pid=$!
     else
-        echo "[ATO-fallback] running via nohup: $cmd"
         nohup bash -lc "$cmd" >>"$logfile" 2>&1 &
         pid=$!
     fi
     printf '%s' "$pid"
 }
 
-echo "Starting server (logs/server.log)..."
+step "Start Services"
+if prompt_user "Start landing server (http://localhost:6868)?" "y"; then
+    LANDING_PID=$(run_with_ato "$LOG_DIR/landing.log" "node landing/server.mjs")
+    sleep 0.2
+fi
+
+echo "Starting API server..."
 SERVER_PID=$(run_with_ato "$LOG_DIR/server.log" "cd server && PORT=\"$SERVER_PORT\" RUNNER_URL=\"http://localhost:$RUNNER_PORT\" CORS_ORIGIN=\"$cors_origin\" SERVER_PUBLIC_URL=\"$server_public\" MAX_ITERATIONS=10 REQUEST_TIMEOUT_MS=30000 MAX_PAYLOAD_SIZE=1048576 FEATURE_X_ENABLED=false npm run dev")
 sleep 0.2
 
-echo "Starting UI (logs/ui.log)..."
-# pass -p for Next
+echo "Starting UI..."
 UI_PID=$(run_with_ato "$LOG_DIR/ui.log" "cd ui && MAX_ITERATIONS=10 REQUEST_TIMEOUT_MS=30000 MAX_PAYLOAD_SIZE=1048576 FEATURE_X_ENABLED=false npm run dev")
 sleep 0.2
 
-echo "Starting runner (logs/runner.log)..."
-RUNNER_PID=$(run_with_ato "$LOG_DIR/runner.log" "cd runner && PORT=\"$RUNNER_PORT\" RUNNER_TOKEN=\"$RUNNER_TOKEN\" AI_API_URL=\"$AI_API_URL\" BRIDGE_URL=\"$BRIDGE_URL\" BRIDGE_TOKEN=\"$BRIDGE_TOKEN\" MAX_ITERATIONS=10 REQUEST_TIMEOUT_MS=30000 MAX_PAYLOAD_SIZE=1048576 FEATURE_X_ENABLED=false npm run dev")
+echo "Starting runner..."
+RUNNER_PID=$(run_with_ato "$LOG_DIR/runner.log" "cd runner && PORT=\"$RUNNER_PORT\" RUNNER_TOKEN=\"$RUNNER_TOKEN\" AI_API_URL=\"$AI_API_URL\" BRIDGE_URL=\"$BRIDGE_URL\" BRIDGE_TOKEN=\"$BRIDGE_TOKEN\" RUNNER_MAX_CONCURRENCY=${RUNNER_MAX_CONCURRENCY:-2} MAX_ITERATIONS=10 REQUEST_TIMEOUT_MS=30000 MAX_PAYLOAD_SIZE=1048576 FEATURE_X_ENABLED=false npm run dev")
 sleep 0.2
 
-echo "PIDs: server=$SERVER_PID ui=$UI_PID runner=$RUNNER_PID"
-echo "Access: UI=http://localhost:$UI_PORT  Server=http://localhost:$SERVER_PORT  Runner=http://localhost:$RUNNER_PORT"
+echo ""
+echo "Started:"
+[ -n "${LANDING_PID:-}" ] && echo "  Landing PID: $LANDING_PID"
+echo "  Server PID:  $SERVER_PID"
+echo "  UI PID:      $UI_PID"
+echo "  Runner PID:  $RUNNER_PID"
+echo ""
+echo "URLs:"
+echo "  Landing: http://localhost:$LANDING_PORT"
+echo "  UI:      http://localhost:$UI_PORT"
+echo "  API:     http://localhost:$SERVER_PORT"
+echo "  Runner:  http://localhost:$RUNNER_PORT"
 
 check_service() {
     local name=$1 url=$2 pid=$3 log=$4
@@ -246,21 +273,38 @@ check_service() {
         code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "$url" 2>/dev/null || echo 000)
         echo "[$name] HTTP $code -> $url"
         if [ "$code" = "000" ] || [ "$code" -ge 400 ]; then
-            echo "  Check logs: tail -n 50 $log"
+            echo "Check logs: tail -n 50 $log"
             return 1
         fi
     fi
     return 0
 }
 
+step "Health Checks"
 sleep 1
 check_service UI "http://localhost:$UI_PORT" "$UI_PID" "$LOG_DIR/ui.log" || true
 check_service Server "http://localhost:$SERVER_PORT/health" "$SERVER_PID" "$LOG_DIR/server.log" || true
 check_service Runner "http://localhost:$RUNNER_PORT/health" "$RUNNER_PID" "$LOG_DIR/runner.log" || true
 
-echo "Tailing logs (press Ctrl+C to stop)..."
-tail -n +1 -f "$LOG_DIR/server.log" | sed 's/^/[Server] /' &
-tail -n +1 -f "$LOG_DIR/ui.log" | sed 's/^/[UI]     /' &
-tail -n +1 -f "$LOG_DIR/runner.log" | sed 's/^/[Runner] /' &
+step "Smoke Test"
+if prompt_user "Run smoke tests now (npm run smoke)?" "n"; then
+    npm run smoke || true
+fi
+
+step "Logs"
+if prompt_user "Tail logs now (Ctrl+C to stop)?" "y"; then
+    tail -n +1 -f "$LOG_DIR/landing.log" | sed 's/^/[Landing] /' &
+    tail -n +1 -f "$LOG_DIR/server.log" | sed 's/^/[Server]  /' &
+    tail -n +1 -f "$LOG_DIR/ui.log" | sed 's/^/[UI]      /' &
+    tail -n +1 -f "$LOG_DIR/runner.log" | sed 's/^/[Runner]  /' &
+    wait
+fi
+
+echo ""
+echo "Services are running in the background."
+echo "Stop them with:"
+echo "  kill $SERVER_PID $UI_PID $RUNNER_PID ${LANDING_PID:-}"
+echo "Or press Ctrl+C in this terminal to stop them via the script."
 
 wait
+

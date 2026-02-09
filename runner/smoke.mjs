@@ -1,6 +1,6 @@
 import 'dotenv/config'
 
-const BASE_URL = process.env.RUNNER_BASE_URL ?? `http://localhost:${process.env.PORT ?? 8788}`
+const BASE_URL = process.env.RUNNER_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3002}`
 const TOKEN = process.env.RUNNER_TOKEN
 
 if (!TOKEN) {
