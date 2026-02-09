@@ -8,6 +8,7 @@ services:
       - PORT=3001
       - CORS_ORIGIN=http://localhost:3000
       - RUNNER_URL=http://runner:3002
+      - CHROMA_URL=http://chroma:8000
       - SQLITE_PATH=/app/data/server.db
     volumes:
       - server_data:/app/data
@@ -27,6 +28,15 @@ services:
     volumes:
       - runner_data:/app/data
 
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+
   ui:
     image: heididang/aiwebapp-ui:latest
     build:
@@ -45,3 +55,4 @@ services:
 volumes:
   server_data:
   runner_data:
+  chroma_data:

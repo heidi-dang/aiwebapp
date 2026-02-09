@@ -591,6 +591,13 @@ export class SqliteStore implements Store {
         '  content TEXT NOT NULL,',
         '  created_at INTEGER NOT NULL',
         ');',
+        'CREATE TABLE IF NOT EXISTS user_facts (',
+        '  id TEXT PRIMARY KEY,',
+        '  user_id TEXT NOT NULL,',
+        '  content TEXT NOT NULL,',
+        '  tags TEXT,',
+        '  created_at INTEGER NOT NULL',
+        ');',
         'CREATE TABLE IF NOT EXISTS knowledge_chunks (',
         '  id TEXT PRIMARY KEY,',
         '  doc_id TEXT NOT NULL,',
@@ -1078,21 +1085,40 @@ export class SqliteStore implements Store {
   }
 
   async searchKnowledge(embedding: number[], limit: number): Promise<Array<{ docId: string; content: string; score: number }>> {
-    // Fetch all chunks (inefficient for large data, but MVP)
-    const chunks = await this.db.all<{ doc_id: string; content: string; embedding: string }[]>(
-      'SELECT doc_id, content, embedding FROM knowledge_chunks'
+    // We only use this for fallback if vector service isn't available
+    return []
+  }
+
+  // --- Facts / Long-Term Memory ---
+  async addUserFact(userId: string, content: string, tags: string[] = []): Promise<string> {
+    const id = `fact_${Date.now()}_${Math.random().toString(16).slice(2)}`
+    const createdAt = nowSeconds()
+    const tagsJson = JSON.stringify(tags)
+    
+    await this.db.run(
+      'INSERT INTO user_facts (id, user_id, content, tags, created_at) VALUES (?, ?, ?, ?, ?)',
+      id, userId, content, tagsJson, createdAt
     )
+    return id
+  }
 
-    const results = chunks.map(chunk => {
-      const chunkEmbedding = JSON.parse(chunk.embedding) as number[]
-      const score = cosineSimilarity(embedding, chunkEmbedding)
-      return { docId: chunk.doc_id, content: chunk.content, score }
-    })
+  async getUserFacts(userId: string): Promise<any[]> {
+    const rows = await this.db.all(
+      'SELECT * FROM user_facts WHERE user_id = ? ORDER BY created_at DESC',
+      userId
+    )
+    return rows.map(r => ({
+      ...r,
+      tags: r.tags ? JSON.parse(r.tags) : []
+    }))
+  }
 
-    // Sort by score descending
-    results.sort((a: { score: number }, b: { score: number }) => b.score - a.score)
-
-    return results.slice(0, limit)
+  async deleteUserFact(id: string): Promise<boolean> {
+    const result = await this.db.run(
+      'DELETE FROM user_facts WHERE id = ?',
+      id
+    )
+    return (result.changes ?? 0) > 0
   }
 }
 

@@ -709,6 +709,20 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             required: ['query']
           }
         }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'search_knowledge',
+          description: 'Search the vector knowledge base for relevant code snippets or documentation',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search query' }
+            },
+            required: ['query']
+          }
+        }
       }
     ]
   }
@@ -771,6 +785,9 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
           break
         case 'memory_search':
           result = await this.handleMemorySearch(params.query)
+          break
+        case 'search_knowledge':
+          result = await this.handleSearchKnowledge(params.query)
           break
         default:
           throw new Error(`Unknown tool: ${name}`)
@@ -1020,6 +1037,26 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   private async handleMemorySearch(query: string) {
     const results = await this.memoryService.search(query)
     return { query, results }
+  }
+
+  private async handleSearchKnowledge(query: string) {
+    // Call server to search knowledge base
+    // We assume the runner can talk to the server API
+    const serverUrl = process.env.SERVER_URL || 'http://localhost:3001'
+    try {
+      const response = await fetch(`${serverUrl}/knowledge/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, limit: 5 })
+      })
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`)
+      }
+      const data = await response.json()
+      return data
+    } catch (err) {
+      return { error: `Failed to search knowledge: ${err instanceof Error ? err.message : String(err)}` }
+    }
   }
 
   private async emitEvent(type: RunnerEventType, data?: unknown): Promise<void> {
