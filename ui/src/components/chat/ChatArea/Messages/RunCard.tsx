@@ -73,7 +73,7 @@ function ToolTimeline({
         >
           <div className="flex items-center gap-2">
             {tool.status === 'running' && (
-              <div className="h-2 w-2 animate-pulse rounded-full bg-blue-400" />
+              <div className="h-2 w-2 animate-pulse rounded-full bg-blue-400" data-testid="run-thinking" />
             )}
             {tool.status === 'done' && (
               <Icon type="check" size="xs" className="text-green-400" />
@@ -97,7 +97,7 @@ function ToolTimeline({
           )}
 
           {tool.refusedCommand && (
-            <div className="mt-2 rounded bg-yellow-500/10 p-2 text-[11px] text-yellow-300">
+            <div className="mt-2 rounded bg-yellow-500/10 p-2 text-[11px] text-yellow-300" data-testid="run-tool-refusal">
               <div className="font-medium">Command refused</div>
               <div className="mt-1 text-yellow-200">{tool.refusedCommand}</div>
               {tool.refusedReason && (

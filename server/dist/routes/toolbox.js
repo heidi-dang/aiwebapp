@@ -1,7 +1,7 @@
 import { requireOptionalBearerAuth } from '../auth.js';
 import { promises as fs } from 'node:fs';
-import { exec as execCb } from 'child_process';
-import { promisify } from 'util';
+import { exec as execCb } from 'node:child_process';
+import { promisify } from 'node:util';
 import glob from 'glob';
 import path from 'node:path';
 const exec = promisify(execCb);
@@ -44,12 +44,11 @@ async function grepSearchSafe(args) {
     return matches;
 }
 function looksLikeNaturalLanguageCommand(command) {
-    if (/\b(run|execute|start|stop|open|close|list|show|find)\b\s+(the|a|an)\b/i.test(command)) {
+    const lowered = command.toLowerCase();
+    if (/\b(run|execute|start|stop|open|close|list|show|find)\b\s+(the|a|an)\b/.test(lowered))
         return true;
-    }
-    if (/^[A-Za-z ,]+$/.test(command) && command.trim().split(/\s+/).length > 3) {
+    if (/^[a-z ,]+$/.test(lowered) && lowered.trim().split(/\s+/).length > 3)
         return true;
-    }
     return false;
 }
 function isDangerousCommand(command) {
@@ -65,47 +64,48 @@ async function loadAllowlist() {
         return [];
     }
 }
-export async function registerToolboxRoutes(app) {
-    app.post('/internal/toolbox', async (req, reply) => {
-        requireOptionalBearerAuth(req, reply);
-        if (reply.sent)
+export async function registerToolboxRoutes(app, store) {
+    app.get('/toolbox', async (req, res) => {
+        requireOptionalBearerAuth(req, res);
+        if (res.headersSent)
             return;
-        const body = req.body;
+        res.json(store.toolbox);
+    });
+    app.post('/internal/toolbox', async (req, res) => {
+        requireOptionalBearerAuth(req, res);
+        if (res.headersSent)
+            return;
+        const body = (req.body ?? {});
         const tool = String(body.tool ?? '');
         const params = (body.params ?? {});
         try {
             if (tool === 'read_file') {
-                const path = String(params.path ?? '');
-                if (!path || path.includes('..') || path.startsWith('/')) {
-                    reply.code(400);
-                    return { error: 'Invalid path' };
+                const p = String(params.path ?? '');
+                if (!p || p.includes('..') || path.isAbsolute(p)) {
+                    return res.status(400).json({ error: 'Invalid path' });
                 }
-                if (path.includes('.git') || path.includes('node_modules')) {
-                    reply.code(403);
-                    return { error: 'Refused to read suspicious path' };
+                if (p.includes('.git') || p.includes('node_modules')) {
+                    return res.status(403).json({ error: 'Refused to read suspicious path' });
                 }
                 try {
-                    const text = await fs.readFile(path, 'utf8');
-                    return { success: true, result: { path, text } };
+                    const text = await fs.readFile(p, 'utf8');
+                    return res.json({ success: true, result: { path: p, text } });
                 }
-                catch (err) {
-                    reply.code(404);
-                    return { error: 'File not found' };
+                catch {
+                    return res.status(404).json({ error: 'File not found' });
                 }
             }
             if (tool === 'write_file') {
-                const path = String(params.path ?? '');
+                const p = String(params.path ?? '');
                 const content = String(params.content ?? '');
-                if (!path || path.includes('..') || path.startsWith('/')) {
-                    reply.code(400);
-                    return { error: 'Invalid path' };
+                if (!p || p.includes('..') || path.isAbsolute(p)) {
+                    return res.status(400).json({ error: 'Invalid path' });
                 }
-                if (path.includes('.git') || path.includes('node_modules')) {
-                    reply.code(403);
-                    return { error: 'Refused to write suspicious path' };
+                if (p.includes('.git') || p.includes('node_modules')) {
+                    return res.status(403).json({ error: 'Refused to write suspicious path' });
                 }
-                await fs.writeFile(path, content, 'utf8');
-                return { success: true, result: { path } };
+                await fs.writeFile(p, content, 'utf8');
+                return res.json({ success: true, result: { path: p } });
             }
             if (tool === 'list_files') {
                 const pattern = String(params.glob ?? '**/*');
@@ -117,71 +117,62 @@ export async function registerToolboxRoutes(app) {
                             resolve(matches);
                     });
                 });
-                return { success: true, result: { files: entries } };
+                return res.json({ success: true, result: { files: entries } });
             }
             if (tool === 'list_dir') {
-                const path = String(params.path ?? '.');
-                if (!path || path.includes('..') || path.startsWith('/')) {
-                    reply.code(400);
-                    return { error: 'Invalid path' };
+                const p = String(params.path ?? '.');
+                if (!p || p.includes('..') || path.isAbsolute(p)) {
+                    return res.status(400).json({ error: 'Invalid path' });
                 }
-                if (path.includes('.git') || path.includes('node_modules')) {
-                    reply.code(403);
-                    return { error: 'Refused to list suspicious path' };
+                if (p.includes('.git') || p.includes('node_modules')) {
+                    return res.status(403).json({ error: 'Refused to list suspicious path' });
                 }
-                const entries = await fs.readdir(path, { withFileTypes: true });
+                const entries = await fs.readdir(p, { withFileTypes: true });
                 const files = entries.map((e) => ({ name: e.name, type: e.isDirectory() ? 'directory' : 'file' }));
-                return { success: true, result: { path, files } };
+                return res.json({ success: true, result: { path: p, files } });
             }
             if (tool === 'grep_search') {
                 const query = String(params.query ?? '');
                 const include = String(params.include_pattern ?? '');
                 if (!query) {
-                    reply.code(400);
-                    return { error: 'Missing query' };
+                    return res.status(400).json({ error: 'Missing query' });
                 }
                 const matches = await grepSearchSafe({ query, includePattern: include || undefined, maxMatches: 200 });
-                return { success: true, result: { query, matches } };
+                return res.json({ success: true, result: { query, matches } });
             }
-            // Approve a command by adding it to the allowlist. This is a convenience to let a local user opt-in
-            // to a previously refused command. This will persist to config/allowed-commands.json (append if missing).
             if (tool === 'approve_command') {
                 const command = String(params.command ?? '');
                 if (!command) {
-                    reply.code(400);
-                    return { error: 'Missing command' };
+                    return res.status(400).json({ error: 'Missing command' });
                 }
                 if (isDangerousCommand(command)) {
-                    reply.code(403);
-                    return { error: 'Refused: matches dangerous pattern' };
+                    return res.status(403).json({ error: 'Refused: matches dangerous pattern' });
                 }
                 try {
-                    const cfgPath = new URL('../../config/allowed-commands.json', import.meta.url);
+                    const cfgUrl = new URL('../../config/allowed-commands.json', import.meta.url);
                     let allowed = [];
                     try {
-                        const current = await fs.readFile(cfgPath, 'utf8');
+                        const current = await fs.readFile(cfgUrl, 'utf8');
                         allowed = JSON.parse(current);
                     }
-                    catch (e) {
+                    catch {
                         // treat as empty list
                     }
                     if (!allowed.includes(command)) {
                         allowed.push(command);
-                        await fs.writeFile(cfgPath, JSON.stringify(allowed, null, 2), 'utf8');
+                        await fs.writeFile(cfgUrl, JSON.stringify(allowed, null, 2), 'utf8');
                     }
-                    return { success: true, result: { command } };
+                    return res.json({ success: true, result: { command } });
                 }
                 catch (err) {
                     const message = err instanceof Error ? err.message : String(err);
-                    reply.code(500);
-                    return { error: message };
+                    return res.status(500).json({ error: message });
                 }
             }
             if (tool === 'run_command') {
                 const command = String(params.command ?? '');
                 if (!command) {
-                    reply.code(400);
-                    return { error: 'Missing command' };
+                    return res.status(400).json({ error: 'Missing command' });
                 }
                 const allowed = await loadAllowlist();
                 const matchesAllowlist = (cmd) => {
@@ -196,28 +187,23 @@ export async function registerToolboxRoutes(app) {
                     return false;
                 };
                 if (!matchesAllowlist(command)) {
-                    reply.code(403);
-                    return { error: 'Refused: command not on allowlist' };
+                    return res.status(403).json({ error: 'Refused: command not on allowlist' });
                 }
                 if (looksLikeNaturalLanguageCommand(command)) {
-                    reply.code(403);
-                    return { error: 'Refused: looks like natural language' };
+                    return res.status(403).json({ error: 'Refused: looks like natural language' });
                 }
                 if (isDangerousCommand(command)) {
-                    reply.code(403);
-                    return { error: 'Refused: matches dangerous pattern' };
+                    return res.status(403).json({ error: 'Refused: matches dangerous pattern' });
                 }
                 const { stdout, stderr } = await exec(command, { timeout: 15000, maxBuffer: 1024 * 1024 });
                 const output = (stdout || '').slice(0, 4000) || (stderr || '').slice(0, 4000) || '(no output)';
-                return { success: true, result: { stdout: output } };
+                return res.json({ success: true, result: { stdout: output } });
             }
-            reply.code(400);
-            return { error: 'Unsupported tool' };
+            return res.status(400).json({ error: 'Unsupported tool' });
         }
         catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            reply.code(500);
-            return { error: message };
+            return res.status(500).json({ error: message });
         }
     });
 }
