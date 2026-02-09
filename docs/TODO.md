@@ -173,6 +173,18 @@
 - **Configurable Provider**: Agent now accepts provider configuration (openai, anthropic, ollama)
 - **Fallback Logic**: Preserved bridge fallback and implemented retry logic in agent
 
+## 📋 PHASE 7: SESSION INTELLIGENCE & STATE ENHANCEMENTS - COMPLETED ✅
+
+### 1. Session Intelligence ✅ DONE
+- **Auto-Naming**: Integrated `SessionNamer` with `LLMService` for automatic session titling
+- **Summarization**: Created `Summarizer` service to generate concise session summaries
+- **Endpoints**: Added `/sessions/:id/summarize` and `/sessions/:id/runs` for history retrieval
+
+### 2. State & Storage Enhancements ✅ DONE
+- **Session ID Tracking**: Added `session_id` to `jobs` table in runner DB for better tracking
+- **State Persistence**: Updated storage to persist session summaries and state
+- **History Retrieval**: Fixed `getRuns` to correctly query by session ID
+
 ## 🔧 FOLLOW-UPS - From Previous PRs
 
 ### After PR#7 & PR#8 Merge
