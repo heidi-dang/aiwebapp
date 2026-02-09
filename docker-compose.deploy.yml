@@ -1,0 +1,52 @@
+services:
+  server:
+    image: heididang/aiwebapp:server-${TAG:-v0.01}
+    ports:
+      - "4001:4001"
+    environment:
+      - PORT=4001
+      - CORS_ORIGIN=http://localhost:4000
+      - RUNNER_URL=http://runner:4002
+      - CHROMA_URL=http://chroma:8000
+      - SQLITE_PATH=/app/data/server.db
+    volumes:
+      - server_data:/app/data
+      - ./server/logs:/app/logs
+
+  runner:
+    image: heididang/aiwebapp:runner-${TAG:-v0.01}
+    ports:
+      - "4002:4002"
+    environment:
+      - PORT=4002
+      - CORS_ORIGIN=http://localhost:4000
+      - RUNNER_DB=/app/data/runner.db
+      - RUNNER_TOKEN=${RUNNER_TOKEN:-change_me}
+      - RUNNER_PERSIST=true
+    volumes:
+      - runner_data:/app/data
+
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+
+  ui:
+    image: heididang/aiwebapp:ui-${TAG:-v0.01}
+    ports:
+      - "4000:4000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:4001
+      - RUNNER_URL=http://runner:4002
+    depends_on:
+      - server
+      - runner
+
+volumes:
+  server_data:
+  runner_data:
+  chroma_data:
