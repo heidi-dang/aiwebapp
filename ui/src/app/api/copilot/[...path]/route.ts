@@ -97,7 +97,7 @@ async function proxyRequest(request: NextRequest, path: string[]) {
     let copilotHost: string
     try {
       copilotHost = new URL(copilotBaseUrl).host
-    } catch (e) {
+    } catch {
       console.error('Invalid copilotBaseUrl:', copilotBaseUrl)
       return NextResponse.json(
         { error: `Invalid Copilot API base URL: ${copilotBaseUrl}` },
