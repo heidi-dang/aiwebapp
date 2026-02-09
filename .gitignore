@@ -23,6 +23,17 @@ hotreload.out
 *.db
 *.sqlite
 *.sqlite3
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+
+# Frontend build artifacts
+ui/out
+
+# Local cache
+.cache/
 
 # Debug and temporary files
 server/minimal-fastify-server.js
