@@ -18,7 +18,8 @@
     "toolbox": "node scripts/toolbox.mjs",
     "toolbox:smoke": "npm run toolbox -- smoke",
     "toolbox:list": "npm run toolbox -- list-files 'ui/src/**'",
-    "toolbox:grep": "npm run toolbox -- grep-search 'run_command' --include 'runner/**'"
+    "toolbox:grep": "npm run toolbox -- grep-search 'run_command' --include 'runner/**'",
+    "test": "echo \"No tests specified\" && exit 0"
   },
   "devDependencies": {
     "@types/body-parser": "^1.19.6",
