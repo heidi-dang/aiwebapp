@@ -97,7 +97,7 @@ export class ContextManager {
         [{ role: 'user', content: prompt }]
       );
 
-      return response.content;
+      return response.content || '';
     } catch (err) {
       console.warn('Failed to summarize context:', err);
       return 'Context truncated due to length.';
