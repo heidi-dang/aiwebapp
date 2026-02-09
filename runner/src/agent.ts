@@ -251,13 +251,13 @@ Generate the code now.`
     const execPrompt = `Execute and test the generated code.
 - If it's a script, run it with the appropriate runtime (node for .js, python for .py, etc.)
 - If it's a web application, check if it can be built/started
-- If there are tests, run them
+- **Run Tests/Lint**: Use 'run_test' and 'run_lint' tools if available to verify correctness.
 - Check for any runtime errors or issues
 - Verify the code works as expected and fulfills the user's request
 
 User request: "${this.ctx.input.message || this.ctx.input.instruction}"
 
-Execute the code and report the results.`
+Execute the code and report the results. If tests fail, try to fix the code.`
 
     this.messages.push({ role: 'user', content: execPrompt })
 
@@ -640,6 +640,28 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             properties: {}
           }
         }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'run_test',
+          description: 'Run project tests (e.g. npm test)',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'run_lint',
+          description: 'Run project linter (e.g. npm run lint)',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
       }
     ]
   }
@@ -686,6 +708,12 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
           break
         case 'git_undo':
           result = await this.handleGitUndo()
+          break
+        case 'run_test':
+          result = await this.handleRunTest()
+          break
+        case 'run_lint':
+          result = await this.handleRunLint()
           break
         default:
           throw new Error(`Unknown tool: ${name}`)
@@ -850,6 +878,32 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   private async handleGitUndo() {
     await this.gitService.undo()
     return { success: true, message: 'Undid last commit' }
+  }
+
+  private async handleRunTest() {
+    return this.runPackageScript('test')
+  }
+
+  private async handleRunLint() {
+    return this.runPackageScript('lint')
+  }
+
+  private async runPackageScript(scriptName: string) {
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    const baseDir = this.ctx.input.base_dir && this.ctx.input.base_dir.trim() ? this.ctx.input.base_dir : process.cwd()
+    const pkgPath = path.join(baseDir, 'package.json')
+
+    try {
+      const content = await fs.readFile(pkgPath, 'utf8')
+      const pkg = JSON.parse(content)
+      if (pkg.scripts && pkg.scripts[scriptName]) {
+        return await this.handleRunCommand(`npm run ${scriptName}`)
+      }
+      return { error: `No "${scriptName}" script found in package.json` }
+    } catch (err) {
+      return { error: 'Could not read package.json' }
+    }
   }
 
   private async emitEvent(type: RunnerEventType, data?: unknown): Promise<void> {
