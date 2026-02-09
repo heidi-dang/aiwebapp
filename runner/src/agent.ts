@@ -7,6 +7,7 @@ import type { JobContext, JobInput } from './executor.js'
 import type { RunnerEventType } from './db.js'
 import { OllamaClient, createOllamaClientFromEnv } from './ollama.js'
 import { GitService } from './services/git.js'
+import { RepoMapper } from './services/repo-map.js'
 
 export type AgentState = 'planning' | 'code_generation' | 'code_execution' | 'review' | 'iterate' | 'finish'
 
@@ -47,11 +48,13 @@ export class CoderAgent {
   private messages: ChatMessage[] = []
   private ollama: OllamaClient | null = null
   private gitService: GitService
+  private repoMapper: RepoMapper
 
   constructor(private ctx: JobContext) {
     this.ollama = createOllamaClientFromEnv()
     const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
     this.gitService = new GitService(baseDir)
+    this.repoMapper = new RepoMapper(baseDir)
     this.initializeMessages()
     this.loadMemory()
   }
@@ -145,6 +148,16 @@ Be thorough and systematic in your approach.`
   }
 
   async run(): Promise<void> {
+    // Inject repo map into system prompt
+    try {
+      const map = await this.repoMapper.generateMap()
+      if (this.messages.length > 0 && this.messages[0].role === 'system') {
+        this.messages[0].content += `\n\nCurrent Repository Map:\n${map}`
+      }
+    } catch (err) {
+      console.warn('Failed to generate repo map:', err)
+    }
+
     while (this.state !== 'finish' && this.currentIteration < this.maxIterations) {
       await this.processState()
       this.currentIteration++
