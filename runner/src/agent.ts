@@ -10,6 +10,7 @@ import { RepoMapper } from './services/repo-map.js'
 import { WebService } from './services/web.js'
 import { MemoryService } from './services/memory.js'
 import { ContextManager } from './services/context.js'
+import { approvalService } from './services/approval.js'
 import { llmService } from './llm/index.js'
 import type { ChatMessage } from './llm/types.js'
 
@@ -148,6 +149,10 @@ Be thorough and systematic in your approach.`
     }
 
     while (this.state !== 'finish' && this.currentIteration < this.maxIterations) {
+      if (this.ctx.aborted) {
+        await this.emitEvent('job.cancelled')
+        return
+      }
       await this.processState()
       this.currentIteration++
     }
@@ -709,6 +714,7 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   }
 
   private async executeTool(call: NonNullable<ChatMessage['tool_calls']>[0]): Promise<any> {
+    if (this.ctx.aborted) return { error: 'Job cancelled' }
     const { name, arguments: args } = call.function!
     const params = args ? JSON.parse(args) : {}
 
@@ -855,11 +861,55 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   }
 
   private async handleRunCommand(command: string) {
+    if (this.ctx.aborted) return { error: 'Job cancelled' }
+
+    // Check for sensitive commands requiring approval
+    if (this.isSensitiveCommand(command)) {
+      const { tokenId, wait } = approvalService.createRequest(this.ctx.jobId)
+      
+      await this.emitEvent('approval.request', {
+        tokenId,
+        type: 'run_command',
+        description: `Execute command: ${command}`,
+        data: { command }
+      })
+
+      const approved = await wait(300000) // 5 minutes timeout
+
+      await this.emitEvent('approval.response', {
+        tokenId,
+        approved
+      })
+
+      if (!approved) {
+        return { error: 'Command execution denied by user or timed out' }
+      }
+    }
+
     const { exec } = await import('child_process')
     const { promisify } = await import('util')
     const execAsync = promisify(exec)
-    const result = await execAsync(command, { timeout: 15000 })
-    return { stdout: result.stdout, stderr: result.stderr }
+    try {
+      const result = await execAsync(command, { timeout: 15000 })
+      return { stdout: result.stdout, stderr: result.stderr }
+    } catch (err: any) {
+      return { stdout: err.stdout || '', stderr: err.stderr || err.message, error: err.message }
+    }
+  }
+
+  private isSensitiveCommand(command: string): boolean {
+    const sensitivePatterns = [
+      /\brm\b/i,
+      /\bmv\b/i,
+      /\bchmod\b/i,
+      /\bchown\b/i,
+      /\bsudo\b/i,
+      /\bgit push\b/i,
+      /\bnpm publish\b/i,
+      /\byarn publish\b/i,
+      />/  // redirection
+    ]
+    return sensitivePatterns.some(p => p.test(command))
   }
 
   private async handleApplyEdit(path: string, range: { start: { line: number; character: number }; end: { line: number; character: number } }, text: string) {

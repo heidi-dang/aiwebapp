@@ -50,8 +50,8 @@ export async function registerJobRoutes(app: any, store: Store) {
 
     const jobId = req.params.id
     const approvalSchema = z.object({
-      toolName: z.string(),
-      args: z.record(z.any())
+      tokenId: z.string(),
+      approved: z.boolean()
     })
 
     const parsed = approvalSchema.safeParse(req.body)
@@ -60,31 +60,37 @@ export async function registerJobRoutes(app: any, store: Store) {
       return
     }
 
-    // Store approval decision (this would be used by the runner)
-    // For now, we'll just acknowledge the approval
-    res.json({ success: true, message: 'Tool call approved', tool: parsed.data.toolName })
-  })
+    try {
+      const response = await fetch(`${RUNNER_URL}/api/jobs/${encodeURIComponent(jobId)}/approval`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${RUNNER_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(parsed.data)
+      })
 
-  app.post('/jobs/:id/reject', async (req: any, res: any) => {
-    requireOptionalBearerAuth(req, res)
-    if (res.headersSent) return
+      if (!response.ok) {
+        const errorText = await response.text()
+        res.status(response.status).json({ 
+          error: 'Failed to submit approval', 
+          details: errorText 
+        })
+        return
+      }
 
-    const jobId = req.params.id
-    const rejectionSchema = z.object({
-      toolName: z.string(),
-      reason: z.string().optional()
-    })
-
-    const parsed = rejectionSchema.safeParse(req.body)
-    if (!parsed.success) {
-      res.status(400).json({ error: 'Invalid rejection request', details: parsed.error.errors })
-      return
+      res.json({ success: true, message: 'Approval submitted' })
+    } catch (error) {
+      res.status(500).json({ 
+        error: 'Failed to submit approval', 
+        details: error instanceof Error ? error.message : String(error) 
+      })
     }
-
-    // Store rejection decision (this would be used by the runner)
-    // For now, we'll just acknowledge the rejection
-    res.json({ success: true, message: 'Tool call rejected', tool: parsed.data.toolName })
   })
+
+  // Remove separate reject endpoint as approval endpoint handles both
+  // app.post('/jobs/:id/reject', ...) - removed
+
 
   app.get('/jobs/:id/status', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
