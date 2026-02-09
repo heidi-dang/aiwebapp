@@ -28,7 +28,7 @@ nvm_install_dir() {
   if [ -n "$NVM_DIR" ]; then
     printf %s "${NVM_DIR}"
   else
-    nvm_default_install_di
+    nvm_default_install_dir
   fi
 }
 

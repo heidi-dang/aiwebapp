@@ -157,6 +157,34 @@
 - Update documentation
 - **TODO:** Add tests for error scenarios
 
+## 📋 PHASE 6: MODEL CONFIGURATION & PROVIDER SUPPORT - COMPLETED ✅
+
+### 1. Provider Abstraction ✅ DONE
+- **Created `LLMService`**: Unified interface for LLM providers
+- **Created `LLMProvider` interface**: Standardized chat method
+
+### 2. Provider Implementations ✅ DONE
+- **OpenAI Provider**: Support for OpenAI API
+- **Anthropic Provider**: Support for Anthropic API
+- **Ollama Provider**: Support for local Ollama models (both native and OpenAI-compatible)
+
+### 3. Agent Integration ✅ DONE
+- **Refactored `CoderAgent`**: Switched from direct `OllamaClient` to `LLMService`
+- **Configurable Provider**: Agent now accepts provider configuration (openai, anthropic, ollama)
+- **Fallback Logic**: Preserved bridge fallback and implemented retry logic in agent
+
+## 📋 PHASE 7: SESSION INTELLIGENCE & STATE ENHANCEMENTS - COMPLETED ✅
+
+### 1. Session Intelligence ✅ DONE
+- **Auto-Naming**: Integrated `SessionNamer` with `LLMService` for automatic session titling
+- **Summarization**: Created `Summarizer` service to generate concise session summaries
+- **Endpoints**: Added `/sessions/:id/summarize` and `/sessions/:id/runs` for history retrieval
+
+### 2. State & Storage Enhancements ✅ DONE
+- **Session ID Tracking**: Added `session_id` to `jobs` table in runner DB for better tracking
+- **State Persistence**: Updated storage to persist session summaries and state
+- **History Retrieval**: Fixed `getRuns` to correctly query by session ID
+
 ## 🔧 FOLLOW-UPS - From Previous PRs
 
 ### After PR#7 & PR#8 Merge

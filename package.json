@@ -14,8 +14,8 @@
     "smoke": "npm run init:env && npm --prefix server run smoke && npm --prefix runner run smoke && npm --prefix ui run smoke",
     "smoke:phase2": "BASE_URL=http://localhost:3201 npm --prefix server run smoke && RUNNER_BASE_URL=http://localhost:3202 npm --prefix runner run smoke && BASE_URL=http://localhost:3200 npm --prefix ui run smoke",
     "lint": "npm --prefix ui run lint",
-    "check:tools": "node scripts/check-tools.js && node scripts/check-guardrail-sync.js",
-    "toolbox": "node scripts/toolbox.js",
+    "check:tools": "node scripts/check-tools.mjs && node scripts/check-guardrail-sync.js",
+    "toolbox": "node scripts/toolbox.mjs",
     "toolbox:smoke": "npm run toolbox -- smoke",
     "toolbox:list": "npm run toolbox -- list-files 'ui/src/**'",
     "toolbox:grep": "npm run toolbox -- grep-search 'run_command' --include 'runner/**'"

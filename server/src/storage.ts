@@ -44,9 +44,9 @@ export interface Store {
   }): Promise<void>
 
   getRuns(args: {
-    dbId: string
-    entityType: EntityType
-    componentId: string
+    dbId?: string
+    entityType?: EntityType
+    componentId?: string
     sessionId: string
   }): Promise<RunRecord[]>
 
@@ -304,18 +304,17 @@ export class InMemoryStore implements Store {
   }
 
   async getRuns(args: {
-    dbId: string
-    entityType: EntityType
-    componentId: string
+    dbId?: string
+    entityType?: EntityType
+    componentId?: string
     sessionId: string
   }): Promise<RunRecord[]> {
-    const key = makeSessionKey({
-      dbId: args.dbId,
-      entityType: args.entityType,
-      componentId: args.componentId,
-      sessionId: args.sessionId
-    })
-    return this.sessionsByKey.get(key)?.runs ?? []
+    for (const session of this.sessionsByKey.values()) {
+      if (session.entry.session_id === args.sessionId) {
+        return session.runs
+      }
+    }
+    return []
   }
 
   async deleteSession(args: {
@@ -791,18 +790,15 @@ export class SqliteStore implements Store {
   }
 
   async getRuns(args: {
-    dbId: string
-    entityType: EntityType
-    componentId: string
+    dbId?: string
+    entityType?: EntityType
+    componentId?: string
     sessionId: string
   }): Promise<RunRecord[]> {
     const rows = await this.db.all<
       Array<{ created_at: number; run_input: string | null; content_json: string | null }>
     >(
-      'SELECT created_at, run_input, content_json FROM runs WHERE db_id = ? AND entity_type = ? AND component_id = ? AND session_id = ? ORDER BY created_at ASC, id ASC',
-      args.dbId,
-      args.entityType,
-      args.componentId,
+      'SELECT created_at, run_input, content_json FROM runs WHERE session_id = ? ORDER BY created_at ASC, id ASC',
       args.sessionId
     )
 

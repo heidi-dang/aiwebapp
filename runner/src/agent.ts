@@ -5,11 +5,12 @@
 
 import type { JobContext, JobInput } from './executor.js'
 import type { RunnerEventType } from './db.js'
-import { OllamaClient, createOllamaClientFromEnv } from './ollama.js'
 import { GitService } from './services/git.js'
 import { RepoMapper } from './services/repo-map.js'
 import { WebService } from './services/web.js'
 import { MemoryService } from './services/memory.js'
+import { llmService } from './llm/index.js'
+import type { ChatMessage } from './llm/types.js'
 
 export type AgentState = 'planning' | 'code_generation' | 'code_execution' | 'review' | 'iterate' | 'finish'
 
@@ -27,18 +28,6 @@ export interface AgentMemory {
   }>
 }
 
-type ChatMessage = {
-  role: 'system' | 'user' | 'assistant' | 'tool'
-  content?: string | null
-  name?: string
-  tool_call_id?: string
-  tool_calls?: Array<{
-    id: string
-    type: 'function'
-    function: { name: string; arguments?: string }
-  }>
-}
-
 export class CoderAgent {
   private state: AgentState = 'planning'
   private memory: AgentMemory = {
@@ -48,18 +37,12 @@ export class CoderAgent {
   private maxIterations = 5
   private currentIteration = 0
   private messages: ChatMessage[] = []
-  private ollama: OllamaClient | null = null
   private gitService: GitService
   private repoMapper: RepoMapper
   private webService: WebService
   private memoryService: MemoryService
 
   constructor(private ctx: JobContext) {
-    this.ollama = createOllamaClientFromEnv()
-    if (!this.ollama) {
-      // Optional: Log warning if Ollama is not configured but might be needed
-      // console.warn('Ollama client not configured (OLLAMA_API_URL missing)')
-    }
     const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
     this.gitService = new GitService(baseDir)
     this.repoMapper = new RepoMapper(baseDir)
@@ -310,19 +293,10 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   private async callLLMWithTools(): Promise<ChatMessage> {
     const provider = this.ctx.input.provider || 'bridge'
 
-    if (provider === 'ollama' && this.ollama) {
-      return this.callLLMWithOllama()
-    }
-
     // Use bridge if available (preferred for Copilot access)
     if (this.ctx.bridge && provider === 'bridge') {
       return this.callLLMWithBridge()
     }
-
-    // Fallback to direct API
-    const tools = this.getAvailableTools()
-    const maxRetries = 3
-    let lastError: Error | null = null
 
     // Determine model based on state (Architect/Editor pattern)
     let model = this.ctx.input.model || 'gpt-4o'
@@ -332,36 +306,36 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       model = this.ctx.input.writer_model
     }
 
+    // Configure LLM Service
+    // Note: We might want to pass API keys from ctx.input if provided, or rely on env vars
+    // For now, we assume env vars are set or ctx.input might have them in future
+    const llmConfig = {
+      provider: provider === 'bridge' ? 'openai' : provider, // Fallback to openai if bridge not available but requested? Or just use provider.
+      model,
+      // We can pass apiKey if we have it in ctx.input securely, otherwise LLMService uses env
+    }
+    
+    // If provider was 'bridge' but we got here, it means bridge wasn't available. 
+    // We should probably default to 'openai' or 'ollama' depending on config.
+    if (llmConfig.provider === 'bridge') {
+      llmConfig.provider = 'openai'
+    }
+
+    const tools = this.getAvailableTools()
+    const maxRetries = 3
+    let lastError: Error | null = null
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const res = await fetch(`${process.env.AI_API_URL}/v1/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.AI_API_KEY}`,
-            ...(process.env.AI_API_KEY && { 'X-API-Key': process.env.AI_API_KEY })
-          },
-          body: JSON.stringify({
-            model,
-            messages: this.messages,
-            tools,
-            tool_choice: 'auto',
-            temperature: 0.2,
-            max_tokens: 4000
-          })
-        })
-
-        if (!res.ok) {
-          const errorText = await res.text()
-          throw new Error(`LLM API request failed (${res.status}): ${errorText}`)
-        }
-
-        const json = await res.json()
-        const choice = json.choices?.[0]
-        const message = choice?.message as ChatMessage
-
-        if (!message) {
-          throw new Error('LLM API returned no message')
+        const response = await llmService.chat(llmConfig, this.messages, tools)
+        
+        // Normalize response if needed (LLMService returns ChatResponse which is compatible with ChatMessage mostly)
+        // ChatResponse doesn't have 'name' or 'tool_call_id' usually, but 'tool_calls' matches.
+        
+        const message: ChatMessage = {
+          role: 'assistant',
+          content: response.content,
+          tool_calls: response.tool_calls
         }
 
         this.messages.push(message)
@@ -378,8 +352,42 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             })
           }
           // Continue the loop to get the next response after tool execution
+          // We need to call LLM again with the tool results
+          // Recursive call or loop? 
+          // The original code was: "Continue the loop to get the next response after tool execution"
+          // But it was inside the retry loop which is wrong. The retry loop is for *one* request.
+          // The original code actually had a bug or I misread it. 
+          // "Continue the loop to get the next response after tool execution" implies we go back to top of retry loop?
+          // No, that would re-send the original request.
+          
+          // Actually, the original code had:
+          // } else { return message }
+          // If tool calls, it looped? But the loop is `for (let attempt = 1...)`.
+          // If it successfully got a message and handled tool calls, it *should* call the API again.
+          // But the `attempt` loop is for retries of a *single* call.
+          
+          // Let's look at the original code:
+          // It seems the original code was confusingly structured or I am misinterpreting "Continue the loop".
+          // If `message.tool_calls` exists, it executes tools, pushes results.
+          // Then it falls through to... where?
+          // If it falls through the `try` block, it continues the `attempt` loop? No, `attempt` loop is for retries.
+          // If success, we should break the `attempt` loop.
+          
+          // Wait, the original code:
+          // if (message.tool_calls) { ... } else { return message }
+          // If it handled tool calls, it *finishes* the try block.
+          // Then it continues to `attempt++`? That means it retries the *same* request?
+          // That seems wrong. It should be a new request with the tool outputs.
+          
+          // The standard pattern is:
+          // 1. Call LLM
+          // 2. If tool calls: execute, append results, GOTO 1.
+          // 3. If no tool calls: return response.
+          
+          // I will implement this standard pattern here using recursion or a `while(true)` loop.
+          
+          return await this.callLLMWithTools()
         } else {
-          // No more tool calls, return the response
           return message
         }
       } catch (err) {
@@ -387,14 +395,12 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
         console.log(`LLM API attempt ${attempt} failed:`, lastError.message)
 
         if (attempt < maxRetries) {
-          // Exponential backoff: wait 1s, 2s, 4s...
           const delay = Math.pow(2, attempt - 1) * 1000
           await new Promise(resolve => setTimeout(resolve, delay))
         }
       }
     }
 
-    // All retries failed
     throw new Error(`LLM API failed after ${maxRetries} attempts. Last error: ${lastError?.message}`)
   }
 
@@ -448,30 +454,6 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       }
     } catch (err) {
       throw new Error(`Bridge Copilot call failed: ${err instanceof Error ? err.message : String(err)}`)
-    }
-  }
-
-  private async callLLMWithOllama(): Promise<ChatMessage> {
-    if (!this.ollama) {
-      throw new Error('Ollama client not available')
-    }
-
-    try {
-      // Convert messages to Ollama format
-      const ollamaMessages = this.messages.map(m => ({
-        role: m.role === 'tool' ? 'assistant' : m.role, // Ollama doesn't have 'tool' role
-        content: m.content || ''
-      }))
-
-      const response = await this.ollama.chat(ollamaMessages)
-
-      // For now, assume no tool calls; just return the content
-      return {
-        role: 'assistant',
-        content: response
-      }
-    } catch (err) {
-      throw new Error(`Ollama call failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 

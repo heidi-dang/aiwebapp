@@ -14,7 +14,8 @@ import { promisify } from 'node:util'
 import type { RunnerEvent, RunnerEventType, JobStore, JobStatus } from './db.js'
 import { BridgeClient, createBridgeClientFromEnv } from './bridge.js'
 import { runCoderAgent } from './agent.js'
-import { createOllamaClientFromEnv } from './ollama.js'
+import { llmService } from './llm/index.js'
+import type { ChatMessage } from './llm/types.js'
 import type { FastifyReply } from 'fastify'
 
 const execAsync = promisify(execCb)
@@ -45,14 +46,6 @@ type ToolCall = {
   id: string
   type: 'function'
   function: { name: string; arguments?: string }
-}
-
-type ChatMessage = {
-  role: 'system' | 'user' | 'assistant' | 'tool'
-  content?: string | null
-  name?: string
-  tool_call_id?: string
-  tool_calls?: ToolCall[]
 }
 
 export interface JobContext {
@@ -883,21 +876,17 @@ async function executeWithOllama(ctx: JobContext): Promise<void> {
   const message = ctx.input.message ?? ctx.input.instruction ?? 'Hello'
   const model = ctx.input.model || 'qwen2.5-coder:7b'
 
-  const ollama = createOllamaClientFromEnv()
-  if (!ollama) {
-    throw new Error('Ollama client not configured')
-  }
-
   await emitEvent(ctx, 'tool.start', { tool: 'ollama', input: { model, message } })
 
   try {
-    const response = await ollama.chat([
-      { role: 'user', content: message }
-    ])
+    const response = await llmService.chat(
+      { provider: 'ollama', model },
+      [{ role: 'user', content: message }]
+    )
 
     await emitEvent(ctx, 'tool.output', {
       tool: 'ollama',
-      output: response
+      output: response.content || ''
     })
     await emitEvent(ctx, 'tool.end', { tool: 'ollama', success: true })
   } catch (err) {
@@ -911,20 +900,23 @@ async function executeWithOllama(ctx: JobContext): Promise<void> {
  * Call LLM based on provider
  */
 async function callLLM(ctx: JobContext, provider: string, model: string, messages: ChatMessage[]): Promise<string> {
-  if (provider === 'ollama') {
-    const ollama = createOllamaClientFromEnv()
-    if (!ollama) throw new Error('Ollama not configured')
-    const ollamaMessages = messages.map(m => ({
-      role: m.role === 'tool' ? 'assistant' : m.role,
-      content: m.content || ''
-    }))
-    return await ollama.chat(ollamaMessages)
-  } else if (provider === 'copilotapi') {
+  if (provider === 'copilotapi') {
     // For now, simple, but since executeWithCopilotApi is complex, perhaps duplicate or simplify
     // To keep simple, assume only ollama for multi-agent
     throw new Error('CopilotAPI not supported for multi-agent yet')
-  } else {
-    throw new Error(`Unknown provider: ${provider}`)
+  }
+
+  // Use LLMService for all supported providers (ollama, openai, anthropic)
+  try {
+    const res = await llmService.chat(
+      { provider, model }, 
+      messages
+    )
+    return res.content || ''
+  } catch (err) {
+    // Check if provider is supported by LLMService
+    // If not, it will throw.
+    throw err
   }
 }
 
