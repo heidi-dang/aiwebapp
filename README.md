@@ -218,6 +218,52 @@ This will build all services and start them in production mode. Configure your r
 - `runner.ai.heidi.com.au` → Runner service
 - `copilot.ai.heidi.com.au` → Copilot bridge (if used)
 
+## Docker Deployment
+
+We support deploying the application using Docker containers. This is the recommended method for staging and production environments.
+
+### Building and Pushing Images
+
+Use the provided scripts to build and push Docker images to Docker Hub. These scripts build images for the UI, Server, and Runner services and tag them with `v0.01` and `latest`.
+
+**Prerequisites:**
+- Docker installed and running
+- Logged into Docker Hub (`docker login`)
+
+**Windows:**
+```batch
+scripts\ops\build-docker.bat
+scripts\ops\push-docker.bat
+```
+
+**Linux/macOS:**
+```bash
+./scripts/ops/build-docker.sh
+./scripts/ops/push-docker.sh
+```
+
+### Deploying with Docker Compose
+
+For production or test environments, use the `docker-compose.deploy.yml` file which pulls the pre-built images from Docker Hub.
+
+**Deploy v0.01 (Default):**
+```bash
+docker-compose -f docker-compose.deploy.yml up -d
+```
+
+**Deploy a Specific Version:**
+You can deploy a specific version by setting the `TAG` environment variable:
+
+```bash
+# Deploy latest
+TAG=latest docker-compose -f docker-compose.deploy.yml up -d
+
+# Deploy v0.01
+TAG=v0.01 docker-compose -f docker-compose.deploy.yml up -d
+```
+
+Ensure you have your environment variables configured in `.env` or passed to the docker-compose command.
+
 ## CopilotAPI Integration
 
 ### VSCode Extension Setup

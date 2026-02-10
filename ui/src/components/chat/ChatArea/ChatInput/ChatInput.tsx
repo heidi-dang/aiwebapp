@@ -83,7 +83,8 @@ const ChatInput = () => {
     if (envAiApiUrl && (selectedEndpoint === 'http://localhost:4001' || !selectedEndpoint)) {
       setSelectedEndpoint(envAiApiUrl)
     }
-  }, [envAiApiUrl, selectedEndpoint, setSelectedEndpoint])
+    // envAiApiUrl is a module-level constant (build-time env); omit from deps per react-hooks/exhaustive-deps
+  }, [selectedEndpoint, setSelectedEndpoint])
 
   function copyOutput() {
     if (!toolOutput) return
