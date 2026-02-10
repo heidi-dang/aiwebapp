@@ -58,6 +58,8 @@ interface Store {
   setCloudFallbackEnabled: (cloudFallbackEnabled: boolean) => void
   pocReviewBaseDir: string
   setPocReviewBaseDir: (pocReviewBaseDir: string) => void
+  pocReviewChecksJson: string
+  setPocReviewChecksJson: (pocReviewChecksJson: string) => void
   // System prompt for agents
   systemPromptMode: 'default' | 'strict' | 'custom'
   setSystemPromptMode: (mode: 'default' | 'strict' | 'custom') => void
@@ -130,6 +132,9 @@ export const useStore = create<Store>()(
       pocReviewBaseDir: '',
       setPocReviewBaseDir: (pocReviewBaseDir) =>
         set(() => ({ pocReviewBaseDir })),
+      pocReviewChecksJson: '',
+      setPocReviewChecksJson: (pocReviewChecksJson) =>
+        set(() => ({ pocReviewChecksJson })),
       // System prompt defaults (agent mode only)
       systemPromptMode: 'default',
       setSystemPromptMode: (systemPromptMode) =>

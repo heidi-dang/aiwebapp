@@ -44,6 +44,13 @@ export interface JobInput {
   cloud_fallback?: boolean
   sleep_ms?: number
   poc_commands?: string[]
+  poc_checks?: Array<{
+    id?: string
+    statement: string
+    command: string
+    dependencies?: string[]
+    weight?: number
+  }>
 }
 
 type ToolCall = {
@@ -1121,26 +1128,35 @@ async function runReviewCommand(
 }
 
 async function executeWithPocReview(ctx: JobContext): Promise<void> {
+  const checksFromInput = Array.isArray(ctx.input.poc_checks) ? ctx.input.poc_checks : []
   const commands = (Array.isArray(ctx.input.poc_commands) && ctx.input.poc_commands.length > 0)
     ? ctx.input.poc_commands
     : []
 
   const checks: Array<{ id: string; statement: string; command: string; dependencies: string[]; weight: number }> =
-    commands.length > 0
-      ? commands.map((command, i) => ({
-          id: `C${i + 1}`,
-          statement: `Command succeeds: ${command}`,
-          command,
-          dependencies: i === 0 ? [] : [`C${i}`],
-          weight: 1
+    checksFromInput.length > 0
+      ? checksFromInput.map((c, i) => ({
+          id: (c.id && String(c.id).trim()) ? String(c.id).trim() : `C${i + 1}`,
+          statement: String(c.statement ?? '').trim() || `Claim ${i + 1}`,
+          command: String(c.command ?? '').trim(),
+          dependencies: Array.isArray(c.dependencies) ? c.dependencies.filter((d) => typeof d === 'string') : [],
+          weight: typeof c.weight === 'number' && Number.isFinite(c.weight) ? c.weight : 1
         }))
-      : [
-          { id: 'C1', statement: 'Node is available', command: 'node -v', dependencies: [], weight: 1 },
-          { id: 'C2', statement: 'npm is available', command: 'npm -v', dependencies: ['C1'], weight: 1 },
-          { id: 'C3', statement: 'Runner builds', command: 'cd runner && npm run build', dependencies: ['C2'], weight: 3 },
-          { id: 'C4', statement: 'Server builds', command: 'cd server && npm run build', dependencies: ['C2'], weight: 3 },
-          { id: 'C5', statement: 'UI builds', command: 'cd ui && npm run build', dependencies: ['C2'], weight: 3 }
-        ]
+      : commands.length > 0
+        ? commands.map((command, i) => ({
+            id: `C${i + 1}`,
+            statement: `Command succeeds: ${command}`,
+            command,
+            dependencies: i === 0 ? [] : [`C${i}`],
+            weight: 1
+          }))
+        : [
+            { id: 'C1', statement: 'Node is available', command: 'node -v', dependencies: [], weight: 1 },
+            { id: 'C2', statement: 'npm is available', command: 'npm -v', dependencies: ['C1'], weight: 1 },
+            { id: 'C3', statement: 'Runner builds', command: 'cd runner && npm run build', dependencies: ['C2'], weight: 3 },
+            { id: 'C4', statement: 'Server builds', command: 'cd server && npm run build', dependencies: ['C2'], weight: 3 },
+            { id: 'C5', statement: 'UI builds', command: 'cd ui && npm run build', dependencies: ['C2'], weight: 3 }
+          ]
 
   await emitEvent(ctx, 'tool.start', {
     tool: 'poc_review',
