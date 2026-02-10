@@ -52,6 +52,9 @@ jobs:
       - name: Build UI
         run: cd ui && npm run build
 
+      - name: Run UI smoke tests
+        run: cd ui && npm run smoke
+
   check-runner:
     runs-on: ubuntu-latest
     steps:
@@ -70,3 +73,6 @@ jobs:
 
       - name: Build runner
         run: cd runner && npm run build
+
+      - name: Run runner smoke tests
+        run: cd runner && npm run smoke

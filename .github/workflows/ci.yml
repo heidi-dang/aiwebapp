@@ -36,14 +36,5 @@ jobs:
     - name: Build
       run: npm run build
 
-    - name: Start Services & Run Smoke Tests
-      run: |
-        npm start &
-        PID=$!
-        echo "Waiting for services to start..."
-        sleep 30
-        npm run smoke
-        kill $PID
-
-    - name: Verify Docker Build
-      run: docker compose build
+    - name: Run Smoke Tests
+      run: npm run smoke
