@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useState, useEffect } from 'react'
 import Icon from '@/components/ui/icon'
 import { getProviderIcon } from '@/lib/modelProvider'
+import Link from 'next/link'
 import Sessions from './Sessions'
 import AuthToken from './AuthToken'
 import { isValidUrl } from '@/lib/utils'
@@ -293,6 +294,13 @@ const Sidebar = ({
           disabled={messages.length === 0}
           onClick={handleNewChat}
         />
+        <Button
+          asChild
+          size="lg"
+          className="h-9 w-full rounded-xl bg-primaryAccent text-xs font-medium uppercase text-primary hover:bg-primaryAccent/80"
+        >
+          <Link href="/poc-review">PoC Review</Link>
+        </Button>
         {isMounted && (
           <>
             <Endpoint />

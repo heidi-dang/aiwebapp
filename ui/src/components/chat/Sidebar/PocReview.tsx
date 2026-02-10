@@ -37,7 +37,7 @@ function parseChecksJson(raw: string): unknown[] | null {
   return parsed
 }
 
-export function PocReview() {
+export function PocReview({ emitChatMessage = true }: { emitChatMessage?: boolean }) {
   const {
     pocReviewBaseDir,
     setPocReviewBaseDir,
@@ -47,6 +47,7 @@ export function PocReview() {
     setPocReviewTemplates,
     selectedPocReviewTemplateId,
     setSelectedPocReviewTemplateId,
+    addPocReviewHistory,
     runtimeMode,
     cloudFallbackEnabled,
     initRun,
@@ -323,15 +324,27 @@ export function PocReview() {
               )
 
               initRun(jobId)
-              setMessages((prev) => [
-                ...prev,
-                {
-                  role: 'agent',
-                  content: 'PoC review started…',
-                  created_at: Math.floor(Date.now() / 1000),
-                  extra_data: { runner_job_id: jobId }
-                }
-              ])
+              const now = Math.floor(Date.now() / 1000)
+              const template = selectedPocReviewTemplateId
+                ? pocReviewTemplates.find((t) => t.id === selectedPocReviewTemplateId)
+                : undefined
+              addPocReviewHistory({
+                jobId,
+                createdAt: now,
+                templateId: selectedPocReviewTemplateId || undefined,
+                templateName: template?.name
+              })
+              if (emitChatMessage) {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    role: 'agent',
+                    content: 'PoC review started…',
+                    created_at: now,
+                    extra_data: { runner_job_id: jobId }
+                  }
+                ])
+              }
 
               const unsubscribe = streamJobEvents(jobId, {
                 onEvent: (evt) => {

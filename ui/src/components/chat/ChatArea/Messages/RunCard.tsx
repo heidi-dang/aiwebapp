@@ -310,6 +310,53 @@ export default function RunCard({ jobId }: { jobId: string }) {
               Cancel
             </Button>
           )}
+          {pocProofHash && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(pocProofHash)
+                } catch {
+                }
+              }}
+            >
+              Copy Proof Hash
+            </Button>
+          )}
+          {pocClaimEvents.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const artifact = {
+                  jobId: run.jobId,
+                  status: run.status,
+                  proof_hash: pocProofHash,
+                  claims: pocClaimEvents.map((c) => ({
+                    claim: c.claim,
+                    evidence: {
+                      stdout_hash: c.evidence.stdout_hash,
+                      stderr_hash: c.evidence.stderr_hash
+                    }
+                  }))
+                }
+                const blob = new Blob([JSON.stringify(artifact, null, 2) + '\n'], {
+                  type: 'application/json'
+                })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `poc-artifact-${run.jobId}.json`
+                document.body.appendChild(a)
+                a.click()
+                a.remove()
+                URL.revokeObjectURL(url)
+              }}
+            >
+              Export Artifact
+            </Button>
+          )}
           {pocClaims.length > 0 && (
             <Button
               size="sm"

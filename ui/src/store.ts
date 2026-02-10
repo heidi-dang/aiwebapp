@@ -70,6 +70,18 @@ interface Store {
   ) => void
   selectedPocReviewTemplateId: string
   setSelectedPocReviewTemplateId: (id: string) => void
+  pocReviewHistory: Array<{
+    jobId: string
+    createdAt: number
+    templateId?: string
+    templateName?: string
+  }>
+  addPocReviewHistory: (entry: {
+    jobId: string
+    createdAt: number
+    templateId?: string
+    templateName?: string
+  }) => void
   // System prompt for agents
   systemPromptMode: 'default' | 'strict' | 'custom'
   setSystemPromptMode: (mode: 'default' | 'strict' | 'custom') => void
@@ -156,6 +168,14 @@ export const useStore = create<Store>()(
       selectedPocReviewTemplateId: '',
       setSelectedPocReviewTemplateId: (selectedPocReviewTemplateId) =>
         set(() => ({ selectedPocReviewTemplateId })),
+      pocReviewHistory: [],
+      addPocReviewHistory: (entry) =>
+        set((state) => ({
+          pocReviewHistory: [
+            entry,
+            ...state.pocReviewHistory.filter((e) => e.jobId !== entry.jobId)
+          ].slice(0, 50)
+        })),
       // System prompt defaults (agent mode only)
       systemPromptMode: 'default',
       setSystemPromptMode: (systemPromptMode) =>
@@ -285,7 +305,8 @@ export const useStore = create<Store>()(
       partialize: (state) => ({
         selectedEndpoint: state.selectedEndpoint,
         pocReviewTemplates: state.pocReviewTemplates,
-        selectedPocReviewTemplateId: state.selectedPocReviewTemplateId
+        selectedPocReviewTemplateId: state.selectedPocReviewTemplateId,
+        pocReviewHistory: state.pocReviewHistory
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHydrated?.()
