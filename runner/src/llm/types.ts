@@ -4,6 +4,7 @@ export interface LLMConfig {
   model: string;
   apiKey?: string;
   baseUrl?: string;
+  fallbackOrder?: string[];
 }
 
 export interface ChatMessage {

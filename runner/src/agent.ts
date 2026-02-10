@@ -347,9 +347,15 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     // Configure LLM Service
     // Note: We might want to pass API keys from ctx.input if provided, or rely on env vars
     // For now, we assume env vars are set or ctx.input might have them in future
+    
+    const fallbackOrder = process.env.LLM_FALLBACK_ORDER 
+      ? process.env.LLM_FALLBACK_ORDER.split(',').map(p => p.trim()) 
+      : ['openrouter', 'ollama']
+
     const llmConfig = {
       provider: provider === 'bridge' ? 'openai' : provider, // Fallback to openai if bridge not available but requested? Or just use provider.
       model,
+      fallbackOrder
       // We can pass apiKey if we have it in ctx.input securely, otherwise LLMService uses env
     }
     

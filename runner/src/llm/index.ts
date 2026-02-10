@@ -13,16 +13,38 @@ export class LLMService {
   }
 
   async chat(config: LLMConfig, messages: ChatMessage[], tools?: any[]): Promise<ChatResponse> {
-    const provider = this.getProvider(config)
-    
-    try {
-      return await provider.chat(config.model, messages, tools)
-    } catch (err) {
-      console.error(`LLM Chat failed with provider ${config.provider}:`, err)
-      // Implement fallback logic here if needed
-      // For now, rethrow
-      throw err
+    const providersToTry = [config.provider]
+    if (config.fallbackOrder) {
+      // Add fallbacks, filtering out duplicates
+      config.fallbackOrder.forEach(p => {
+        if (!providersToTry.includes(p)) providersToTry.push(p)
+      })
     }
+
+    let lastError: unknown
+
+    for (const providerName of providersToTry) {
+      try {
+        // Create a temporary config for this attempt
+        const attemptConfig = { ...config, provider: providerName }
+        
+        // Adjust model if switching to Ollama (fallback usually implies local)
+        if (providerName === 'ollama' && !attemptConfig.model.includes(':')) {
+             attemptConfig.model = 'qwen2.5-coder:7b' // Default safe local model
+        }
+
+        const provider = this.getProvider(attemptConfig)
+        console.log(`[LLM] Attempting chat with provider: ${providerName} (model: ${attemptConfig.model})`)
+        return await provider.chat(attemptConfig.model, messages, tools)
+      } catch (err) {
+        console.warn(`[LLM] Provider ${providerName} failed:`, err instanceof Error ? err.message : String(err))
+        lastError = err
+        // Continue to next provider
+      }
+    }
+
+    console.error(`[LLM] All providers failed. Last error:`, lastError)
+    throw lastError || new Error('All LLM providers failed')
   }
 
   private getProvider(config: LLMConfig): LLMProvider {
@@ -47,6 +69,13 @@ export class LLMService {
     if (config.provider === 'openai' || config.provider === 'mock') {
       const apiKey = config.apiKey || process.env.OPENAI_API_KEY || process.env.AI_API_KEY || ''
       provider = new OpenAIProvider(apiKey, config.baseUrl)
+    } else if (config.provider === 'openrouter') {
+      const apiKey = config.apiKey || process.env.OPENROUTER_API_KEY || ''
+      const baseUrl = config.baseUrl || 'https://openrouter.ai/api/v1'
+      provider = new OpenAIProvider(apiKey, baseUrl, {
+        'HTTP-Referer': 'https://heidiai.com.au', // Required by OpenRouter
+        'X-Title': 'HeidiAI Runner'
+      })
     } else if (config.provider === 'ollama') {
       provider = new OllamaProvider(config.baseUrl)
     } else if (config.provider === 'anthropic') {
