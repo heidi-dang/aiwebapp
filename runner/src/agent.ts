@@ -668,31 +668,64 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   }
 
   private async handleGrepSearch(query: string, includePattern?: string) {
-    const { glob } = await import('glob')
-    const { exec } = await import('child_process')
-    const { promisify } = await import('util')
-    const execAsync = promisify(exec)
-
-    let grepCommand = `grep -r -n "${query.replace(/"/g, '\\"')}" .`
+    const { spawn } = await import('child_process')
+    const args = ['-r', '-n', query, '.']
     if (includePattern) {
-      grepCommand += ` --include="${includePattern}"`
+      args.push(`--include=${includePattern}`)
     }
-    grepCommand += ` | head -50` // Limit results
 
-    try {
-      const result = await execAsync(grepCommand, { timeout: 10000 })
-      return {
-        query,
-        results: result.stdout.split('\n').filter(line => line.trim()),
-        truncated: result.stdout.split('\n').length >= 50
-      }
-    } catch (err: any) {
-      // grep returns exit code 1 when no matches found
-      if (err.code === 1) {
-        return { query, results: [], truncated: false }
-      }
-      throw err
-    }
+    const maxLines = 50
+    const timeoutMs = 10000
+
+    return await new Promise((resolve, reject) => {
+      const child = spawn('grep', args, { cwd: process.cwd() })
+      let stdoutBuffer = ''
+      let stderrBuffer = ''
+      const results: string[] = []
+      let truncated = false
+
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL')
+      }, timeoutMs)
+
+      child.stdout.on('data', (chunk) => {
+        stdoutBuffer += chunk.toString()
+        const lines = stdoutBuffer.split('\n')
+        stdoutBuffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.trim()) continue
+          results.push(line)
+          if (results.length >= maxLines) {
+            truncated = true
+            child.kill('SIGKILL')
+            break
+          }
+        }
+      })
+
+      child.stderr.on('data', (chunk) => {
+        stderrBuffer += chunk.toString()
+      })
+
+      child.on('error', (err) => {
+        clearTimeout(timer)
+        reject(err)
+      })
+
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        if (stdoutBuffer.trim() && results.length < maxLines) {
+          results.push(stdoutBuffer.trim())
+        }
+        if (code === 0 || (code === 1 && results.length === 0) || (code === null && truncated)) {
+          resolve({ query, results, truncated })
+          return
+        }
+        const error = new Error(stderrBuffer || `grep failed with code ${code ?? 'unknown'}`)
+        ;(error as { code?: number | null }).code = code
+        reject(error)
+      })
+    })
   }
 
   private async handleRunCommand(command: string) {

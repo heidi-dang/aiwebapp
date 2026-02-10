@@ -9,7 +9,7 @@
  */
 import { promises as fs } from 'node:fs'
 import { glob } from 'glob'
-import { exec as execCb } from 'node:child_process'
+import { exec as execCb, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { RunnerEvent, RunnerEventType, JobStore, JobStatus } from './db.js'
 import { BridgeClient, createBridgeClientFromEnv } from './bridge.js'
@@ -284,20 +284,63 @@ async function handleGrepSearchTool(ctx: JobContext, query: string, includePatte
   await emitEvent(ctx, 'tool.start', { tool: 'grep_search', input: { query, include_pattern: includePattern } })
   try {
     const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
-    let command = `grep -r -n "${query.replace(/"/g, '\\"')}" .`
+    const args = ['-r', '-n', query, '.']
     if (includePattern) {
-      command += ` --include="${includePattern}"`
+      args.push(`--include=${includePattern}`)
     }
-    command += ` | head -50`
 
-    const { stdout } = await execAsync(command, {
-      timeout: 10000,
-      maxBuffer: 1024 * 1024,
-      cwd: baseDir
+    const maxLines = 50
+    const timeoutMs = 10000
+    const lines = await new Promise<string[]>((resolve, reject) => {
+      const child = spawn('grep', args, { cwd: baseDir })
+      let stdoutBuffer = ''
+      let stderrBuffer = ''
+      const results: string[] = []
+      let truncated = false
+
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL')
+      }, timeoutMs)
+
+      child.stdout.on('data', (chunk) => {
+        stdoutBuffer += chunk.toString()
+        const parts = stdoutBuffer.split('\n')
+        stdoutBuffer = parts.pop() ?? ''
+        for (const line of parts) {
+          if (!line.trim()) continue
+          results.push(line)
+          if (results.length >= maxLines) {
+            truncated = true
+            child.kill('SIGKILL')
+            break
+          }
+        }
+      })
+
+      child.stderr.on('data', (chunk) => {
+        stderrBuffer += chunk.toString()
+      })
+
+      child.on('error', (err) => {
+        clearTimeout(timer)
+        reject(err)
+      })
+
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        if (stdoutBuffer.trim() && results.length < maxLines) {
+          results.push(stdoutBuffer.trim())
+        }
+        if (code === 0 || (code === 1 && results.length === 0) || (code === null && truncated)) {
+          resolve(results)
+          return
+        }
+        reject(new Error(stderrBuffer || `grep failed with code ${code ?? 'unknown'}`))
+      })
     })
 
-    const lines = stdout.trim().split('\n').filter(line => line.trim())
-    const matches = lines.map(line => {
+    const cleanedLines = lines.filter(line => line.trim())
+    const matches = cleanedLines.map(line => {
       const colonIndex = line.indexOf(':')
       if (colonIndex === -1) return null
       const file = line.slice(0, colonIndex)
