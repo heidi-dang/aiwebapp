@@ -2,9 +2,9 @@ name: Tools Check
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [ main, 'core-feature/**' ]
   push:
-    branches: [ main ]
+    branches: [ main, 'core-feature/**' ]
 
 jobs:
   tools-check:
