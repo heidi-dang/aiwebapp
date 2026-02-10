@@ -1,7 +1,10 @@
 import { tracingService } from './tracing.js';
 tracingService.start();
 
-import 'dotenv/config'
+import dotenv from 'dotenv'
+import dotenvExpand from 'dotenv-expand'
+const envConfig = dotenv.config({ path: '../.env' })
+dotenvExpand.expand(envConfig)
 
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
@@ -17,7 +20,7 @@ function requireEnv(name: string): string {
   return v
 }
 
-const PORT = Number(process.env.PORT ?? 4002)
+const PORT = Number(process.env.RUNNER_PORT ?? 4002)
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:4000'
 const DB_PATH = process.env.RUNNER_DB ?? './runner.db'
 const USE_SQLITE = process.env.RUNNER_PERSIST !== 'false'

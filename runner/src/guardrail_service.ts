@@ -47,11 +47,19 @@ export class GuardrailService {
         /\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g // IP
       ],
       dangerousCommands: [
-        // In sandboxed environment, allow more commands as they are isolated
-        // Keep basic restrictions for database operations and system-level commands
-        'drop table',
-        'delete from',
-        'truncate table'
+        'rm -rf',
+        'sudo',
+        'format',
+        'fdisk',
+        'dd if=',
+        'chmod 777',
+        'chown -R',
+        'kill -9',
+        'shutdown',
+        'reboot',
+        'mkfs',
+        'wget',
+        'curl.*|.*sh'
       ],
       maxPromptLength: 10000,
       maxResponseLength: 50000,
