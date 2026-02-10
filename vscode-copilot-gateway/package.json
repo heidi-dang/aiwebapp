@@ -1,0 +1,215 @@
+{
+  "name": "aiwebapp-copilot-gateway",
+  "displayName": "AIWebApp Copilot Gateway",
+  "description": "GitHub Copilot API Gateway integrated with AIWebApp services - provides OpenAI-compatible API endpoints with authentication, session management, and advanced features",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.85.0",
+    "node": ">=18.0.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "copilot",
+    "api",
+    "gateway",
+    "openai",
+    "ai",
+    "github",
+    "chat",
+    "completions",
+    "streaming",
+    "authentication"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiwebapp-copilot-gateway.startServer",
+        "title": "Start Copilot Gateway Server",
+        "category": "AIWebApp"
+      },
+      {
+        "command": "aiwebapp-copilot-gateway.stopServer",
+        "title": "Stop Copilot Gateway Server",
+        "category": "AIWebApp"
+      },
+      {
+        "command": "aiwebapp-copilot-gateway.showDashboard",
+        "title": "Show Gateway Dashboard",
+        "category": "AIWebApp"
+      },
+      {
+        "command": "aiwebapp-copilot-gateway.openSettings",
+        "title": "Open Gateway Settings",
+        "category": "AIWebApp"
+      }
+    ],
+    "configuration": {
+      "title": "AIWebApp Copilot Gateway",
+      "properties": {
+        "aiwebapp-copilot-gateway.server.port": {
+          "type": "number",
+          "default": 3030,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Port for the HTTP server"
+        },
+        "aiwebapp-copilot-gateway.server.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "enum": [
+            "127.0.0.1",
+            "0.0.0.0"
+          ],
+          "enumDescriptions": [
+            "Localhost only (secure)",
+            "All interfaces (LAN access)"
+          ],
+          "description": "Host binding for the server"
+        },
+        "aiwebapp-copilot-gateway.server.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Bearer token for API authentication"
+        },
+        "aiwebapp-copilot-gateway.server.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start server when extension activates"
+        },
+        "aiwebapp-copilot-gateway.server.maxConcurrentRequests": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Maximum concurrent requests to Copilot"
+        },
+        "aiwebapp-copilot-gateway.server.requestTimeout": {
+          "type": "number",
+          "default": 30000,
+          "minimum": 5000,
+          "maximum": 120000,
+          "description": "Request timeout in milliseconds"
+        },
+        "aiwebapp-copilot-gateway.server.retryAttempts": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Number of retry attempts for failed requests"
+        },
+        "aiwebapp-copilot-gateway.auth.integrationEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable integration with AIWebApp authentication service"
+        },
+        "aiwebapp-copilot-gateway.auth.serviceUrl": {
+          "type": "string",
+          "default": "http://localhost:4003",
+          "description": "AIWebApp authentication service URL"
+        },
+        "aiwebapp-copilot-gateway.session.trackingEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable session tracking and management"
+        },
+        "aiwebapp-copilot-gateway.session.maxHistory": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 1000,
+          "description": "Maximum conversation history to maintain per session"
+        },
+        "aiwebapp-copilot-gateway.usage.trackingEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Track API usage for analytics"
+        },
+        "aiwebapp-copilot-gateway.usage.metricsEndpoint": {
+          "type": "string",
+          "default": "http://localhost:4001/api/metrics",
+          "description": "Endpoint to send usage metrics"
+        }
+      }
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "aiwebapp-copilot-gateway-explorer",
+          "name": "Copilot Gateway",
+          "icon": "$(robot)",
+          "contextualTitle": "AIWebApp Copilot Gateway"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "aiwebapp-copilot-gateway.startServer",
+          "when": "view == aiwebapp-copilot-gateway-explorer && !aiwebapp-copilot-gateway.serverRunning",
+          "group": "navigation@1"
+        },
+        {
+          "command": "aiwebapp-copilot-gateway.stopServer",
+          "when": "view == aiwebapp-copilot-gateway-explorer && aiwebapp-copilot-gateway.serverRunning",
+          "group": "navigation@1"
+        },
+        {
+          "command": "aiwebapp-copilot-gateway.showDashboard",
+          "when": "view == aiwebapp-copilot-gateway-explorer",
+          "group": "navigation@2"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "uuid": "^9.0.1",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@types/compression": "^1.7.5",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^18.19.3",
+    "@types/uuid": "^9.0.7",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.9",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "@vscode/test-electron": "^2.3.8",
+    "eslint": "^8.55.0",
+    "typescript": "^5.3.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/heidi-dang/aiwebapp"
+  },
+  "publisher": "heidi-dang",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/heidi-dang/aiwebapp/issues"
+  },
+  "homepage": "https://github.com/heidi-dang/aiwebapp#readme"
+}
