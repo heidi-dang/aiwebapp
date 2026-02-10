@@ -52,6 +52,10 @@ interface Store {
   setMode: (mode: 'agent' | 'team') => void
   provider: 'bridge' | 'copilotapi' | 'ollama'
   setProvider: (provider: 'bridge' | 'copilotapi' | 'ollama') => void
+  runtimeMode: 'local' | 'sandbox'
+  setRuntimeMode: (runtimeMode: 'local' | 'sandbox') => void
+  cloudFallbackEnabled: boolean
+  setCloudFallbackEnabled: (cloudFallbackEnabled: boolean) => void
   // System prompt for agents
   systemPromptMode: 'default' | 'strict' | 'custom'
   setSystemPromptMode: (mode: 'default' | 'strict' | 'custom') => void
@@ -116,6 +120,11 @@ export const useStore = create<Store>()(
       setMode: (mode) => set(() => ({ mode })),
       provider: 'bridge',
       setProvider: (provider) => set(() => ({ provider })),
+      runtimeMode: 'sandbox',
+      setRuntimeMode: (runtimeMode) => set(() => ({ runtimeMode })),
+      cloudFallbackEnabled: true,
+      setCloudFallbackEnabled: (cloudFallbackEnabled) =>
+        set(() => ({ cloudFallbackEnabled })),
       // System prompt defaults (agent mode only)
       systemPromptMode: 'default',
       setSystemPromptMode: (systemPromptMode) =>
