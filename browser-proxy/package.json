@@ -1,0 +1,24 @@
+{
+  "name": "browser-proxy",
+  "version": "0.1.0",
+  "description": "Headless browser service for ChatGPT interaction",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "fastify": "^4.26.1",
+    "@fastify/cors": "^9.0.1",
+    "playwright": "^1.41.2",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.1",
+    "typescript": "^5.3.3",
+    "@types/node": "^20.11.19"
+  }
+}

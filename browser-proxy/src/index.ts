@@ -16,8 +16,8 @@ await fastify.register(cors, {
 
 fastify.get('/health', async () => {
   const browserOk = await browserManager.healthCheck()
-  return { 
-    status: browserOk ? 'ok' : 'degraded', 
+  return {
+    status: browserOk ? 'ok' : 'degraded',
     service: 'browser-proxy',
     browser: browserOk ? 'connected' : 'disconnected'
   }
@@ -35,12 +35,12 @@ fastify.post('/v1/chat/completions', async (req, reply) => {
   try {
     const page = await browserManager.getPage()
     const client = new ChatGPTClient(page)
-    
+
     await client.navigate()
-    
+
     if (!await client.isLoggedIn()) {
-      return reply.status(503).send({ 
-        error: 'Browser not logged in', 
+      return reply.status(503).send({
+        error: 'Browser not logged in',
         code: 'NEEDS_AUTH',
         message: 'Please log in manually via the debug view'
       })
