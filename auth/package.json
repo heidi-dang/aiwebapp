@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/index.js",
+    "build": "echo 'No build needed for auth'",
     "start": "node src/index.js",
     "smoke": "node smoke.mjs"
   },
