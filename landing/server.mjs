@@ -1,3 +1,7 @@
+import 'dotenv/config'
+import dotenvExpand from 'dotenv-expand'
+dotenvExpand.expand(dotenv.config({ path: '../.env' }))
+
 import http from 'node:http'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -5,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname)
-const port = Number(process.env.PORT ?? 6868)
+const port = Number(process.env.LANDING_PORT ?? 6868)
 
 const contentTypes = new Map([
   ['.html', 'text/html; charset=utf-8'],
@@ -62,8 +66,18 @@ const server = http.createServer(async (req, res) => {
       let html = await fs.readFile(fullPath, 'utf8')
       if (isLocal) {
         html = html
-          .replaceAll('https://ai.heidi.com.au', 'http://localhost:4000')
-          .replaceAll('https://user.heidiai.com.au', 'http://localhost:4000/register')
+          .replaceAll('{{LANDING_URL}}', 'http://localhost:6868')
+          .replaceAll('{{APP_URL}}', 'http://localhost:4000')
+          .replaceAll('{{AUTH_URL}}', 'http://localhost:4003')
+      } else {
+        // For production, these should be set via environment variables or derived from host
+        const baseUrl = `https://${host}`
+        const appUrl = baseUrl.replace(/^https:\/\/([^.]+\.)?/, 'https://app.')
+        const authUrl = baseUrl.replace(/^https:\/\/([^.]+\.)?/, 'https://auth.')
+        html = html
+          .replaceAll('{{LANDING_URL}}', baseUrl)
+          .replaceAll('{{APP_URL}}', appUrl)
+          .replaceAll('{{AUTH_URL}}', authUrl)
       }
       res.end(html, 'utf8')
       return
