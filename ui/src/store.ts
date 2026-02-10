@@ -186,10 +186,22 @@ export const useStore = create<Store>()(
             startedAt = startedAt ?? (Number.isFinite(ts) ? ts : Date.now())
           } else if (event.type === 'job.cancelled') {
             status = 'cancelled'
+            // Cleanup streaming connection on job completion
+            if (state.runUi[jobId]?.unsubscribe) {
+              state.runUi[jobId].unsubscribe()
+            }
           } else if (event.type === 'job.timeout') {
             status = 'timeout'
+            // Cleanup streaming connection on job completion
+            if (state.runUi[jobId]?.unsubscribe) {
+              state.runUi[jobId].unsubscribe()
+            }
           } else if (event.type === 'error') {
             status = 'error'
+            // Cleanup streaming connection on job completion
+            if (state.runUi[jobId]?.unsubscribe) {
+              state.runUi[jobId].unsubscribe()
+            }
           } else if (event.type === 'done') {
             finishedAt = finishedAt ?? (Number.isFinite(ts) ? ts : Date.now())
             if (
@@ -198,6 +210,10 @@ export const useStore = create<Store>()(
               status !== 'timeout'
             ) {
               status = 'done'
+            }
+            // Cleanup streaming connection on job completion
+            if (state.runUi[jobId]?.unsubscribe) {
+              state.runUi[jobId].unsubscribe()
             }
           }
 

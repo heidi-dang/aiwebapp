@@ -24,6 +24,25 @@ A modern full-stack AI Web App built with Next.js, Fastify, and Node.js. Feature
 - 🛠️ **Developer Tools**: CLI utilities for file operations and development
 - 🌐 **Production Ready**: Docker support and deployment scripts
 
+## Recent Updates
+
+### Performance Optimizations (February 11, 2026)
+
+#### Database Schema Enhancements
+- **Added `user_sessions` table**: Stores user authentication sessions with token hashing and expiration tracking
+  - Includes indexes on `token_hash` and `user_id` for fast lookups
+  - Foreign key constraint to `users` table with cascade delete
+- **Added `social_accounts` table**: Manages OAuth social login accounts (Google, GitHub, Microsoft, Apple)
+  - Includes indexes on `provider` + `provider_id` and `user_id` for efficient queries
+  - Stores provider-specific data and creation timestamps
+  - Foreign key constraint to `users` table with cascade delete
+
+#### Memory Leak Prevention
+- **EventSource Connection Cleanup**: Implemented automatic cleanup of streaming connections in UI store
+  - Added cleanup logic in `applyRunnerEvent` function for job completion events
+  - Prevents memory leaks from unclosed EventSource connections on job states: cancelled, timeout, error, done
+  - Ensures proper resource management for real-time streaming features
+
 ## Architecture
 
 This application consists of four main services that communicate via HTTP APIs:
