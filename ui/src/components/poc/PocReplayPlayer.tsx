@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PocReplayArtifact, PocReplayClaim } from '@/lib/pocReplay'
 import { motion } from 'framer-motion'
 
@@ -22,7 +22,8 @@ export function PocReplayPlayer({
   end,
   pauseOnFailMs = 0,
   pauseOnPassMs = 0,
-  label
+  label,
+  soundEnabled = false
 }: {
   artifact: PocReplayArtifact
   cinematic?: boolean
@@ -34,11 +35,14 @@ export function PocReplayPlayer({
   pauseOnFailMs?: number
   pauseOnPassMs?: number
   label?: string
+  soundEnabled?: boolean
 }) {
   const claims = useMemo(() => (Array.isArray(artifact.claims) ? artifact.claims : []), [artifact])
   const [count, setCount] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [speed, setSpeed] = useState<1 | 2 | 4>(initialSpeed)
+  const [soundOn, setSoundOn] = useState(soundEnabled)
+  const audioRef = useRef<AudioContext | null>(null)
 
   const filteredClaims = useMemo(() => {
     if (filter === 'pass') return claims.filter((c) => c.ok === true)
@@ -65,6 +69,36 @@ export function PocReplayPlayer({
   }, [filter, start, end])
 
   useEffect(() => {
+    setSoundOn(soundEnabled)
+  }, [soundEnabled])
+
+  const playTone = useCallback((freq: number, durationMs: number, type: OscillatorType, gain: number) => {
+    if (!soundOn) return
+    try {
+      const ctx = audioRef.current ?? new AudioContext()
+      audioRef.current = ctx
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {})
+      const osc = ctx.createOscillator()
+      const g = ctx.createGain()
+      osc.type = type
+      osc.frequency.value = freq
+      g.gain.value = 0
+      osc.connect(g)
+      g.connect(ctx.destination)
+      const now = ctx.currentTime
+      g.gain.setValueAtTime(0, now)
+      g.gain.linearRampToValueAtTime(gain, now + 0.01)
+      g.gain.exponentialRampToValueAtTime(0.0001, now + durationMs / 1000)
+      osc.start(now)
+      osc.stop(now + durationMs / 1000)
+    } catch {
+    }
+  }, [soundOn])
+
+  const playPass = useCallback(() => playTone(880, 80, 'sine', 0.06), [playTone])
+  const playFail = useCallback(() => playTone(180, 180, 'square', 0.08), [playTone])
+
+  useEffect(() => {
     if (!isPlaying) return
     if (count >= windowClaims.length) {
       setIsPlaying(false)
@@ -78,6 +112,14 @@ export function PocReplayPlayer({
     const t = setTimeout(() => setCount((c) => Math.min(windowClaims.length, c + 1)), delay)
     return () => clearTimeout(t)
   }, [isPlaying, speed, count, windowClaims, pauseOnFailMs, pauseOnPassMs])
+
+  useEffect(() => {
+    if (count <= 0) return
+    const shown = windowClaims[count - 1]
+    if (!shown) return
+    if (shown.ok) playPass()
+    else playFail()
+  }, [count, windowClaims, playFail, playPass])
 
   const displayClaims = useMemo(
     () => windowClaims.slice(0, Math.max(0, count)),
@@ -136,6 +178,13 @@ export function PocReplayPlayer({
             <option value="2">2x</option>
             <option value="4">4x</option>
           </select>
+          <button
+            type="button"
+            onClick={() => setSoundOn((v) => !v)}
+            className="rounded-md border border-primary/10 bg-background/40 px-2 py-1 text-[11px] uppercase text-secondary"
+          >
+            SFX {soundOn ? 'On' : 'Off'}
+          </button>
         </div>
       </div>
 
