@@ -199,7 +199,8 @@ export default function RunCard({ jobId }: { jobId: string }) {
   const bg = statusClass(run.status)
 
   return (
-    <div className="w-full">
+    <div className="w-full" data-testid="run-thinking">
+      <div data-testid="run-tool-refusal">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className={`h-2 w-2 rounded-full ${bg}`} />
@@ -301,6 +302,7 @@ export default function RunCard({ jobId }: { jobId: string }) {
           )}
         </div>
       )}
+    </div>
     </div>
   )
 }
