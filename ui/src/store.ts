@@ -89,6 +89,8 @@ interface Store {
   pocAwardedJobIds: string[]
   pocLastXpGain: number
   unlockPocBadge: (badgeId: string) => void
+  pocBadgeFeed: Array<{ badgeId: string; unlockedAt: number }>
+  clearPocBadgeFeed: () => void
   // System prompt for agents
   systemPromptMode: 'default' | 'strict' | 'custom'
   setSystemPromptMode: (mode: 'default' | 'strict' | 'custom') => void
@@ -192,13 +194,19 @@ export const useStore = create<Store>()(
       unlockPocBadge: (badgeId) =>
         set((state) => {
           if (state.pocBadges[badgeId]) return state
+          const unlockedAt = Math.floor(Date.now() / 1000)
           return {
             pocBadges: {
               ...state.pocBadges,
-              [badgeId]: { unlockedAt: Math.floor(Date.now() / 1000) }
-            }
+              [badgeId]: { unlockedAt }
+            },
+            pocBadgeFeed: [...state.pocBadgeFeed, { badgeId, unlockedAt }].slice(
+              -10
+            )
           }
         }),
+      pocBadgeFeed: [],
+      clearPocBadgeFeed: () => set(() => ({ pocBadgeFeed: [] })),
       // System prompt defaults (agent mode only)
       systemPromptMode: 'default',
       setSystemPromptMode: (systemPromptMode) =>
@@ -272,6 +280,14 @@ export const useStore = create<Store>()(
           let pocBadges = state.pocBadges
           let pocAwardedJobIds = state.pocAwardedJobIds
           let pocLastXpGain = state.pocLastXpGain
+          let pocBadgeFeed = state.pocBadgeFeed
+
+          const unlock = (badgeId: string) => {
+            if (pocBadges[badgeId]) return
+            const unlockedAt = Math.floor(Date.now() / 1000)
+            pocBadges = { ...pocBadges, [badgeId]: { unlockedAt } }
+            pocBadgeFeed = [...pocBadgeFeed, { badgeId, unlockedAt }].slice(-10)
+          }
 
           if (event.type === 'job.started') {
             status = 'running'
@@ -302,18 +318,8 @@ export const useStore = create<Store>()(
               if (success && failed === 0) {
                 pocStreak = pocStreak + 1
                 if (pocStreak > pocLongestStreak) pocLongestStreak = pocStreak
-                if (!pocBadges['all_claims_verified']) {
-                  pocBadges = {
-                    ...pocBadges,
-                    all_claims_verified: { unlockedAt: Math.floor(Date.now() / 1000) }
-                  }
-                }
-                if (pocStreak >= 5 && !pocBadges['streak_5']) {
-                  pocBadges = {
-                    ...pocBadges,
-                    streak_5: { unlockedAt: Math.floor(Date.now() / 1000) }
-                  }
-                }
+                unlock('all_claims_verified')
+                if (pocStreak >= 5) unlock('streak_5')
               } else {
                 pocStreak = 0
               }
@@ -335,12 +341,7 @@ export const useStore = create<Store>()(
               })
               if (buildClaims.length > 0) {
                 const allBuildOk = buildClaims.every((c) => c.ok === true)
-                if (allBuildOk && !pocBadges['clean_build']) {
-                  pocBadges = {
-                    ...pocBadges,
-                    clean_build: { unlockedAt: Math.floor(Date.now() / 1000) }
-                  }
-                }
+                if (allBuildOk) unlock('clean_build')
               }
 
               const hasWarnings = evidence.some((ev) => {
@@ -348,12 +349,7 @@ export const useStore = create<Store>()(
                 const err = typeof ev.stderr === 'string' ? ev.stderr : ''
                 return /warning/i.test(out) || /warning/i.test(err)
               })
-              if (success && failed === 0 && !hasWarnings && !pocBadges['zero_warnings']) {
-                pocBadges = {
-                  ...pocBadges,
-                  zero_warnings: { unlockedAt: Math.floor(Date.now() / 1000) }
-                }
-              }
+              if (success && failed === 0 && !hasWarnings) unlock('zero_warnings')
 
               pocAwardedJobIds = [jobId, ...pocAwardedJobIds].slice(0, 200)
             }
@@ -388,7 +384,8 @@ export const useStore = create<Store>()(
             pocLongestStreak,
             pocBadges,
             pocAwardedJobIds,
-            pocLastXpGain
+            pocLastXpGain,
+            pocBadgeFeed
           }
         }),
       setRunCollapsed: (jobId, collapsed) =>
