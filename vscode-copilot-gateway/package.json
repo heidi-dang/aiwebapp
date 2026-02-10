@@ -1,0 +1,216 @@
+{
+  "name": "heidi-ai-copilot-dashboard",
+  "displayName": "Heidi AI Copilot Dashboard",
+  "description": "Heidi AI WebApp Copilot Dashboard - OpenAI-compatible API gateway with authentication, session memory, tool orchestration, and usage insights for your Heidi AI workflows",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.85.0",
+    "node": ">=18.0.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "heidi",
+    "copilot",
+    "dashboard",
+    "ai",
+    "agent",
+    "github",
+    "chat",
+    "streaming",
+    "tools",
+    "sessions",
+    "metrics"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiwebapp-copilot-gateway.startServer",
+        "title": "Start Heidi AI Copilot Dashboard",
+        "category": "Heidi AI"
+      },
+      {
+        "command": "aiwebapp-copilot-gateway.stopServer",
+        "title": "Stop Heidi AI Copilot Dashboard",
+        "category": "Heidi AI"
+      },
+      {
+        "command": "aiwebapp-copilot-gateway.showDashboard",
+        "title": "Show Heidi AI Dashboard",
+        "category": "Heidi AI"
+      },
+      {
+        "command": "aiwebapp-copilot-gateway.openSettings",
+        "title": "Configure Heidi AI Dashboard",
+        "category": "Heidi AI"
+      }
+    ],
+    "configuration": {
+      "title": "Heidi AI Copilot Dashboard",
+      "properties": {
+        "aiwebapp-copilot-gateway.server.port": {
+          "type": "number",
+          "default": 3030,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Port for the HTTP server"
+        },
+        "aiwebapp-copilot-gateway.server.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "enum": [
+            "127.0.0.1",
+            "0.0.0.0"
+          ],
+          "enumDescriptions": [
+            "Localhost only (secure)",
+            "All interfaces (LAN access)"
+          ],
+          "description": "Host binding for the server"
+        },
+        "aiwebapp-copilot-gateway.server.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Bearer token for API authentication"
+        },
+        "aiwebapp-copilot-gateway.server.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically launch Heidi AI Copilot Dashboard on VS Code startup"
+        },
+        "aiwebapp-copilot-gateway.server.maxConcurrentRequests": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Maximum concurrent requests to Copilot"
+        },
+        "aiwebapp-copilot-gateway.server.requestTimeout": {
+          "type": "number",
+          "default": 30000,
+          "minimum": 5000,
+          "maximum": 120000,
+          "description": "Request timeout in milliseconds"
+        },
+        "aiwebapp-copilot-gateway.server.retryAttempts": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Number of retry attempts for failed requests"
+        },
+        "aiwebapp-copilot-gateway.auth.integrationEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Heidi AI WebApp authentication integration"
+        },
+        "aiwebapp-copilot-gateway.auth.serviceUrl": {
+          "type": "string",
+          "default": "http://localhost:4003",
+          "description": "Heidi AI WebApp authentication service URL"
+        },
+        "aiwebapp-copilot-gateway.session.trackingEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Heidi AI session tracking and memory"
+        },
+        "aiwebapp-copilot-gateway.session.maxHistory": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 1000,
+          "description": "Maximum conversation history to maintain per session"
+        },
+        "aiwebapp-copilot-gateway.usage.trackingEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Track Heidi AI usage analytics and performance"
+        },
+        "aiwebapp-copilot-gateway.usage.metricsEndpoint": {
+          "type": "string",
+          "default": "http://localhost:4001/api/metrics",
+          "description": "Heidi AI WebApp metrics endpoint"
+        }
+      }
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "aiwebapp-copilot-gateway-explorer",
+          "name": "Heidi AI",
+          "icon": "$(robot)",
+          "contextualTitle": "Heidi AI Copilot Dashboard"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "aiwebapp-copilot-gateway.startServer",
+          "when": "view == aiwebapp-copilot-gateway-explorer && !aiwebapp-copilot-gateway.serverRunning",
+          "group": "navigation@1"
+        },
+        {
+          "command": "aiwebapp-copilot-gateway.stopServer",
+          "when": "view == aiwebapp-copilot-gateway-explorer && aiwebapp-copilot-gateway.serverRunning",
+          "group": "navigation@1"
+        },
+        {
+          "command": "aiwebapp-copilot-gateway.showDashboard",
+          "when": "view == aiwebapp-copilot-gateway-explorer",
+          "group": "navigation@2"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "uuid": "^9.0.1",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@types/compression": "^1.7.5",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^18.19.3",
+    "@types/uuid": "^9.0.7",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.9",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "@vscode/test-electron": "^2.3.8",
+    "eslint": "^8.55.0",
+    "typescript": "^5.3.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/heidi-dang/aiwebapp"
+  },
+  "publisher": "heidi-dang",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/heidi-dang/aiwebapp/issues"
+  },
+  "homepage": "https://github.com/heidi-dang/aiwebapp#readme"
+}
