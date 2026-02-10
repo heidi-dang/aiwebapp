@@ -3,6 +3,7 @@ const path = require('node:path')
 
 function ensureFile(destPath, srcPath) {
   if (fs.existsSync(destPath)) return false
+  if (!fs.existsSync(srcPath)) return false
   fs.mkdirSync(path.dirname(destPath), { recursive: true })
   fs.copyFileSync(srcPath, destPath)
   return true

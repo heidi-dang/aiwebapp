@@ -1,7 +1,7 @@
 {
-  "name": "aiwebapp-copilot-gateway",
-  "displayName": "AIWebApp Copilot Gateway",
-  "description": "GitHub Copilot API Gateway integrated with AIWebApp services - provides OpenAI-compatible API endpoints with authentication, session management, and advanced features",
+  "name": "heidi-ai-copilot-dashboard",
+  "displayName": "Heidi AI Copilot Dashboard",
+  "description": "Heidi AI WebApp Copilot Dashboard - OpenAI-compatible API gateway with authentication, session memory, tool orchestration, and usage insights for your Heidi AI workflows",
   "version": "1.0.0",
   "engines": {
     "vscode": "^1.85.0",
@@ -13,16 +13,17 @@
     "Programming Languages"
   ],
   "keywords": [
+    "heidi",
     "copilot",
-    "api",
-    "gateway",
-    "openai",
+    "dashboard",
     "ai",
+    "agent",
     "github",
     "chat",
-    "completions",
     "streaming",
-    "authentication"
+    "tools",
+    "sessions",
+    "metrics"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -32,27 +33,27 @@
     "commands": [
       {
         "command": "aiwebapp-copilot-gateway.startServer",
-        "title": "Start Copilot Gateway Server",
-        "category": "AIWebApp"
+        "title": "Start Heidi AI Copilot Dashboard",
+        "category": "Heidi AI"
       },
       {
         "command": "aiwebapp-copilot-gateway.stopServer",
-        "title": "Stop Copilot Gateway Server",
-        "category": "AIWebApp"
+        "title": "Stop Heidi AI Copilot Dashboard",
+        "category": "Heidi AI"
       },
       {
         "command": "aiwebapp-copilot-gateway.showDashboard",
-        "title": "Show Gateway Dashboard",
-        "category": "AIWebApp"
+        "title": "Show Heidi AI Dashboard",
+        "category": "Heidi AI"
       },
       {
         "command": "aiwebapp-copilot-gateway.openSettings",
-        "title": "Open Gateway Settings",
-        "category": "AIWebApp"
+        "title": "Configure Heidi AI Dashboard",
+        "category": "Heidi AI"
       }
     ],
     "configuration": {
-      "title": "AIWebApp Copilot Gateway",
+      "title": "Heidi AI Copilot Dashboard",
       "properties": {
         "aiwebapp-copilot-gateway.server.port": {
           "type": "number",
@@ -82,7 +83,7 @@
         "aiwebapp-copilot-gateway.server.autoStart": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically start server when extension activates"
+          "description": "Automatically launch Heidi AI Copilot Dashboard on VS Code startup"
         },
         "aiwebapp-copilot-gateway.server.maxConcurrentRequests": {
           "type": "number",
@@ -108,17 +109,17 @@
         "aiwebapp-copilot-gateway.auth.integrationEnabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable integration with AIWebApp authentication service"
+          "description": "Enable Heidi AI WebApp authentication integration"
         },
         "aiwebapp-copilot-gateway.auth.serviceUrl": {
           "type": "string",
           "default": "http://localhost:4003",
-          "description": "AIWebApp authentication service URL"
+          "description": "Heidi AI WebApp authentication service URL"
         },
         "aiwebapp-copilot-gateway.session.trackingEnabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable session tracking and management"
+          "description": "Enable Heidi AI session tracking and memory"
         },
         "aiwebapp-copilot-gateway.session.maxHistory": {
           "type": "number",
@@ -130,12 +131,12 @@
         "aiwebapp-copilot-gateway.usage.trackingEnabled": {
           "type": "boolean",
           "default": true,
-          "description": "Track API usage for analytics"
+          "description": "Track Heidi AI usage analytics and performance"
         },
         "aiwebapp-copilot-gateway.usage.metricsEndpoint": {
           "type": "string",
           "default": "http://localhost:4001/api/metrics",
-          "description": "Endpoint to send usage metrics"
+          "description": "Heidi AI WebApp metrics endpoint"
         }
       }
     },
@@ -143,9 +144,9 @@
       "explorer": [
         {
           "id": "aiwebapp-copilot-gateway-explorer",
-          "name": "Copilot Gateway",
+          "name": "Heidi AI",
           "icon": "$(robot)",
-          "contextualTitle": "AIWebApp Copilot Gateway"
+          "contextualTitle": "Heidi AI Copilot Dashboard"
         }
       ]
     },
