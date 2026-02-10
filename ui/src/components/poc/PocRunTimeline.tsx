@@ -5,6 +5,8 @@ import { useStore } from '@/store'
 import { ConfettiBurst } from './ConfettiBurst'
 import { motion } from 'framer-motion'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { toast } from 'sonner'
+import { base64UrlEncodeUtf8, buildReplayArtifact } from '@/lib/pocReplay'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -365,13 +367,11 @@ function PocRunTimelineInner({
               <button
                 type="button"
                 onClick={() => {
-                  const artifact = {
-                    version: 1,
+                  const artifact = buildReplayArtifact({
                     jobId,
-                    createdAt: Math.floor(Date.now() / 1000),
-                    proof_hash: summary?.proofHash || '',
+                    proofHash: summary?.proofHash || '',
                     claims
-                  }
+                  })
                   const artifactJson = JSON.stringify(artifact, null, 2)
                   downloadFile(`poc-replay-${jobId}.json`, artifactJson + '\n', 'application/json')
                   const html = buildReplayHtml(artifactJson, `PoC Replay ${jobId}`)
@@ -380,6 +380,28 @@ function PocRunTimelineInner({
                 className="rounded-md border border-primary/10 bg-primaryAccent px-2 py-1 text-[11px] uppercase text-secondary"
               >
                 Export Replay
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const artifact = buildReplayArtifact({
+                      jobId,
+                      proofHash: summary?.proofHash || '',
+                      claims
+                    })
+                    const artifactJson = JSON.stringify(artifact)
+                    const encoded = base64UrlEncodeUtf8(artifactJson)
+                    const url = `${window.location.origin}/poc-replay?d=${encoded}`
+                    await navigator.clipboard.writeText(url)
+                    toast.success('Share link copied')
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : String(err))
+                  }
+                }}
+                className="rounded-md border border-primary/10 bg-primaryAccent px-2 py-1 text-[11px] uppercase text-secondary"
+              >
+                Copy Share Link
               </button>
               {variant === 'default' && (
                 <button
