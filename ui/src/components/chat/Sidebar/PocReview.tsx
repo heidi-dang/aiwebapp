@@ -227,6 +227,77 @@ export function PocReview() {
           >
             Templates
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-9 w-full rounded-xl border border-primary/15 bg-primaryAccent text-xs font-medium uppercase"
+            onClick={() => {
+              const standard = [
+                {
+                  id: 'C1',
+                  statement: 'Node is available',
+                  command: 'node -v',
+                  dependencies: [],
+                  weight: 1,
+                  enabled: true
+                },
+                {
+                  id: 'C2',
+                  statement: 'npm is available',
+                  command: 'npm -v',
+                  dependencies: ['C1'],
+                  weight: 1,
+                  enabled: true
+                },
+                {
+                  id: 'C3',
+                  statement: 'Runner builds',
+                  command: 'cd runner && npm run build',
+                  dependencies: ['C2'],
+                  weight: 3,
+                  enabled: true
+                },
+                {
+                  id: 'C4',
+                  statement: 'Server builds',
+                  command: 'cd server && npm run build',
+                  dependencies: ['C2'],
+                  weight: 3,
+                  enabled: true
+                },
+                {
+                  id: 'C5',
+                  statement: 'UI builds',
+                  command: 'cd ui && npm run build',
+                  dependencies: ['C2'],
+                  weight: 3,
+                  enabled: true
+                },
+                {
+                  id: 'C6',
+                  statement: 'UI validate (lint/format/typecheck)',
+                  command: 'cd ui && npm run validate',
+                  dependencies: ['C2'],
+                  weight: 5,
+                  enabled: false
+                }
+              ]
+              const nextJson = JSON.stringify(standard, null, 2)
+              setPocReviewChecksJson(nextJson)
+
+              const name = 'Standard Repo Review'
+              const existing = pocReviewTemplates.find((t) => t.name === name)
+              const id = existing?.id ?? randomId('poc_tpl')
+              setPocReviewTemplates((prev) => {
+                const without = prev.filter((t) => t.id !== id)
+                return [{ id, name, checksJson: nextJson }, ...without]
+              })
+              setSelectedPocReviewTemplateId(id)
+              toast.success('Standard template generated')
+            }}
+          >
+            Generate
+          </Button>
         </div>
         <Button
           type="button"

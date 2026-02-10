@@ -100,6 +100,15 @@ function getPocProofHashFromPayload(payload: unknown): string | null {
   return typeof proofHash === 'string' && proofHash.trim() ? proofHash : null
 }
 
+async function sha256Hex(text: string) {
+  const data = new TextEncoder().encode(text)
+  const digest = await crypto.subtle.digest('SHA-256', data)
+  const bytes = new Uint8Array(digest)
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
 interface ApprovalState {
   tokenId: string
   description: string
@@ -305,7 +314,7 @@ export default function RunCard({ jobId }: { jobId: string }) {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => {
+              onClick={async () => {
                 const lines = [
                   `# PoC Review Report`,
                   ``,
@@ -324,7 +333,10 @@ export default function RunCard({ jobId }: { jobId: string }) {
                     return `- ${ok ? '✅' : '❌'} ${c.id ?? ''} (w=${weight}) deps=[${deps}]\n  - ${statement}\n  - \`${cmd}\`\n  - hash: ${hash}`
                   })
                 ]
-                const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/markdown' })
+                const reportBody = lines.join('\n') + '\n'
+                const reportHash = await sha256Hex(reportBody)
+                const fullReport = [`Report Hash: ${reportHash}`, ``, reportBody].join('\n')
+                const blob = new Blob([fullReport], { type: 'text/markdown' })
                 const url = URL.createObjectURL(blob)
                 const a = document.createElement('a')
                 a.href = url
