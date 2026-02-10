@@ -1,0 +1,73 @@
+{
+  "name": "aiwebapp-copilot-gateway",
+  "displayName": "Heidi AI Copilot Dashboard",
+  "description": "OpenAI-compatible API gateway for Heidi AI WebApp with GitHub Copilot integration, authentication, session management, and live metrics dashboard.",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:aiwebapp-copilot-gateway.start"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiwebapp-copilot-gateway.start",
+        "title": "Start Heidi AI Copilot Dashboard"
+      }
+    ],
+    "configuration": {
+      "title": "Heidi AI Copilot Dashboard",
+      "properties": {
+        "aiwebapp-copilot-gateway.port": {
+          "type": "number",
+          "default": 3001,
+          "description": "Port for the Heidi AI Copilot Dashboard server"
+        },
+        "aiwebapp-copilot-gateway.apiKey": {
+          "type": "string",
+          "description": "API key for Heidi AI Copilot Dashboard authentication"
+        },
+        "aiwebapp-copilot-gateway.backendUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "URL of the Heidi AI WebApp backend for tool calling"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.74.0",
+    "@types/node": "16.x",
+    "eslint": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^5.0.0",
+    "@typescript-eslint/parser": "^5.0.0",
+    "typescript": "^4.4.3",
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/compression": "^1.7.5",
+    "@types/morgan": "^1.9.9",
+    "@types/ws": "^8.5.10"
+  },
+  "dependencies": {
+    "axios": "^1.4.0",
+    "express": "^4.18.2",
+    "ws": "^8.13.0",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "compression": "^1.7.4",
+    "morgan": "^1.10.0"
+  }
+}
