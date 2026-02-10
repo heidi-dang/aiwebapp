@@ -33,6 +33,7 @@ function statusClass(status: RunState['status']) {
 
 type PocClaim = {
   id?: string
+  hash?: string
   statement?: string
   command?: string
   ok?: boolean
@@ -44,6 +45,8 @@ type PocClaim = {
 type PocEvidence = {
   stdout?: string
   stderr?: string
+  stdout_hash?: string
+  stderr_hash?: string
 }
 
 type PocClaimEvent = {
@@ -64,6 +67,7 @@ function getPocClaimFromPayload(payload: unknown): PocClaim | null {
   const dependencies = claim['dependencies']
   return {
     id: typeof claim['id'] === 'string' ? claim['id'] : undefined,
+    hash: typeof claim['hash'] === 'string' ? claim['hash'] : undefined,
     statement: typeof claim['statement'] === 'string' ? claim['statement'] : undefined,
     command: typeof claim['command'] === 'string' ? claim['command'] : undefined,
     ok: typeof claim['ok'] === 'boolean' ? claim['ok'] : undefined,
@@ -83,6 +87,8 @@ function getPocClaimEventFromPayload(payload: unknown): PocClaimEvent | null {
   if (isRecord(evidenceRaw)) {
     if (typeof evidenceRaw['stdout'] === 'string') evidence.stdout = evidenceRaw['stdout']
     if (typeof evidenceRaw['stderr'] === 'string') evidence.stderr = evidenceRaw['stderr']
+    if (typeof evidenceRaw['stdout_hash'] === 'string') evidence.stdout_hash = evidenceRaw['stdout_hash']
+    if (typeof evidenceRaw['stderr_hash'] === 'string') evidence.stderr_hash = evidenceRaw['stderr_hash']
   }
   return { claim, evidence }
 }
@@ -301,7 +307,8 @@ export default function RunCard({ jobId }: { jobId: string }) {
                     const ok = !!c.ok
                     const statement = typeof c.statement === 'string' ? c.statement : ''
                     const cmd = typeof c.command === 'string' ? c.command : ''
-                    return `- ${ok ? '✅' : '❌'} ${c.id ?? ''} (w=${weight}) deps=[${deps}]\n  - ${statement}\n  - \`${cmd}\``
+                    const hash = typeof c.hash === 'string' ? c.hash : ''
+                    return `- ${ok ? '✅' : '❌'} ${c.id ?? ''} (w=${weight}) deps=[${deps}]\n  - ${statement}\n  - \`${cmd}\`\n  - hash: ${hash}`
                   })
                 ]
                 const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/markdown' })
@@ -377,6 +384,11 @@ export default function RunCard({ jobId }: { jobId: string }) {
                           <div className="text-xs font-medium text-primary">
                             {ok ? '✅' : '❌'} {id} <span className="text-primary/70">w={weight}</span>
                           </div>
+                          {claim.hash && (
+                            <div className="mt-1 break-words font-mono text-[11px] text-secondary/80">
+                              hash: {claim.hash}
+                            </div>
+                          )}
                           {claim.statement && (
                             <div className="mt-1 break-words text-xs text-secondary">
                               {claim.statement}
@@ -403,6 +415,16 @@ export default function RunCard({ jobId }: { jobId: string }) {
                       </div>
                       {isOpen && (
                         <div className="mt-2 space-y-2">
+                          {(evidence.stdout_hash || evidence.stderr_hash) && (
+                            <div className="rounded-md border border-primary/10 bg-primaryAccent p-2 text-[11px] text-secondary/80">
+                              {evidence.stdout_hash && (
+                                <div className="break-words">stdout_hash: {evidence.stdout_hash}</div>
+                              )}
+                              {evidence.stderr_hash && (
+                                <div className="break-words">stderr_hash: {evidence.stderr_hash}</div>
+                              )}
+                            </div>
+                          )}
                           {evidence.stdout && (
                             <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-primary/10 bg-primaryAccent p-2 text-[11px] text-primary/90">
                               {evidence.stdout}

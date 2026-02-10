@@ -11,6 +11,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { glob } from 'glob'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import type { RunnerEvent, RunnerEventType, JobStore, JobStatus } from './db.js'
 import { BridgeClient, createBridgeClientFromEnv } from './bridge.js'
 import { runCoderAgent } from './agent.js'
@@ -50,6 +51,7 @@ export interface JobInput {
     command: string
     dependencies?: string[]
     weight?: number
+    enabled?: boolean
   }>
 }
 
@@ -111,6 +113,26 @@ function parseToolArgs(raw?: string): Record<string, unknown> {
   } catch {
     return {}
   }
+}
+
+function sha256Hex(input: string) {
+  return createHash('sha256').update(input).digest('hex')
+}
+
+function stableClaimJson(claim: {
+  id: string
+  statement: string
+  command: string
+  dependencies: string[]
+  weight: number
+}) {
+  return JSON.stringify({
+    id: claim.id,
+    statement: claim.statement,
+    command: claim.command,
+    dependencies: [...claim.dependencies],
+    weight: claim.weight
+  })
 }
 
 function resolveWithinBase(baseDir: string, targetPath: string) {
@@ -1135,13 +1157,16 @@ async function executeWithPocReview(ctx: JobContext): Promise<void> {
 
   const checks: Array<{ id: string; statement: string; command: string; dependencies: string[]; weight: number }> =
     checksFromInput.length > 0
-      ? checksFromInput.map((c, i) => ({
-          id: (c.id && String(c.id).trim()) ? String(c.id).trim() : `C${i + 1}`,
-          statement: String(c.statement ?? '').trim() || `Claim ${i + 1}`,
-          command: String(c.command ?? '').trim(),
-          dependencies: Array.isArray(c.dependencies) ? c.dependencies.filter((d) => typeof d === 'string') : [],
-          weight: typeof c.weight === 'number' && Number.isFinite(c.weight) ? c.weight : 1
-        }))
+      ? checksFromInput
+          .filter((c) => c && typeof c === 'object' && c.enabled !== false)
+          .map((c, i) => ({
+            id: (c.id && String(c.id).trim()) ? String(c.id).trim() : `C${i + 1}`,
+            statement: String(c.statement ?? '').trim() || `Claim ${i + 1}`,
+            command: String(c.command ?? '').trim(),
+            dependencies: Array.isArray(c.dependencies) ? c.dependencies.filter((d) => typeof d === 'string') : [],
+            weight: typeof c.weight === 'number' && Number.isFinite(c.weight) ? c.weight : 1
+          }))
+          .filter((c) => c.command.length > 0)
       : commands.length > 0
         ? commands.map((command, i) => ({
             id: `C${i + 1}`,
@@ -1157,6 +1182,21 @@ async function executeWithPocReview(ctx: JobContext): Promise<void> {
             { id: 'C4', statement: 'Server builds', command: 'cd server && npm run build', dependencies: ['C2'], weight: 3 },
             { id: 'C5', statement: 'UI builds', command: 'cd ui && npm run build', dependencies: ['C2'], weight: 3 }
           ]
+
+  const unique = new Set<string>()
+  for (const c of checks) {
+    let id = c.id
+    if (!id) id = 'C'
+    if (!unique.has(id)) {
+      unique.add(id)
+      c.id = id
+      continue
+    }
+    let n = 2
+    while (unique.has(`${id}_${n}`)) n++
+    c.id = `${id}_${n}`
+    unique.add(c.id)
+  }
 
   await emitEvent(ctx, 'tool.start', {
     tool: 'poc_review',
@@ -1182,6 +1222,9 @@ async function executeWithPocReview(ctx: JobContext): Promise<void> {
     const check = checks[i]
     const res = await runReviewCommand(ctx, check.command)
     const ok = res.exitCode === 0
+    const claimHash = sha256Hex(stableClaimJson(check))
+    const stdoutHash = sha256Hex(res.stdout || '')
+    const stderrHash = sha256Hex(res.stderr || '')
     results.push({
       id: check.id,
       statement: check.statement,
@@ -1198,6 +1241,7 @@ async function executeWithPocReview(ctx: JobContext): Promise<void> {
       output: line + '\n',
       claim: {
         id: check.id,
+        hash: claimHash,
         statement: check.statement,
         dependencies: check.dependencies,
         command: check.command,
@@ -1207,7 +1251,9 @@ async function executeWithPocReview(ctx: JobContext): Promise<void> {
       },
       evidence: {
         stdout: res.stdout,
-        stderr: res.stderr
+        stderr: res.stderr,
+        stdout_hash: stdoutHash,
+        stderr_hash: stderrHash
       }
     })
   }
