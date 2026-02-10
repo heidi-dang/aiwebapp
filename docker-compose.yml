@@ -60,7 +60,20 @@ services:
     # This entry ensures 'docker compose build' creates the image
     profiles: ["donotstart"] 
 
+  browser-proxy:
+    image: heididang/aiwebapp-browser-proxy:latest
+    build: ./browser-proxy
+    ports:
+      - "4003:3003"
+    environment:
+      - PORT=3003
+      - NODE_ENV=production
+    volumes:
+      - browser_data:/app/user_data
+    restart: unless-stopped
+
 volumes:
   server_data:
   runner_data:
   chroma_data:
+  browser_data:
