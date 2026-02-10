@@ -1,7 +1,8 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '@/store'
+import { motion, AnimatePresence } from 'framer-motion'
 
 function levelFromXp(xp: number, k: number) {
   return Math.floor(Math.sqrt(Math.max(0, xp) / k)) + 1
@@ -28,6 +29,8 @@ const badges: Array<{ id: string; name: string; description: string }> = [
 export function PocGameHud() {
   const { pocXpTotal, pocStreak, pocLongestStreak, pocBadges, pocLastXpGain } = useStore()
   const k = 25
+  const [levelUp, setLevelUp] = useState(false)
+  const [streakUp, setStreakUp] = useState(false)
 
   const { level, progressPct, xpInto, xpNeeded } = useMemo(() => {
     const level = levelFromXp(pocXpTotal, k)
@@ -39,22 +42,52 @@ export function PocGameHud() {
     return { level, progressPct: pct, xpInto: into, xpNeeded: span }
   }, [pocXpTotal])
 
+  useEffect(() => {
+    const key = 'poc_last_level'
+    const prev = Number(localStorage.getItem(key) || '0')
+    if (prev > 0 && level > prev) {
+      setLevelUp(true)
+      const t = setTimeout(() => setLevelUp(false), 1200)
+      return () => clearTimeout(t)
+    }
+    localStorage.setItem(key, String(level))
+  }, [level])
+
+  useEffect(() => {
+    const key = 'poc_last_streak'
+    const prev = Number(localStorage.getItem(key) || '0')
+    if (pocStreak > 0 && pocStreak > prev) {
+      setStreakUp(true)
+      const t = setTimeout(() => setStreakUp(false), 900)
+      return () => clearTimeout(t)
+    }
+    localStorage.setItem(key, String(pocStreak))
+  }, [pocStreak])
+
   return (
     <div className="rounded-xl border border-primary/15 bg-background/60 p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs font-medium uppercase text-primary">Player</div>
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            <div className="rounded-full border border-primary/20 bg-primaryAccent px-2 py-1 text-xs font-medium uppercase text-primary">
+            <motion.div
+              className="rounded-full border border-primary/20 bg-primaryAccent px-2 py-1 text-xs font-medium uppercase text-primary"
+              animate={levelUp ? { scale: [1, 1.12, 1] } : { scale: 1 }}
+              transition={{ duration: 0.5, ease: 'easeOut' }}
+            >
               Level {level}
-            </div>
+            </motion.div>
             <div className="text-xs text-secondary">
               XP {pocXpTotal}
               {pocLastXpGain > 0 ? <span className="text-secondary/70"> (+{pocLastXpGain})</span> : null}
             </div>
-            <div className="text-xs text-secondary">
+            <motion.div
+              className="text-xs text-secondary"
+              animate={streakUp ? { scale: [1, 1.1, 1] } : { scale: 1 }}
+              transition={{ duration: 0.4, ease: 'easeOut' }}
+            >
               Streak {pocStreak} <span className="text-secondary/70">(best {pocLongestStreak})</span>
-            </div>
+            </motion.div>
           </div>
           <div className="mt-2 h-2 w-full overflow-hidden rounded-full border border-primary/15 bg-primaryAccent">
             <div
@@ -89,6 +122,20 @@ export function PocGameHud() {
           })}
         </div>
       </div>
+
+      <AnimatePresence>
+        {levelUp && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="mt-3 rounded-xl border border-primary/25 bg-accent p-2 text-xs font-medium uppercase text-primary"
+          >
+            Level Up
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
