@@ -117,12 +117,12 @@ if ! grep -q "PORT=" "$ENV_FILE" 2>/dev/null; then
 fi
 
 if ! grep -q "SERVER_PORT=" "$ENV_FILE" 2>/dev/null; then
-    SERVER_PORT=$(prompt_value "Enter production Server port" "3001")
+    SERVER_PORT=$(prompt_value "Enter production Server port" "4001")
     echo "SERVER_PORT=$SERVER_PORT" >> "$ENV_FILE"
 fi
 
 if ! grep -q "RUNNER_PORT=" "$ENV_FILE" 2>/dev/null; then
-    RUNNER_PORT=$(prompt_value "Enter production Runner port" "3002")
+    RUNNER_PORT=$(prompt_value "Enter production Runner port" "4002")
     echo "RUNNER_PORT=$RUNNER_PORT" >> "$ENV_FILE"
 fi
 
@@ -164,8 +164,8 @@ fi
 step "Step 5: Port Configuration & Validation"
 LANDING_PORT=6868
 UI_PORT=$(grep "^PORT=" "$ENV_FILE" | cut -d'=' -f2 || echo "80")
-SERVER_PORT=$(grep "^SERVER_PORT=" "$ENV_FILE" | cut -d'=' -f2 || echo "3001")
-RUNNER_PORT=$(grep "^RUNNER_PORT=" "$ENV_FILE" | cut -d'=' -f2 || echo "3002")
+SERVER_PORT=$(grep "^SERVER_PORT=" "$ENV_FILE" | cut -d'=' -f2 || echo "4001")
+RUNNER_PORT=$(grep "^RUNNER_PORT=" "$ENV_FILE" | cut -d'=' -f2 || echo "4002")
 
 echo "Production service configuration:"
 echo "  Landing: http://localhost:$LANDING_PORT"

@@ -28,57 +28,49 @@ if %errorlevel% neq 0 (
     echo ERROR: Failed to verify cloudflared version. Please check the installation. & pause & exit /b 1
 )
 
-REM Cleanup and delete existing tunnels
-"%CLOUDFLARED_PATH%" tunnel cleanup 1ccbf986-e747-421f-85f3-8b497ba9c1ac
-if %errorlevel% neq 0 (
-    echo ERROR: Failed to clean up tunnels. Please check manually. & pause & exit /b 1
-)
-
-"%CLOUDFLARED_PATH%" tunnel delete heidiai-tunnel1
-if %errorlevel% neq 0 (
-    echo WARNING: Failed to delete heidiai-tunnel1. It might not exist or is already deleted.
-)
+REM Cleanup existing tunnels if requested (fresh start)
+REM "%CLOUDFLARED_PATH%" tunnel cleanup
 
 REM Check if heidiai-tunnel1 exists
 "%CLOUDFLARED_PATH%" tunnel list | findstr /i "heidiai-tunnel1"
 if %errorlevel%==0 (
-    echo heidiai-tunnel1 already exists. Skipping creation step.
+    echo heidiai-tunnel1 already exists.
 ) else (
-    REM Recreate the credentials file for heidiai-tunnel1
+    echo Creating heidiai-tunnel1...
     "%CLOUDFLARED_PATH%" tunnel create heidiai-tunnel1
     if %errorlevel% neq 0 (
         echo ERROR: Failed to create heidiai-tunnel1. Please check manually. & pause & exit /b 1
     )
 )
 
+REM Get the Tunnel ID
+for /f "tokens=2" %%i in ('"%CLOUDFLARED_PATH%" tunnel list ^| findstr "heidiai-tunnel1"') do set TUNNEL_ID=%%i
+echo Tunnel ID is %TUNNEL_ID%
+
 REM Check if credentials file exists
-if not exist "%USERPROFILE%\.cloudflared\fb25b907-c071-473e-a219-f0ba3783e5b1.json" (
-    echo ERROR: Tunnel credentials file is missing. Attempting to recreate the tunnel.
-    "%CLOUDFLARED_PATH%" tunnel delete heidiai-tunnel1
-    "%CLOUDFLARED_PATH%" tunnel create heidiai-tunnel1
-    if not exist "%USERPROFILE%\.cloudflared\fb25b907-c071-473e-a219-f0ba3783e5b1.json" (
-        echo ERROR: Failed to recreate the tunnel. Please check manually.
-        pause
-        exit /b 1
-    )
+if not exist "%USERPROFILE%\.cloudflared\%TUNNEL_ID%.json" (
+    echo ERROR: Tunnel credentials file is missing for %TUNNEL_ID%.
+    echo Please ensure you are logged in: cloudflared tunnel login
+    pause
+    exit /b 1
 )
 
 REM Create a new configuration file for the heidiai-tunnel1
 set CONFIG_PATH=%USERPROFILE%\.cloudflared\config.yml
 if exist "%CONFIG_PATH%" del "%CONFIG_PATH%"
-echo tunnel: fb25b907-c071-473e-a219-f0ba3783e5b1 >> "%CONFIG_PATH%"
-echo credentials-file: %USERPROFILE%\.cloudflared\fb25b907-c071-473e-a219-f0ba3783e5b1.json >> "%CONFIG_PATH%"
+echo tunnel: %TUNNEL_ID% >> "%CONFIG_PATH%"
+echo credentials-file: %USERPROFILE%\.cloudflared\%TUNNEL_ID%.json >> "%CONFIG_PATH%"
 echo. >> "%CONFIG_PATH%"
 echo ingress: >> "%CONFIG_PATH%"
-echo   - hostname: code.fb25b907-c071-473e-a219-f0ba3783e5b1.cfargotunnel.com >> "%CONFIG_PATH%"
-echo     service: http://localhost:3000 >> "%CONFIG_PATH%"
-echo   - hostname: copilot.fb25b907-c071-473e-a219-f0ba3783e5b1.cfargotunnel.com >> "%CONFIG_PATH%"
-echo     service: http://localhost:3001 >> "%CONFIG_PATH%"
+echo   - hostname: code.%TUNNEL_ID%.cfargotunnel.com >> "%CONFIG_PATH%"
+echo     service: http://localhost:4000 >> "%CONFIG_PATH%"
+echo   - hostname: copilot.%TUNNEL_ID%.cfargotunnel.com >> "%CONFIG_PATH%"
+echo     service: http://localhost:4001 >> "%CONFIG_PATH%"
 echo   - hostname: heidiai.com.au >> "%CONFIG_PATH%"
-echo     service: http://localhost:3002 >> "%CONFIG_PATH%"
-echo   - hostname: ollama.fb25b907-c071-473e-a219-f0ba3783e5b1.cfargotunnel.com >> "%CONFIG_PATH%"
+echo     service: http://localhost:4002 >> "%CONFIG_PATH%"
+echo   - hostname: ollama.%TUNNEL_ID%.cfargotunnel.com >> "%CONFIG_PATH%"
 echo     service: http://localhost:3003 >> "%CONFIG_PATH%"
-echo   - hostname: openai.fb25b907-c071-473e-a219-f0ba3783e5b1.cfargotunnel.com >> "%CONFIG_PATH%"
+echo   - hostname: openai.%TUNNEL_ID%.cfargotunnel.com >> "%CONFIG_PATH%"
 echo     service: http://localhost:3004 >> "%CONFIG_PATH%"
 echo   - service: http_status:404 >> "%CONFIG_PATH%"
 
@@ -112,7 +104,7 @@ if %errorlevel% neq 0 (
 )
 
 REM Health Check
-"%CLOUDFLARED_PATH%" tunnel info fb25b907-c071-473e-a219-f0ba3783e5b1 | findstr /i "status: running"
+"%CLOUDFLARED_PATH%" tunnel info %TUNNEL_ID% | findstr /i "status: running"
 if %errorlevel%==0 (
     echo Tunnel health: GREEN
 ) else (

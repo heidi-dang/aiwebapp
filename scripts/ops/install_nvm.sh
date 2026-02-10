@@ -123,7 +123,7 @@ install_nvm_from_git() {
     fi
   fi
 
-  local fetch_erro
+  local fetch_error
   if [ -d "$INSTALL_DIR/.git" ]; then
     # Updating repo
     nvm_echo "=> nvm is already installed in $INSTALL_DIR, trying to update using git"

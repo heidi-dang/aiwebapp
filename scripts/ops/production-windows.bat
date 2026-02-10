@@ -192,7 +192,7 @@ if "%result%"=="" (
 
 call :get_env_value "%ENV_FILE%" "PORT"
 if "%result%"=="" (
-    call :prompt_value "Enter production UI port" "80"
+    call :prompt_value "Enter production UI port" "4000"
     set PORT=%result%
     echo PORT=%PORT% >> "%ENV_FILE%"
 ) else (
@@ -202,7 +202,7 @@ set "UI_PORT=%PORT%"
 
 call :get_env_value "%ENV_FILE%" "SERVER_PORT"
 if "%result%"=="" (
-    call :prompt_value "Enter production Server port" "3001"
+    call :prompt_value "Enter production Server port" "4001"
     set SERVER_PORT=%result%
     echo SERVER_PORT=%SERVER_PORT% >> "%ENV_FILE%"
 ) else (
@@ -211,7 +211,7 @@ if "%result%"=="" (
 
 call :get_env_value "%ENV_FILE%" "RUNNER_PORT"
 if "%result%"=="" (
-    call :prompt_value "Enter production Runner port" "3002"
+    call :prompt_value "Enter production Runner port" "4002"
     set RUNNER_PORT=%result%
     echo RUNNER_PORT=%RUNNER_PORT% >> "%ENV_FILE%"
 ) else (
@@ -305,7 +305,7 @@ echo.
 echo Checking availability of critical ports...
 set PORTS_OK=true
 
-for %%p in (3000 3001 3002 3003 3004 3005 3006 6868 8080) do (
+for %%p in (4000 4001 4002 4003 4004 4005 4006 6868 8080) do (
     netstat -an | findstr "0.0.0.0:%%p [::]:%%p " | findstr "LISTENING" >nul
     if !errorlevel! equ 0 (
         echo.

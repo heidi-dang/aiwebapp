@@ -9,14 +9,12 @@
  */
 import { promises as fs } from 'node:fs'
 import { glob } from 'glob'
-import { exec as execCb } from 'node:child_process'
+import { exec as execCb, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { RunnerEvent, RunnerEventType, JobStore, JobStatus } from './db.js'
 import { BridgeClient, createBridgeClientFromEnv } from './bridge.js'
 import { runCoderAgent } from './agent.js'
-import { llmService } from './llm/index.js'
-import { sandboxService } from './services/sandbox.js'
-import type { ChatMessage } from './llm/types.js'
+import { createOllamaClientFromEnv } from './llm/providers/ollama.js'
 import type { FastifyReply } from 'fastify'
 
 const execAsync = promisify(execCb)
@@ -47,6 +45,14 @@ type ToolCall = {
   id: string
   type: 'function'
   function: { name: string; arguments?: string }
+}
+
+type ChatMessage = {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content?: string | null
+  name?: string
+  tool_call_id?: string
+  tool_calls?: ToolCall[]
 }
 
 export interface JobContext {
@@ -109,7 +115,7 @@ async function handleReadFileTool(ctx: JobContext, path: string) {
     })()
     const res = ctx.bridge
       ? await ctx.bridge.readFile(resolvedPath)
-      : { path: resolvedPath, text: await sandboxService.readFile(ctx.jobId, resolvedPath) }
+      : { path: resolvedPath, text: await fs.readFile(resolvedPath, 'utf8') }
 
     await emitEvent(ctx, 'tool.output', {
       tool: 'read_file',
@@ -154,7 +160,7 @@ async function handleWriteFileTool(ctx: JobContext, path: string, content: strin
         }
       ])
     } else {
-      await sandboxService.writeFile(ctx.jobId, resolvedPath, content)
+      await fs.writeFile(resolvedPath, content, 'utf8')
     }
 
     await emitEvent(ctx, 'tool.output', {
@@ -202,23 +208,18 @@ async function handleListFilesTool(ctx: JobContext, globPattern: string) {
 async function handleRunCommandTool(ctx: JobContext, command: string) {
   await emitEvent(ctx, 'tool.start', { tool: 'run_command', input: { command } })
   try {
-    // Use SandboxService
-    const { stdout, stderr, exitCode } = await sandboxService.execCommand(ctx.jobId, command)
+    const { stdout, stderr } = await execAsync(command, {
+      timeout: 15000,
+      maxBuffer: 1024 * 1024
+    })
 
     const output = (stdout || '').slice(0, 4000)
     const errOut = (stderr || '').slice(0, 4000)
-    const combined = output + (errOut ? `\nStderr: ${errOut}` : '')
 
     await emitEvent(ctx, 'tool.output', {
       tool: 'run_command',
-      output: combined || '(no output)'
+      output: output || errOut || '(no output)'
     })
-    
-    if (exitCode !== 0) {
-       await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: `Exit code ${exitCode}` })
-       return { stdout: output, stderr: errOut, exitCode }
-    }
-
     await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: true })
     return { stdout: output, stderr: errOut }
   } catch (err) {
@@ -251,22 +252,29 @@ function isDangerousCommand(command: string): boolean {
 async function handleListDirTool(ctx: JobContext, path: string) {
   await emitEvent(ctx, 'tool.start', { tool: 'list_dir', input: { path } })
   try {
-    const { stdout } = await sandboxService.execCommand(ctx.jobId, `ls -F "${path}"`)
-    const lines = stdout.split('\n').filter(l => l.trim())
-    const files = lines.map(name => {
-      const isDir = name.endsWith('/')
-      return {
-        name: isDir ? name.slice(0, -1) : name,
-        type: isDir ? 'directory' : 'file'
+    const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
+    const { resolve, isAbsolute, sep } = await import('node:path')
+    const target = (() => {
+      const candidate = isAbsolute(path) ? path : resolve(baseDir, path)
+      const baseResolved = resolve(baseDir)
+      const normalizedCandidate = resolve(candidate)
+      if (normalizedCandidate !== baseResolved && !normalizedCandidate.startsWith(baseResolved + sep)) {
+        throw new Error('Access outside of base_dir is not allowed')
       }
-    })
+      return normalizedCandidate
+    })()
+    const entries = await fs.readdir(target, { withFileTypes: true })
+    const files = entries.map(entry => ({
+      name: entry.name,
+      type: entry.isDirectory() ? 'directory' : 'file'
+    }))
 
     await emitEvent(ctx, 'tool.output', {
       tool: 'list_dir',
-      output: `Found ${files.length} items in ${path}`
+      output: `Found ${files.length} items in ${target}`
     })
     await emitEvent(ctx, 'tool.end', { tool: 'list_dir', success: true })
-    return { path, files }
+    return { path: target, files }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     await emitEvent(ctx, 'tool.end', { tool: 'list_dir', success: false, error: message })
@@ -277,16 +285,64 @@ async function handleListDirTool(ctx: JobContext, path: string) {
 async function handleGrepSearchTool(ctx: JobContext, query: string, includePattern?: string) {
   await emitEvent(ctx, 'tool.start', { tool: 'grep_search', input: { query, include_pattern: includePattern } })
   try {
-    let command = `grep -r -n "${query.replace(/"/g, '\\"')}" .`
+    const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
+    const args = ['-r', '-n', query, '.']
     if (includePattern) {
-      command += ` --include="${includePattern}"`
+      args.push(`--include=${includePattern}`)
     }
-    command += ` | head -50`
 
-    const { stdout } = await sandboxService.execCommand(ctx.jobId, command)
+    const maxLines = 50
+    const timeoutMs = 10000
+    const lines = await new Promise<string[]>((resolve, reject) => {
+      const child = spawn('grep', args, { cwd: baseDir })
+      let stdoutBuffer = ''
+      let stderrBuffer = ''
+      const results: string[] = []
+      let truncated = false
 
-    const lines = stdout.trim().split('\n').filter(line => line.trim())
-    const matches = lines.map(line => {
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL')
+      }, timeoutMs)
+
+      child.stdout.on('data', (chunk) => {
+        stdoutBuffer += chunk.toString()
+        const parts = stdoutBuffer.split('\n')
+        stdoutBuffer = parts.pop() ?? ''
+        for (const line of parts) {
+          if (!line.trim()) continue
+          results.push(line)
+          if (results.length >= maxLines) {
+            truncated = true
+            child.kill('SIGKILL')
+            break
+          }
+        }
+      })
+
+      child.stderr.on('data', (chunk) => {
+        stderrBuffer += chunk.toString()
+      })
+
+      child.on('error', (err) => {
+        clearTimeout(timer)
+        reject(err)
+      })
+
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        if (stdoutBuffer.trim() && results.length < maxLines) {
+          results.push(stdoutBuffer.trim())
+        }
+        if (code === 0 || (code === 1 && results.length === 0) || (code === null && truncated)) {
+          resolve(results)
+          return
+        }
+        reject(new Error(stderrBuffer || `grep failed with code ${code ?? 'unknown'}`))
+      })
+    })
+
+    const cleanedLines = lines.filter(line => line.trim())
+    const matches = cleanedLines.map(line => {
       const colonIndex = line.indexOf(':')
       if (colonIndex === -1) return null
       const file = line.slice(0, colonIndex)
@@ -870,13 +926,17 @@ async function executeWithOllama(ctx: JobContext): Promise<void> {
   const message = ctx.input.message ?? ctx.input.instruction ?? 'Hello'
   const model = ctx.input.model || 'qwen2.5-coder:7b'
 
+  const ollama = createOllamaClientFromEnv()
+  if (!ollama) {
+    throw new Error('Ollama client not configured')
+  }
+
   await emitEvent(ctx, 'tool.start', { tool: 'ollama', input: { model, message } })
 
   try {
-    const response = await llmService.chat(
-      { provider: 'ollama', model },
-      [{ role: 'user', content: message }]
-    )
+    const response = await ollama.chat(model, [
+      { role: 'user', content: message }
+    ])
 
     await emitEvent(ctx, 'tool.output', {
       tool: 'ollama',
@@ -894,23 +954,20 @@ async function executeWithOllama(ctx: JobContext): Promise<void> {
  * Call LLM based on provider
  */
 async function callLLM(ctx: JobContext, provider: string, model: string, messages: ChatMessage[]): Promise<string> {
-  if (provider === 'copilotapi') {
+  if (provider === 'ollama') {
+    const ollama = createOllamaClientFromEnv()
+    if (!ollama) throw new Error('Ollama not configured')
+    const ollamaMessages = messages.map(m => ({
+      role: m.role === 'tool' ? 'assistant' : m.role,
+      content: m.content || ''
+    }))
+    return (await ollama.chat(model, ollamaMessages)).content || ''
+  } else if (provider === 'copilotapi') {
     // For now, simple, but since executeWithCopilotApi is complex, perhaps duplicate or simplify
     // To keep simple, assume only ollama for multi-agent
     throw new Error('CopilotAPI not supported for multi-agent yet')
-  }
-
-  // Use LLMService for all supported providers (ollama, openai, anthropic)
-  try {
-    const res = await llmService.chat(
-      { provider, model }, 
-      messages
-    )
-    return res.content || ''
-  } catch (err) {
-    // Check if provider is supported by LLMService
-    // If not, it will throw.
-    throw err
+  } else {
+    throw new Error(`Unknown provider: ${provider}`)
   }
 }
 
@@ -989,63 +1046,44 @@ export async function executeJob(
     await store.updateJobStatus(jobId, 'running', nowIso())
     await emitEvent(ctx, 'job.started', { input })
 
-    // Initialize sandbox
-    try {
-      await sandboxService.createSandbox(jobId)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      await store.updateJobStatus(jobId, 'error', undefined, nowIso())
-      await emitEvent(ctx, 'error', { message: `Sandbox init failed: ${msg}` })
-      onComplete('error')
-      return
-    }
-
-    try {
-      // Execute based on provider
-      // When the provider is "copilotapi" we should call the Copilot API directly
-      // rather than using the internal CoderAgent. The CoderAgent is designed
-      // for autonomous coding tasks and exposes internal reasoning and tool calls,
-      // which leads to chat responses that are not conversational. By using
-      // executeWithCopilotApi, we relay the user message to the configured AI API
-      // (see `AI_API_URL` and `AI_API_KEY` in environment) and stream back
-      // natural language answers. For other providers we fall back to the bridge
-      // client if available, otherwise use the simulated executor.
-      if (input.provider === 'copilotapi') {
-        console.log(`[Runner] Using Copilot API for job ${jobId}`);
-        await executeWithCopilotApi(ctx);
-      } else if (input.provider === 'agent') {
-        console.log(`[Runner] Using CoderAgent for job ${jobId}`);
-        await runCoderAgent(ctx);
-      } else if (input.provider === 'ollama') {
-        console.log(`[Runner] Using Ollama for job ${jobId}`);
-        await executeWithOllama(ctx);
-      } else if (input.team_agents && input.team_agents.length > 0) {
-        console.log(`[Runner] Using multi-agent for job ${jobId}`);
-        await executeMultiAgent(ctx);
-      } else if (bridge) {
-        console.log(`[Runner] Using bridge client for job ${jobId}`);
-        try {
-          await executeWithBridge(ctx);
-        } catch (err) {
-          console.log(`[Runner] Bridge failed for job ${jobId}, falling back to simulation:`, err);
-          await executeSimulated(ctx);
-        }
-      } else {
-        console.log(`[Runner] No bridge available for job ${jobId}, using simulation`);
+    // Execute based on provider
+    // When the provider is "copilotapi" we should call the Copilot API directly
+    // rather than using the internal CoderAgent. The CoderAgent is designed
+    // for autonomous coding tasks and exposes internal reasoning and tool calls,
+    // which leads to chat responses that are not conversational. By using
+    // executeWithCopilotApi, we relay the user message to the configured AI API
+    // (see `AI_API_URL` and `AI_API_KEY` in environment) and stream back
+    // natural language answers. For other providers we fall back to the bridge
+    // client if available, otherwise use the simulated executor.
+    if (input.provider === 'copilotapi') {
+      console.log(`[Runner] Using Copilot API for job ${jobId}`);
+      await executeWithCopilotApi(ctx);
+    } else if (input.provider === 'ollama') {
+      console.log(`[Runner] Using Ollama for job ${jobId}`);
+      await executeWithOllama(ctx);
+    } else if (input.team_agents && input.team_agents.length > 0) {
+      console.log(`[Runner] Using multi-agent for job ${jobId}`);
+      await executeMultiAgent(ctx);
+    } else if (bridge) {
+      console.log(`[Runner] Using bridge client for job ${jobId}`);
+      try {
+        await executeWithBridge(ctx);
+      } catch (err) {
+        console.log(`[Runner] Bridge failed for job ${jobId}, falling back to simulation:`, err);
         await executeSimulated(ctx);
       }
+    } else {
+      console.log(`[Runner] No bridge available for job ${jobId}, using simulation`);
+      await executeSimulated(ctx);
+    }
 
-      if (!ctx.aborted) {
-        // Complete successfully
-        await store.updateJobStatus(jobId, 'done', undefined, nowIso())
-        await emitEvent(ctx, 'done', { status: 'done' })
-        onComplete('done')
-      } else {
-        onComplete('cancelled')
-      }
-    } finally {
-      // Cleanup sandbox
-      await sandboxService.destroySandbox(jobId)
+    if (!ctx.aborted) {
+      // Complete successfully
+      await store.updateJobStatus(jobId, 'done', undefined, nowIso())
+      await emitEvent(ctx, 'done', { status: 'done' })
+      onComplete('done')
+    } else {
+      onComplete('cancelled')
     }
   } catch (err) {
     if (ctx.aborted) {

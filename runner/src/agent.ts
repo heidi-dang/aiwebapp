@@ -14,7 +14,6 @@ import { approvalService } from './services/approval.js'
 import { llmService } from './llm/index.js'
 import type { ChatMessage } from './llm/types.js'
 
-import { sandboxService } from './services/sandbox.js'
 import { tracingService } from './tracing.js'
 import { SpanStatusCode } from '@opentelemetry/api'
 
@@ -147,26 +146,6 @@ Be thorough and systematic in your approach.`
       span.setAttribute('job_id', this.ctx.jobId)
       
       try {
-        // Initialize Sandbox
-        const sandboxSpan = tracer.startSpan('init_sandbox')
-        try {
-          // Mount the repo root into the sandbox so scripts are available
-          const path = await import('path')
-          // Assuming runner is running in /runner, root is ..
-          // If base_dir is provided in input, use that, otherwise infer from CWD
-          const workspaceRoot = this.ctx.input.base_dir || path.resolve(process.cwd(), '..')
-          
-          await sandboxService.createSandbox(this.ctx.jobId, workspaceRoot)
-          sandboxSpan.setStatus({ code: SpanStatusCode.OK })
-        } catch (err) {
-          console.error('Failed to create sandbox:', err)
-          sandboxSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(err) })
-          // Fail the job if sandbox creation fails
-          throw err
-        } finally {
-          sandboxSpan.end()
-        }
-
         // Inject repo map into system prompt
         const mapSpan = tracer.startSpan('generate_repo_map')
         try {
@@ -213,12 +192,6 @@ Be thorough and systematic in your approach.`
         span.setStatus({ code: SpanStatusCode.ERROR })
         throw err
       } finally {
-        // Destroy Sandbox
-        try {
-          await sandboxService.destroySandbox(this.ctx.jobId)
-        } catch (err) {
-          console.warn('Failed to destroy sandbox:', err)
-        }
         span.end()
       }
     })
@@ -919,13 +892,9 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     if (this.ctx.bridge) {
       return await this.ctx.bridge.readFile(path)
     } else {
-      // Read from Sandbox
-      try {
-        const text = await sandboxService.readFile(this.ctx.jobId, path)
-        return { path, text }
-      } catch (err) {
-        throw new Error(`Failed to read file ${path} from sandbox: ${err instanceof Error ? err.message : String(err)}`)
-      }
+      const fs = await import('fs/promises')
+      const content = await fs.readFile(path, 'utf8')
+      return { path, text: content }
     }
   }
 
@@ -938,91 +907,92 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
         text: content
       }])
     } else {
-      // Write to Sandbox
-      try {
-        await sandboxService.writeFile(this.ctx.jobId, path, content)
-      } catch (err) {
-        throw new Error(`Failed to write file ${path} to sandbox: ${err instanceof Error ? err.message : String(err)}`)
-      }
+      const fs = await import('fs/promises')
+      await fs.writeFile(path, content, 'utf8')
     }
     return { path, bytes: content.length }
   }
 
   private async handleListFiles(glob: string) {
-    // List files in Sandbox using 'find' or similar, since glob package works on local fs
-    // For MVP, we can try to use 'find' command via execCommand
-    // Or we can assume 'ls -R'
-    // Let's use a simple 'find . -name "glob_pattern"' logic approximation or just list all files
-    // Actually, handling full glob support in shell is tricky without 'glob' lib.
-    // We can run a node script inside the sandbox?
-    // For now, let's just use 'find . -name ...' if the glob is simple, or just list all files if it's **/*
-    
-    let command = 'find . -type f'
-    if (glob && glob !== '**/*') {
-       // Very basic glob to find conversion (imperfect)
-       // e.g. src/*.ts -> src -name "*.ts"
-       const namePart = glob.split('/').pop()
-       if (namePart && namePart.includes('*')) {
-         command += ` -name "${namePart}"`
-       }
-    }
-    // Limit output
-    command += ' | head -n 100'
-
-    const result = await sandboxService.execCommand(this.ctx.jobId, command)
-    if (result.exitCode !== 0) {
-        throw new Error(`Failed to list files: ${result.stderr}`)
-    }
-    
-    const files = result.stdout.split('\n').filter(f => f.trim()).map(f => f.replace(/^\.\//, ''))
+    const { glob: globFn } = await import('glob')
+    const files = await globFn(glob)
     return { files }
   }
 
   private async handleListDir(path: string) {
-    // List dir in Sandbox
-    const command = `ls -la "${path}"`
-    const result = await sandboxService.execCommand(this.ctx.jobId, command)
-    
-    if (result.exitCode !== 0) {
-         throw new Error(`Failed to list directory: ${result.stderr}`)
-    }
-    
-    // Parse ls output? Or just return raw output for now?
-    // The original returned structured data.
-    // Let's return a simplified structure based on parsing ls -la is hard/brittle.
-    // Better: run a python one-liner or node script if available.
-    // Fallback: just return the stdout as 'entries' text for the LLM to read.
-    // But the tool definition says it returns objects.
-    
-    // Let's use 'ls -p' to distinguish directories
-    const lsRes = await sandboxService.execCommand(this.ctx.jobId, `ls -p "${path}"`)
-    if (lsRes.exitCode !== 0) throw new Error(lsRes.stderr)
-        
-    const entries = lsRes.stdout.split('\n').filter(Boolean).map(name => ({
-        name: name.replace(/\/$/, ''),
-        type: name.endsWith('/') ? 'directory' : 'file',
-        size: 0 // We skip size for now to keep it simple
+    const fs = await import('fs/promises')
+    const entries = await fs.readdir(path, { withFileTypes: true })
+    const entryDetails = await Promise.all(entries.map(async (entry) => {
+      const fullPath = `${path}/${entry.name}`
+      const stats = entry.isFile() ? await fs.stat(fullPath) : null
+      return {
+        name: entry.name,
+        type: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other',
+        size: stats?.size
+      }
     }))
-    
-    return { path, entries }
+    return { path, entries: entryDetails }
   }
 
   private async handleGrepSearch(query: string, includePattern?: string) {
-    let grepCommand = `grep -r -n "${query.replace(/"/g, '\\"')}" .`
+    const { spawn } = await import('child_process')
+    const args = ['-r', '-n', query, '.']
     if (includePattern) {
-      grepCommand += ` --include="${includePattern}"`
+      args.push(`--include=${includePattern}`)
     }
-    grepCommand += ` | head -50`
 
-    const result = await sandboxService.execCommand(this.ctx.jobId, grepCommand)
-    // grep returns 1 if not found, which is fine
-    
-    const lines = result.stdout.split('\n').filter(line => line.trim())
-    return {
-        query,
-        results: lines,
-        truncated: lines.length >= 50
-    }
+    const maxLines = 50
+    const timeoutMs = 10000
+
+    return await new Promise((resolve, reject) => {
+      const child = spawn('grep', args, { cwd: process.cwd() })
+      let stdoutBuffer = ''
+      let stderrBuffer = ''
+      const results: string[] = []
+      let truncated = false
+
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL')
+      }, timeoutMs)
+
+      child.stdout.on('data', (chunk) => {
+        stdoutBuffer += chunk.toString()
+        const lines = stdoutBuffer.split('\n')
+        stdoutBuffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.trim()) continue
+          results.push(line)
+          if (results.length >= maxLines) {
+            truncated = true
+            child.kill('SIGKILL')
+            break
+          }
+        }
+      })
+
+      child.stderr.on('data', (chunk) => {
+        stderrBuffer += chunk.toString()
+      })
+
+      child.on('error', (err) => {
+        clearTimeout(timer)
+        reject(err)
+      })
+
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        if (stdoutBuffer.trim() && results.length < maxLines) {
+          results.push(stdoutBuffer.trim())
+        }
+        if (code === 0 || (code === 1 && results.length === 0) || (code === null && truncated)) {
+          resolve({ query, results, truncated })
+          return
+        }
+        const error = new Error(stderrBuffer || `grep failed with code ${code ?? 'unknown'}`)
+        ;(error as { code?: number | null }).code = code
+        reject(error)
+      })
+    })
   }
 
   private async handleRunCommand(command: string) {
@@ -1051,18 +1021,11 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       }
     }
 
-    // Execute in Sandbox
+    const { exec } = await import('child_process')
+    const { promisify } = await import('util')
+    const execAsync = promisify(exec)
     try {
-      // Default cwd to /app/workspace or similar if we set it up
-      const result = await sandboxService.execCommand(this.ctx.jobId, command)
-      if (result.exitCode !== 0) {
-        return { 
-            stdout: result.stdout, 
-            stderr: result.stderr, 
-            error: `Command failed with exit code ${result.exitCode}`,
-            exitCode: result.exitCode 
-        }
-      }
+      const result = await execAsync(command, { timeout: 15000 })
       return { stdout: result.stdout, stderr: result.stderr }
     } catch (err: any) {
       return { stdout: err.stdout || '', stderr: err.stderr || err.message, error: err.message }
@@ -1253,7 +1216,7 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   private async handleSearchKnowledge(query: string) {
     // Call server to search knowledge base
     // We assume the runner can talk to the server API
-    const serverUrl = process.env.SERVER_URL || 'http://localhost:3001'
+    const serverUrl = process.env.SERVER_URL || 'http://localhost:4001'
     try {
       const response = await fetch(`${serverUrl}/knowledge/search`, {
         method: 'POST',

@@ -24,7 +24,7 @@ function requireEnv(name: string): string {
   const v = process.env[name]
   if (!v) {
     console.warn(`Warning: Missing env var ${name}, using default`)
-    return name === 'RUNNER_URL' ? 'http://localhost:3002' : ''
+    return name === 'RUNNER_URL' ? 'http://localhost:4002' : ''
   }
   return v
 }

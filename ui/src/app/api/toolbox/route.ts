@@ -13,7 +13,7 @@ async function getApiUrl() {
 
   const envApi = process.env.NEXT_PUBLIC_API_URL ?? ''
   const derived = isLocal
-    ? 'http://localhost:3001'
+    ? 'http://localhost:4001'
     : `https://api.${hostHeader}`
   return envApi || derived
 }

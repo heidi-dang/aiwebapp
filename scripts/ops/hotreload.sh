@@ -79,9 +79,9 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 LANDING_PORT=6868
-UI_PORT=3000
-SERVER_PORT=3001
-RUNNER_PORT=3002
+UI_PORT=4000
+SERVER_PORT=4001
+RUNNER_PORT=4002
 
 step "Hot Reload (Local Dev)"
 echo "Ports:"

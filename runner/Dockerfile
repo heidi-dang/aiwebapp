@@ -21,5 +21,5 @@ COPY package*.json ./
 RUN npm ci --only=production
 COPY --from=builder /app/dist ./dist
 
-EXPOSE 3002
+EXPOSE 4002
 CMD ["npm", "start"]

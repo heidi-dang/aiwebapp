@@ -33,7 +33,7 @@ export async function DELETE(
 }
 
 async function proxyRequest(request: NextRequest, path: string[]) {
-  const runnerUrl = process.env.RUNNER_URL ?? 'http://localhost:3002'
+  const runnerUrl = process.env.RUNNER_URL ?? 'http://localhost:4002'
   const runnerToken = process.env.RUNNER_TOKEN ?? 'change_me'
 
   const pathStr = path.join('/')

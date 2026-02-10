@@ -6,6 +6,17 @@ Multi-service AI web app:
 - **Server** (`server/`): Fastify API with SQLite DB (Store interface in `server/src/storage.ts`), CRUD for agents/teams/sessions/runs
 - **Runner** (`runner/`): Fastify service executing agent workflows, streaming events to UI
 
+# Copilot Instructions for aiwebapp
+
+## Code Consistency Rules
+- When modifying shared files like `guardrail_service.ts`, ensure all copies (server/src and runner/src) remain in sync
+- Run CI checks before committing
+- Follow the existing code style and patterns
+
+## Common CI Failures
+- If guardrail_service.ts is out of sync, copy the server version to runner or vice versa
+- Always verify file consistency across server/ and runner/ directories
+
 Data flows: UI ↔ Server (REST) for data; UI → Runner (WebSocket/streaming) for execution.
 
 ## Key Patterns & Conventions
