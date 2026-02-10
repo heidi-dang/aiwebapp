@@ -16,6 +16,7 @@ import { toast } from 'sonner'
 import { useQueryState } from 'nuqs'
 import { truncateText } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
+import { BrainBuilder } from './BrainBuilder'
 
 const ENDPOINT_PLACEHOLDER = 'NO ENDPOINT ADDED'
 const SidebarHeader = () => (
@@ -370,6 +371,8 @@ const Sidebar = ({
                           )}
                         </div>
                       )}
+
+                      <BrainBuilder />
                     </>
                   )}
                 </motion.div>
