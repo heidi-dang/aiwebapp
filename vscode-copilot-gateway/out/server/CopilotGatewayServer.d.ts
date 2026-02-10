@@ -1,0 +1,44 @@
+import { ServerConfig, ServerStats } from '../types';
+import { AuthService } from '../services/AuthService';
+import { SessionManager } from '../services/SessionManager';
+import { MetricsService } from '../services/MetricsService';
+export declare class CopilotGatewayServer {
+    private app;
+    private server;
+    private wss;
+    private config;
+    private isRunningFlag;
+    private startTime;
+    private authService?;
+    private sessionManager?;
+    private metricsService?;
+    private requestQueue;
+    private copilotClient;
+    constructor(config: ServerConfig, authService?: AuthService, sessionManager?: SessionManager, metricsService?: MetricsService);
+    start(): Promise<void>;
+    stop(): Promise<void>;
+    isRunning(): boolean;
+    getPort(): number;
+    getStats(): ServerStats;
+    private setupMiddleware;
+    private setupRoutes;
+    private setupWebSocketHandlers;
+    private handleWebSocketMessage;
+    private getAllowedOrigins;
+    private handleHealthCheck;
+    private handleGetModels;
+    private handleChatCompletions;
+    private authenticateRequest;
+    private validateChatCompletionRequest;
+    private handleLegacyCompletions;
+    private handleAnthropicMessages;
+    private handleGeminiGenerateContent;
+    private handleGetTools;
+    private handleToolCall;
+    private handleGetSessions;
+    private handleCreateSession;
+    private handleDeleteSession;
+    private handleGetMetrics;
+    private handleError;
+}
+//# sourceMappingURL=CopilotGatewayServer.d.ts.map
