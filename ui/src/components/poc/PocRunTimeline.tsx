@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '@/store'
 import { ConfettiBurst } from './ConfettiBurst'
 import { motion } from 'framer-motion'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -24,7 +25,166 @@ function getEndSummary(events: Array<{ type: string; payload?: unknown }>) {
   return null
 }
 
-export function PocRunTimeline({ jobId }: { jobId: string }) {
+function downloadFile(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+function buildReplayHtml(artifactJson: string, title: string) {
+  const safeTitle = title.replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${safeTitle}</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; background: #0b0f1a; color: #e5e7eb; }
+      .wrap { max-width: 1100px; margin: 0 auto; padding: 20px; }
+      .card { border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; background: rgba(255,255,255,0.04); padding: 14px; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+      .pill { border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); border-radius: 999px; padding: 6px 10px; font-size: 12px; text-transform: uppercase; }
+      .muted { color: rgba(229,231,235,0.75); font-size: 12px; }
+      .bar { height: 10px; border: 1px solid rgba(255,255,255,0.10); border-radius: 999px; overflow: hidden; background: rgba(255,255,255,0.04); }
+      .bar > div { height: 100%; background: #a78bfa; width: 0%; }
+      .btn { cursor: pointer; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); border-radius: 10px; padding: 8px 10px; font-size: 12px; text-transform: uppercase; color: #e5e7eb; }
+      .btn:hover { background: rgba(255,255,255,0.07); }
+      input[type="range"] { width: 100%; }
+      .list { margin-top: 12px; display: grid; gap: 10px; }
+      .item { border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; background: rgba(255,255,255,0.03); padding: 10px; }
+      .ok { border-color: rgba(52,211,153,0.25); background: rgba(52,211,153,0.07); }
+      .bad { border-color: rgba(251,113,133,0.25); background: rgba(251,113,133,0.06); }
+      .h { font-size: 12px; font-weight: 700; text-transform: uppercase; color: #e5e7eb; display: flex; justify-content: space-between; gap: 10px; }
+      .s { margin-top: 6px; font-size: 12px; color: rgba(229,231,235,0.80); white-space: pre-wrap; overflow-wrap: anywhere; }
+      .mono { font-size: 12px; color: rgba(229,231,235,0.75); overflow-wrap: anywhere; }
+    </style>
+  </head>
+  <body>
+    <script id="artifact" type="application/json">${artifactJson.replaceAll('</', '<\\/')}</script>
+    <div class="wrap">
+      <div class="card">
+        <div class="row">
+          <div>
+            <div class="pill">PoC Replay</div>
+            <div class="muted" id="meta"></div>
+          </div>
+          <div class="row" style="justify-content:flex-end">
+            <button class="btn" id="play">Play</button>
+            <button class="btn" id="reset">Reset</button>
+            <select class="btn" id="speed">
+              <option value="1">1x</option>
+              <option value="2" selected>2x</option>
+              <option value="4">4x</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <div class="row">
+            <div class="muted" id="counter"></div>
+            <div class="muted" id="score"></div>
+          </div>
+          <div class="bar" style="margin-top:8px"><div id="bar"></div></div>
+          <div style="margin-top:10px">
+            <input id="scrub" type="range" min="0" max="0" value="0" />
+          </div>
+        </div>
+      </div>
+      <div class="list" id="list"></div>
+    </div>
+    <script>
+      const artifact = JSON.parse(document.getElementById('artifact').textContent);
+      const claims = Array.isArray(artifact.claims) ? artifact.claims : [];
+      const meta = document.getElementById('meta');
+      const counter = document.getElementById('counter');
+      const score = document.getElementById('score');
+      const bar = document.getElementById('bar');
+      const list = document.getElementById('list');
+      const scrub = document.getElementById('scrub');
+      const playBtn = document.getElementById('play');
+      const resetBtn = document.getElementById('reset');
+      const speedSel = document.getElementById('speed');
+      let count = 0;
+      let timer = null;
+      const fmtTs = (s) => {
+        try { return new Date(s * 1000).toLocaleString(); } catch { return ''; }
+      };
+      meta.textContent = 'Job: ' + (artifact.jobId || '') + ' · proof: ' + (artifact.proof_hash || '') + (artifact.createdAt ? (' · ' + fmtTs(artifact.createdAt)) : '');
+      scrub.max = String(claims.length);
+      const render = () => {
+        const slice = claims.slice(0, count);
+        const passed = slice.reduce((sum, c) => sum + (c.ok ? (c.weight || 1) : 0), 0);
+        const total = slice.reduce((sum, c) => sum + (c.weight || 1), 0);
+        const pct = total > 0 ? Math.round((passed / total) * 100) : 0;
+        counter.textContent = 'Replay ' + count + '/' + claims.length;
+        score.textContent = total > 0 ? (passed + '/' + total + ' (' + pct + '%)') : 'Waiting';
+        bar.style.width = pct + '%';
+        list.innerHTML = '';
+        slice.forEach((c) => {
+          const div = document.createElement('div');
+          div.className = 'item ' + (c.ok ? 'ok' : 'bad');
+          div.innerHTML = '<div class="h"><div>' + (c.ok ? 'PASS' : 'FAIL') + ' · ' + (c.id || '') + '</div><div>w=' + (c.weight || 1) + '</div></div>' +
+            (c.statement ? '<div class="s">' + c.statement + '</div>' : '');
+          list.appendChild(div);
+        });
+        scrub.value = String(count);
+      };
+      const stop = () => {
+        if (timer) clearInterval(timer);
+        timer = null;
+        playBtn.textContent = 'Play';
+      };
+      const start = () => {
+        stop();
+        playBtn.textContent = 'Pause';
+        const speed = Number(speedSel.value || '2');
+        timer = setInterval(() => {
+          count += 1;
+          if (count >= claims.length) {
+            count = claims.length;
+            stop();
+          }
+          render();
+        }, 700 / speed);
+      };
+      playBtn.addEventListener('click', () => {
+        if (timer) stop(); else start();
+      });
+      resetBtn.addEventListener('click', () => {
+        stop();
+        count = 0;
+        render();
+      });
+      speedSel.addEventListener('change', () => {
+        if (timer) start();
+      });
+      scrub.addEventListener('input', (e) => {
+        stop();
+        count = Number(e.target.value || '0');
+        render();
+      });
+      render();
+    </script>
+  </body>
+</html>`
+}
+
+function PocRunTimelineInner({
+  jobId,
+  variant = 'default',
+  onOpenCinematic
+}: {
+  jobId: string
+  variant?: 'default' | 'cinematic'
+  onOpenCinematic?: () => void
+}) {
   const run = useStore((s) => s.runs[jobId])
   const [confettiSeed, setConfettiSeed] = useState<string | null>(null)
   const [highlightClaimId, setHighlightClaimId] = useState<string | null>(null)
@@ -108,9 +268,13 @@ export function PocRunTimeline({ jobId }: { jobId: string }) {
   }, [mode, isPlaying, speed, claims.length])
 
   const pct = displayTotalWeight > 0 ? Math.round((displayPassedWeight / displayTotalWeight) * 100) : 0
+  const maxListHeight = variant === 'cinematic' ? 'max-h-[58vh]' : 'max-h-56'
+  const baseCard = variant === 'cinematic'
+    ? 'relative rounded-xl border border-primary/20 bg-primaryAccent p-5'
+    : 'relative rounded-xl border border-primary/15 bg-primaryAccent p-3'
 
   return (
-    <div className="relative rounded-xl border border-primary/15 bg-primaryAccent p-3">
+    <div className={baseCard}>
       {confettiSeed && <ConfettiBurst seed={confettiSeed} />}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -198,6 +362,34 @@ export function PocRunTimeline({ jobId }: { jobId: string }) {
                 <option value="2">2x</option>
                 <option value="4">4x</option>
               </select>
+              <button
+                type="button"
+                onClick={() => {
+                  const artifact = {
+                    version: 1,
+                    jobId,
+                    createdAt: Math.floor(Date.now() / 1000),
+                    proof_hash: summary?.proofHash || '',
+                    claims
+                  }
+                  const artifactJson = JSON.stringify(artifact, null, 2)
+                  downloadFile(`poc-replay-${jobId}.json`, artifactJson + '\n', 'application/json')
+                  const html = buildReplayHtml(artifactJson, `PoC Replay ${jobId}`)
+                  downloadFile(`poc-replay-${jobId}.html`, html, 'text/html')
+                }}
+                className="rounded-md border border-primary/10 bg-primaryAccent px-2 py-1 text-[11px] uppercase text-secondary"
+              >
+                Export Replay
+              </button>
+              {variant === 'default' && (
+                <button
+                  type="button"
+                  onClick={() => onOpenCinematic?.()}
+                  className="rounded-md border border-primary/10 bg-primaryAccent px-2 py-1 text-[11px] uppercase text-secondary"
+                >
+                  Cinematic
+                </button>
+              )}
             </div>
           </div>
           <input
@@ -214,7 +406,7 @@ export function PocRunTimeline({ jobId }: { jobId: string }) {
         </div>
       )}
 
-      <div className="mt-3 max-h-56 space-y-2 overflow-auto">
+      <div className={`mt-3 ${maxListHeight} space-y-2 overflow-auto`}>
         {displayClaims.length === 0 && (
           <div className="text-xs text-muted">No claims yet</div>
         )}
@@ -240,6 +432,28 @@ export function PocRunTimeline({ jobId }: { jobId: string }) {
           </motion.div>
         ))}
       </div>
+
     </div>
+  )
+}
+
+export function PocRunTimeline({ jobId }: { jobId: string }) {
+  const [cinematicOpen, setCinematicOpen] = useState(false)
+  return (
+    <>
+      <PocRunTimelineInner
+        jobId={jobId}
+        variant="default"
+        onOpenCinematic={() => setCinematicOpen(true)}
+      />
+      <Dialog open={cinematicOpen} onOpenChange={setCinematicOpen}>
+        <DialogContent className="max-h-[92vh] w-[min(96vw,1200px)] max-w-none border border-primary/15 bg-background/95 font-dmmono">
+          <div className="text-xs font-medium uppercase text-primary">Cinematic Replay</div>
+          <div className="mt-3">
+            <PocRunTimelineInner jobId={jobId} variant="cinematic" />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
