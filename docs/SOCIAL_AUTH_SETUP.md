@@ -4,8 +4,10 @@ This guide explains how to obtain Client IDs and Secrets for the supported socia
 
 ## General Configuration
 
-- **Server Public URL**: `https://api.87b6e07d-c3f4-48d5-a70c-8379e9a03735.cfargotunnel.com`
-- **UI Public URL**: `https://ai.heidiai.com.au`
+- **Server Public URL**: `https://api.yourtunnel.cfargotunnel.com` (replace with your actual tunnel URL)
+- **UI Public URL**: `https://app.yourdomain.com` (replace with your actual app URL)
+
+**Important**: All Redirect URIs (Callback URLs) must start with the **Server Public URL**.
 
 **Important**: All Redirect URIs (Callback URLs) must start with the **Server Public URL**.
 
@@ -17,8 +19,8 @@ This guide explains how to obtain Client IDs and Secrets for the supported socia
 2. Click **New OAuth App**.
 3. Fill in the details:
    - **Application Name**: Heidi AI (or your app name)
-   - **Homepage URL**: `https://ai.heidiai.com.au`
-   - **Authorization callback URL**: `https://api.87b6e07d-c3f4-48d5-a70c-8379e9a03735.cfargotunnel.com/auth/oauth/github/callback`
+   - **Homepage URL**: `https://app.yourdomain.com`
+   - **Authorization callback URL**: `https://api.yourtunnel.cfargotunnel.com/auth/oauth/github/callback`
 4. Click **Register application**.
 5. Copy the **Client ID** and generate a new **Client Secret**.
 6. Update `server/.env`:
@@ -37,8 +39,8 @@ This guide explains how to obtain Client IDs and Secrets for the supported socia
 4. Select **Web application**.
 5. Fill in the details:
    - **Name**: Heidi AI
-   - **Authorized JavaScript origins**: `https://ai.heidiai.com.au`
-   - **Authorized redirect URIs**: `https://api.87b6e07d-c3f4-48d5-a70c-8379e9a03735.cfargotunnel.com/auth/oauth/google/callback`
+   - **Authorized JavaScript origins**: `https://app.yourdomain.com`
+   - **Authorized redirect URIs**: `https://api.yourtunnel.cfargotunnel.com/auth/oauth/google/callback`
 6. Click **Create**.
 7. Copy the **Client ID** and **Client Secret**.
 8. Update `server/.env`:
@@ -74,8 +76,8 @@ This guide explains how to obtain Client IDs and Secrets for the supported socia
 2. **App ID**: Create an App ID (e.g., `com.heidi.aiwebapp`) with "Sign In with Apple" enabled.
 3. **Service ID**: Create a Service ID (e.g., `com.heidi.aiwebapp.service`).
    - Configure "Sign In with Apple".
-   - **Domains and Subdomains**: `ai.heidiai.com.au` (and `api.87b6e07d...` if required).
-   - **Return URLs**: `https://api.87b6e07d-c3f4-48d5-a70c-8379e9a03735.cfargotunnel.com/auth/oauth/apple/callback`
+   - **Domains and Subdomains**: `app.yourdomain.com` (and `api.yourtunnel.cfargotunnel.com` if required).
+   - **Return URLs**: `https://api.yourtunnel.cfargotunnel.com/auth/oauth/apple/callback`
 4. **Key**: Create a Key enabled for "Sign In with Apple". Download the `.p8` file.
 5. Generate the Client Secret (JWT) using the Key, Team ID, and Service ID (this usually requires a script or tool, as Apple secrets are time-limited JWTs).
 6. Update `server/.env`:
