@@ -93,6 +93,13 @@ function getPocClaimEventFromPayload(payload: unknown): PocClaimEvent | null {
   return { claim, evidence }
 }
 
+function getPocProofHashFromPayload(payload: unknown): string | null {
+  if (!isRecord(payload)) return null
+  if (payload['tool'] !== 'poc_review') return null
+  const proofHash = payload['proof_hash']
+  return typeof proofHash === 'string' && proofHash.trim() ? proofHash : null
+}
+
 interface ApprovalState {
   tokenId: string
   description: string
@@ -268,6 +275,11 @@ export default function RunCard({ jobId }: { jobId: string }) {
     .map((e) => getPocClaimEventFromPayload(e.payload))
     .filter((c): c is PocClaimEvent => !!c)
   const pocClaims = pocClaimEvents.map((c) => c.claim)
+  const pocProofHash =
+    run.events
+      .filter((e) => e.type === 'tool.end')
+      .map((e) => getPocProofHashFromPayload(e.payload))
+      .find((h): h is string => !!h) ?? null
 
   return (
     <div className="w-full" data-testid="run-thinking">
@@ -299,6 +311,7 @@ export default function RunCard({ jobId }: { jobId: string }) {
                   ``,
                   `Job: ${run.jobId}`,
                   `Status: ${run.status}`,
+                  ...(pocProofHash ? [`Proof Hash: ${pocProofHash}`] : []),
                   ``,
                   `## Claims`,
                   ...pocClaims.map((c) => {
@@ -369,7 +382,14 @@ export default function RunCard({ jobId }: { jobId: string }) {
 
           {pocClaimEvents.length > 0 && (
             <div className="rounded-lg border border-primary/10 bg-accent/30 p-3">
-              <div className="text-xs font-medium uppercase text-primary">PoC Claims</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-medium uppercase text-primary">PoC Claims</div>
+                {pocProofHash && (
+                  <div className="break-words font-mono text-[11px] text-secondary/80">
+                    proof: {pocProofHash}
+                  </div>
+                )}
+              </div>
               <div className="mt-2 space-y-2">
                 {pocClaimEvents.map(({ claim, evidence }, idx) => {
                   const id = claim.id || `claim_${idx + 1}`

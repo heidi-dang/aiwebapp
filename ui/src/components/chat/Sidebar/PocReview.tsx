@@ -25,6 +25,18 @@ function randomId(prefix: string) {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function parseChecksJson(raw: string): unknown[] | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  const parsed = JSON.parse(trimmed)
+  if (!Array.isArray(parsed)) throw new Error('Checks JSON must be an array')
+  return parsed
+}
+
 export function PocReview() {
   const {
     pocReviewBaseDir,
@@ -46,6 +58,14 @@ export function PocReview() {
   const [isRunning, setIsRunning] = useState(false)
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
   const [templateName, setTemplateName] = useState('')
+
+  let parsedChecks: unknown[] | null = null
+  let parsedChecksError: string | null = null
+  try {
+    parsedChecks = parseChecksJson(pocReviewChecksJson)
+  } catch (err) {
+    parsedChecksError = err instanceof Error ? err.message : String(err)
+  }
 
   return (
     <div className="mt-3 w-full">
@@ -84,6 +104,114 @@ export function PocReview() {
           placeholder={`Optional checks JSON (advanced)\n[\n  {\"id\":\"C1\",\"statement\":\"UI builds\",\"command\":\"cd ui && npm run build\",\"dependencies\":[],\"weight\":3}\n]`}
           className="h-28 w-full rounded-xl border border-primary/15 bg-accent p-3 text-xs"
         />
+        {parsedChecksError && (
+          <div className="rounded-xl border border-primary/15 bg-accent p-2 text-[11px] text-red-300/90">
+            {parsedChecksError}
+          </div>
+        )}
+        {parsedChecks && (
+          <div className="rounded-xl border border-primary/15 bg-accent p-2">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-[11px] font-medium uppercase text-primary/80">
+                Checks
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 rounded-md border border-primary/15 bg-primaryAccent text-[11px] uppercase"
+                  onClick={() => {
+                    const next = parsedChecks!.map((c) => {
+                      if (!isRecord(c)) return c
+                      return { ...c, enabled: true }
+                    })
+                    setPocReviewChecksJson(JSON.stringify(next, null, 2))
+                  }}
+                >
+                  Enable all
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 rounded-md border border-primary/15 bg-primaryAccent text-[11px] uppercase"
+                  onClick={() => {
+                    const next = parsedChecks!.map((c) => {
+                      if (!isRecord(c)) return c
+                      return { ...c, enabled: false }
+                    })
+                    setPocReviewChecksJson(JSON.stringify(next, null, 2))
+                  }}
+                >
+                  Disable all
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 rounded-md border border-primary/15 bg-primaryAccent text-[11px] uppercase"
+                  onClick={() => {
+                    const next = parsedChecks!.map((c) => (isRecord(c) ? { ...c } : c))
+                    let prevId: string | null = null
+                    for (let i = 0; i < next.length; i++) {
+                      const row = next[i]
+                      if (!isRecord(row)) continue
+                      if (row.enabled === false) continue
+                      const idRaw = row.id
+                      const id =
+                        typeof idRaw === 'string' && idRaw.trim()
+                          ? idRaw.trim()
+                          : `C${i + 1}`
+                      row.id = id
+                      row.dependencies = prevId ? [prevId] : []
+                      prevId = id
+                    }
+                    setPocReviewChecksJson(JSON.stringify(next, null, 2))
+                    toast.success('Dependencies generated')
+                  }}
+                >
+                  Auto deps
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {parsedChecks.map((c, idx) => {
+                const row = isRecord(c) ? c : null
+                const enabled = row ? row.enabled !== false : true
+                const id = row && typeof row.id === 'string' ? row.id : `#${idx + 1}`
+                const statement = row && typeof row.statement === 'string' ? row.statement : ''
+                return (
+                  <label key={`${id}_${idx}`} className="flex items-start gap-2 text-xs text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      onChange={(e) => {
+                        const next = parsedChecks!.map((x) => (isRecord(x) ? { ...x } : x))
+                        const target = next[idx]
+                        if (isRecord(target)) {
+                          target.enabled = e.target.checked
+                          setPocReviewChecksJson(JSON.stringify(next, null, 2))
+                        }
+                      }}
+                      className="mt-0.5 h-4 w-4 accent-white"
+                    />
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-primary">
+                        {id}
+                      </div>
+                      {statement && (
+                        <div className="mt-0.5 break-words text-[11px] text-secondary/80">
+                          {statement}
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+        )}
         <div className="flex w-full gap-2">
           <Button
             type="button"
@@ -109,10 +237,7 @@ export function PocReview() {
             try {
               let poc_checks: unknown = undefined
               if (pocReviewChecksJson.trim()) {
-                poc_checks = JSON.parse(pocReviewChecksJson)
-                if (!Array.isArray(poc_checks)) {
-                  throw new Error('Checks JSON must be an array')
-                }
+                poc_checks = parseChecksJson(pocReviewChecksJson)
               }
               const input: Record<string, unknown> = {
                 provider: 'poc_review',
