@@ -13,6 +13,8 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
 import { createSqliteStore, createInMemoryStore, type JobStore, type RunnerEvent, type JobStatus } from './db.js'
 import { executeJob, type JobInput } from './executor.js'
 import { approvalService } from './services/approval.js'
+import { killJobProcesses } from './process-registry.js'
+import { sandboxService } from './services/sandbox.js'
 
 function requireEnv(name: string): string {
   const v = process.env[name]
@@ -321,6 +323,8 @@ async function main() {
       handle.cancel()
       if (handle.timeoutHandle) clearTimeout(handle.timeoutHandle)
     }
+    killJobProcesses(jobId)
+    sandboxService.destroySandbox(jobId).catch(() => {})
 
     await store.updateJobStatus(jobId, 'cancelled', undefined, nowIso())
 
@@ -379,6 +383,8 @@ async function main() {
         if (handle.timeoutHandle) clearTimeout(handle.timeoutHandle)
       }
     }
+    killJobProcesses(jobId)
+    sandboxService.destroySandbox(jobId).catch(() => {})
 
     await store.deleteJob(jobId)
     jobSubscribers.delete(jobId)
