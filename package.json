@@ -4,14 +4,14 @@
   "scripts": {
     "init:env": "node scripts/init-env.js",
     "setup": "npm install && npm run bootstrap && npm run init:env",
-    "bootstrap": "npm --prefix server install && npm --prefix runner install && npm --prefix ui install",
+    "bootstrap": "npm --prefix server install && npm --prefix runner install && npm --prefix ui install && npm --prefix auth install",
     "landing": "node landing/server.mjs",
     "dev:guided": "bash scripts/ops/hotreload.sh",
-    "dev": "concurrently -k -n landing,server,runner,ui -c cyan,blue,magenta,green \"npm run landing\" \"npm --prefix server run dev\" \"npm --prefix runner run dev\" \"npm --prefix ui run dev\"",
+    "dev": "concurrently -k -n landing,server,runner,ui,auth -c cyan,blue,magenta,green,yellow \"npm run landing\" \"npm --prefix server run dev\" \"npm --prefix runner run dev\" \"npm --prefix ui run dev\" \"npm --prefix auth run dev\"",
     "dev:phase2": "concurrently -k -n server,runner,ui -c blue,magenta,green \"PORT=4001 RUNNER_URL=http://localhost:4002 RUNNER_TOKEN=test_runner_token_123 CORS_ORIGIN=http://localhost:4000 npm --prefix server run dev\" \"PORT=4002 RUNNER_PERSIST=false RUNNER_TOKEN=test_runner_token_123 CORS_ORIGIN=http://localhost:4000 npm --prefix runner run dev\" \"PORT=4000 NEXT_PUBLIC_API_URL=http://localhost:4001 RUNNER_BASE_URL=http://localhost:4002 RUNNER_TOKEN=test_runner_token_123 npm --prefix ui run dev:phase2\"",
-    "build": "npm run bootstrap && npm --prefix server run build && npm --prefix runner run build && npm --prefix ui run build",
-    "start": "concurrently -k -n landing,server,runner,ui -c cyan,blue,magenta,green \"npm run landing\" \"npm --prefix server start\" \"npm --prefix runner start\" \"npm --prefix ui start\"",
-    "smoke": "npm run init:env && npm --prefix server run smoke && npm --prefix runner run smoke && npm --prefix ui run smoke",
+    "build": "npm run bootstrap && npm --prefix server run build && npm --prefix runner run build && npm --prefix ui run build && npm --prefix auth run build",
+    "start": "concurrently -k -n landing,server,runner,ui,auth -c cyan,blue,magenta,green,yellow \"npm run landing\" \"npm --prefix server start\" \"npm --prefix runner start\" \"npm --prefix ui start\" \"npm --prefix auth start\"",
+    "smoke": "npm run init:env && npm --prefix server run smoke && npm --prefix runner run smoke && npm --prefix ui run smoke && npm --prefix auth run smoke",
     "smoke:phase2": "BASE_URL=http://localhost:4001 npm --prefix server run smoke && RUNNER_BASE_URL=http://localhost:4002 npm --prefix runner run smoke && BASE_URL=http://localhost:4000 npm --prefix ui run smoke",
     "lint": "npm --prefix ui run lint",
     "check:tools": "node scripts/check-tools.mjs && node scripts/check-guardrail-sync.js",
@@ -30,6 +30,8 @@
     "@types/multer": "^2.0.0",
     "@types/node": "^25.2.2",
     "concurrently": "^9.1.2",
+    "dotenv": "^17.2.4",
+    "dotenv-expand": "^12.0.3",
     "glob": "^13.0.1"
   }
 }

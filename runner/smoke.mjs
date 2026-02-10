@@ -1,6 +1,9 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
+import dotenvExpand from 'dotenv-expand'
+const envConfig = dotenv.config({ path: '../.env' })
+dotenvExpand.expand(envConfig)
 
-const BASE_URL = process.env.RUNNER_BASE_URL ?? `http://localhost:${process.env.PORT ?? 4002}`
+const BASE_URL = process.env.RUNNER_BASE_URL ?? `http://localhost:${process.env.RUNNER_PORT ?? 4002}`
 const TOKEN = process.env.RUNNER_TOKEN
 
 if (!TOKEN) {
