@@ -37,6 +37,10 @@ async function proxyRequest(request: NextRequest, path: string[]) {
   const runnerToken = process.env.RUNNER_TOKEN ?? 'change_me'
 
   const pathStr = path.join('/')
+  // The runner's API is mounted at /api/jobs, but the path here includes 'api/jobs' from the client call?
+  // client calls /api/runner/api/jobs/...
+  // path will be ['api', 'jobs', ...]
+  // So we just join them.
   const targetUrl = `${runnerUrl}/${pathStr}`
 
   // Remove the /api/runner prefix from the URL
@@ -47,18 +51,35 @@ async function proxyRequest(request: NextRequest, path: string[]) {
   const finalUrl = `${targetUrl}${queryString}`
 
   try {
+    // Exclude headers that might interfere with proxying
+    const headers = new Headers()
+    const excludeHeaders = [
+      'host',
+      'connection',
+      'transfer-encoding',
+      'content-length',
+      'content-encoding'
+    ]
+    
+    request.headers.forEach((value, key) => {
+      if (!excludeHeaders.includes(key.toLowerCase())) {
+        headers.set(key, value)
+      }
+    })
+    
+    // Add auth token
+    headers.set('Authorization', `Bearer ${runnerToken}`)
+
     const response = await fetch(finalUrl, {
       method: request.method,
-      headers: {
-        ...Object.fromEntries(request.headers.entries()),
-        Authorization: `Bearer ${runnerToken}`,
-        // Remove host header to avoid conflicts
-        host: new URL(runnerUrl).host
-      },
+      headers,
       body:
         request.method !== 'GET' && request.method !== 'HEAD'
           ? await request.arrayBuffer()
-          : undefined
+          : undefined,
+      // @ts-expect-error - duplex is needed for some node versions/fetch implementations
+      duplex: 'half', 
+      cache: 'no-store'
     })
 
     const responseHeaders = new Headers()
@@ -68,16 +89,20 @@ async function proxyRequest(request: NextRequest, path: string[]) {
         ![
           'transfer-encoding',
           'connection',
-          'keep-alive',
-          'proxy-authenticate',
-          'proxy-authorization',
-          'te',
-          'trailers'
+          'content-encoding',
+          'content-length'
         ].includes(key.toLowerCase())
       ) {
         responseHeaders.set(key, value)
       }
     })
+
+    // Ensure SSE headers are set correctly if upstream is SSE
+    if (response.headers.get('content-type')?.includes('text/event-stream')) {
+        responseHeaders.set('Content-Type', 'text/event-stream')
+        responseHeaders.set('Cache-Control', 'no-cache, no-transform')
+        responseHeaders.set('Connection', 'keep-alive')
+    }
 
     return new NextResponse(response.body, {
       status: response.status,

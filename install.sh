@@ -28,7 +28,7 @@ nvm_install_dir() {
   if [ -n "$NVM_DIR" ]; then
     printf %s "${NVM_DIR}"
   else
-    nvm_default_install_dir
+    nvm_default_install_di
   fi
 }
 
@@ -123,7 +123,7 @@ install_nvm_from_git() {
     fi
   fi
 
-  local fetch_error
+  local fetch_erro
   if [ -d "$INSTALL_DIR/.git" ]; then
     # Updating repo
     nvm_echo "=> nvm is already installed in $INSTALL_DIR, trying to update using git"

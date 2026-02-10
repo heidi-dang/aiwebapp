@@ -351,6 +351,75 @@ const ChatInput = () => {
 
   const toolCalls = messages.flatMap((m) => m.tool_calls ?? [])
 
+  const handleTestAgent = useCallback(async () => {
+    if (!inputMessage.trim()) return
+
+    const currentMessage = inputMessage
+    setInputMessage('')
+
+    try {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'user',
+          content: currentMessage,
+          created_at: Math.floor(Date.now() / 1000)
+        }
+      ])
+
+      const { jobId } = await createJob({
+        message: currentMessage,
+        provider: 'agent',
+        model: selectedModel,
+        system_prompt: systemPromptMode === 'custom' ? systemPromptCustom : systemPromptMode
+      })
+
+      initRun(jobId)
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'agent',
+          content: '',
+          created_at: Math.floor(Date.now() / 1000),
+          extra_data: {
+            runner_job_id: jobId
+          }
+        }
+      ])
+
+      const unsubscribe = streamJobEvents(jobId, {
+        onEvent: (evt) => {
+          applyRunnerEvent(evt)
+        },
+        onDone: () => {
+          unsubscribe()
+          setRunUnsubscribe(jobId, undefined)
+        },
+        onError: (err) => {
+          toast.error(
+            `Runner stream error: ${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+      })
+
+      setRunUnsubscribe(jobId, unsubscribe)
+      await startJob(jobId)
+    } catch (error) {
+      toast.error(
+        `Runner error: ${error instanceof Error ? error.message : String(error)}`
+      )
+    }
+  }, [
+    applyRunnerEvent,
+    initRun,
+    inputMessage,
+    setMessages,
+    setRunUnsubscribe,
+    selectedModel,
+    systemPromptCustom,
+    systemPromptMode
+  ])
+
   const handleStartRunnerJob = useCallback(async () => {
     if (!inputMessage.trim()) return
 
@@ -807,6 +876,20 @@ const ChatInput = () => {
         <div className="pointer-events-auto absolute bottom-2 left-2 z-10 flex items-center gap-x-1">
           {mode === 'agent' && (
             <>
+              <Tooltip content="Test Agent (Run Coder)" side="top" delayDuration={300}>
+                <Button
+                  type="button"
+                  aria-label="Test Agent"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-lg text-purple-400"
+                  onClick={handleTestAgent}
+                  disabled={!inputMessage.trim() || isStreaming}
+                >
+                  <Icon type="play" size="xs" />
+                </Button>
+              </Tooltip>
+
               <Tooltip content="Run as job" side="top" delayDuration={300}>
                 <Button
                   type="button"

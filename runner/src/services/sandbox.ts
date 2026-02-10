@@ -10,17 +10,31 @@ export class SandboxService {
   /**
    * Create a new ephemeral sandbox container for a job
    */
-  async createSandbox(jobId: string): Promise<string> {
+  async createSandbox(jobId: string, workspaceRoot?: string): Promise<string> {
     const containerName = `sandbox_${jobId}`;
     
+    let mountArgs = '';
+    if (workspaceRoot) {
+      // Mount workspace to /app/workspace
+      // Use standard linux paths. If running on host, ensure workspaceRoot is absolute.
+      mountArgs = `-v "${workspaceRoot}:/app/workspace" -w /app/workspace`;
+    }
+
     // Security:
     // - --cpus 1.0
     // - --memory 512m
+    // - --network none (unless we need internet)
+    
+    // For now, we need to use the docker socket or sibling container logic?
+    // Since we are running inside a container (Runner), we need to ensure we can spawn sibling containers.
+    // The command `docker run` assumes the docker CLI is available and the socket is mounted.
     
     const command = `docker run -d \
       --name ${containerName} \
+      ${mountArgs} \
       --cpus 1.0 \
       --memory 512m \
+      --network host \
       ${this.image}`;
 
     try {

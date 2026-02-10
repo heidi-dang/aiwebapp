@@ -6,6 +6,7 @@ import { cancelJob, approveJob } from '@/lib/runner/client'
 import Icon from '@/components/ui/icon'
 import { Button } from '@/components/ui/button'
 import type { RunState } from '@/lib/runner/types'
+import ToolLogs, { ToolExecution } from './ToolLogs'
 
 function shortId(id: string) {
   return id.length <= 6 ? id : id.slice(-6)
@@ -30,97 +31,6 @@ function statusClass(status: RunState['status']) {
   }
 }
 
-// Convert internal tool/step identifiers into human-friendly labels.
-function formatToolLabel(name: string) {
-  const map: Record<string, string> = {
-    planning: 'Planning',
-    code_generation: 'Code generation',
-    code_execution: 'Code execution',
-    review: 'Review',
-    iterate: 'Iterate',
-    finish: 'Finish'
-  }
-
-  if (map[name]) return map[name]
-
-  // Fallback: replace underscores with spaces and title-case words
-  return name
-    .replace(/_/g, ' ')
-    .replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1))
-}
-
-interface ToolState {
-  name: string
-  status: 'running' | 'done' | 'error'
-  outputs: string[]
-  refusedCommand?: string
-  refusedReason?: string
-}
-
-function ToolTimeline({
-  tools,
-  onApprove
-}: {
-  tools: Map<string, ToolState>
-  onApprove?: (command: string) => Promise<void>
-}) {
-  return (
-    <div className="space-y-2">
-      {Array.from(tools.entries()).map(([name, tool]) => (
-        <div
-          key={name}
-          className="rounded-lg border border-primary/10 bg-accent/50 p-3"
-        >
-          <div className="flex items-center gap-2">
-            {tool.status === 'running' && (
-              <div className="h-2 w-2 animate-pulse rounded-full bg-blue-400" data-testid="run-thinking" />
-            )}
-            {tool.status === 'done' && (
-              <Icon type="check" size="xs" className="text-green-400" />
-            )}
-            {tool.status === 'error' && (
-              <Icon type="x" size="xs" className="text-red-400" />
-            )}
-            <span className="font-mono text-xs font-medium text-primary">
-              {formatToolLabel(name)}
-            </span>
-          </div>
-
-          {tool.outputs.length > 0 && (
-            <div className="mt-2 max-h-32 overflow-y-auto rounded bg-background/50 p-2">
-              {tool.outputs.map((output, i) => (
-                <div key={i} className="text-[11px] text-secondary">
-                  {output}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {tool.refusedCommand && (
-            <div className="mt-2 rounded bg-yellow-500/10 p-2 text-[11px] text-yellow-300" data-testid="run-tool-refusal">
-              <div className="font-medium">Command refused</div>
-              <div className="mt-1 text-yellow-200">{tool.refusedCommand}</div>
-              {tool.refusedReason && (
-                <div className="mt-1 text-yellow-300">{tool.refusedReason}</div>
-              )}
-              {onApprove && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="mt-2"
-                  onClick={() => onApprove(tool.refusedCommand!)}
-                >
-                  Approve &amp; Run
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
-
 interface ApprovalState {
   tokenId: string
   description: string
@@ -131,7 +41,7 @@ export default function RunCard({ jobId }: { jobId: string }) {
   const { runs, runUi, setRunCollapsed } = useStore()
   const run = runs[jobId]
 
-  const [tools, setTools] = useState<Map<string, ToolState>>(new Map())
+  const [toolExecutions, setToolExecutions] = useState<ToolExecution[]>([])
   const [planSteps, setPlanSteps] = useState<Array<{ tool: string; description: string }>>([])
   const [planMessage, setPlanMessage] = useState<string>('')
   const [pendingApproval, setPendingApproval] = useState<ApprovalState | null>(null)
@@ -139,14 +49,18 @@ export default function RunCard({ jobId }: { jobId: string }) {
 
   useEffect(() => {
     if (!run) return
-    const newTools = new Map<string, ToolState>()
+    const newToolExecutions: ToolExecution[] = []
+    const activeTools = new Map<string, number>() // name -> index
     const newPlanSteps: Array<{ tool: string; description: string }> = []
     let newPlanMessage = ''
     let currentApproval: ApprovalState | null = null
 
-    run.events.forEach((evt) => {
-      const { type, payload } = evt
-      if (type === 'plan' && payload && typeof payload === 'object' && payload !== null && 'steps' in payload && Array.isArray((payload as { steps: unknown }).steps)) {
+    if (run.events && Array.isArray(run.events)) {
+        run.events.forEach((evt) => {
+          if (!evt) return;
+          const { type, payload, ts } = evt
+          
+          if (type === 'plan' && payload && typeof payload === 'object' && payload !== null && 'steps' in payload && Array.isArray((payload as { steps: unknown }).steps)) {
         (payload as { steps: Array<{ tool: string; description: string }> }).steps.forEach((step) => {
           if (step.tool && step.description) {
             newPlanSteps.push({ tool: step.tool, description: step.description })
@@ -155,49 +69,87 @@ export default function RunCard({ jobId }: { jobId: string }) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         if ((payload as any).message) newPlanMessage = (payload as any).message
       }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (type === 'tool.start' && payload && typeof payload === 'object' && payload !== null && 'tool' in payload && typeof (payload as any).tool === 'string') {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const name = (payload as any).tool
-        newTools.set(name, {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const args = (payload as any).input || (payload as any).args
+        
+        const tool: ToolExecution = {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          id: (payload as any).id || `${name}-${ts}-${newToolExecutions.length}`,
           name,
           status: 'running',
-          outputs: []
-        })
+          args,
+          timestamp: ts,
+          output: ''
+        }
+        
+        const idx = newToolExecutions.push(tool) - 1
+        activeTools.set(name, idx)
       }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (type === 'tool.output' && payload && typeof payload === 'object' && payload !== null && 'tool' in payload && typeof (payload as any).tool === 'string') {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const name = (payload as any).tool
-        const existing = newTools.get(name)
-        if (existing) {
+        const idx = activeTools.get(name)
+        if (idx !== undefined) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          existing.outputs.push((payload as any).output || '')
+          newToolExecutions[idx].output = (newToolExecutions[idx].output || '') + ((payload as any).output || '')
         }
       }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (type === 'tool.end' && payload && typeof payload === 'object' && payload !== null && 'tool' in payload && typeof (payload as any).tool === 'string') {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const name = (payload as any).tool
-        const existing = newTools.get(name)
-        if (existing) {
+        const idx = activeTools.get(name)
+        if (idx !== undefined) {
+          const tool = newToolExecutions[idx]
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          existing.status = (payload as any).success ? 'done' : 'error'
+          tool.status = (payload as any).success ? 'success' : 'failure'
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          if ((payload as any).error) existing.outputs.push((payload as any).error)
+          if ((payload as any).error) {
+             // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             tool.output = (tool.output || '') + '\nError: ' + (payload as any).error
+          }
+          tool.duration = ts - tool.timestamp
+          activeTools.delete(name)
         }
       }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (type === 'tool.refused' && payload && typeof payload === 'object' && payload !== null && 'tool' in payload && typeof (payload as any).tool === 'string') {
+         // Treated as a tool failure that starts and fails immediately if not already started
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const name = (payload as any).tool
-        const existing = newTools.get(name) || { name, status: 'error' as const, outputs: [] }
-        ;(existing as ToolState).status = 'error'
+        let idx = activeTools.get(name)
+        
+        if (idx === undefined) {
+             const tool: ToolExecution = {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                id: `${name}-${ts}-${newToolExecutions.length}`,
+                name,
+                status: 'failure',
+                timestamp: ts,
+                output: ''
+             }
+             idx = newToolExecutions.push(tool) - 1
+        }
+        
+        const tool = newToolExecutions[idx]
+        tool.status = 'failure'
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ;(existing as ToolState).refusedCommand = (payload as any).command
+        tool.output = (tool.output || '') + '\nRefused: ' + ((payload as any).reason || 'Unknown reason')
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ;(existing as ToolState).refusedReason = (payload as any).reason
-        newTools.set(name, existing)
+        if ((payload as any).command) {
+             // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             tool.output += `\nCommand: ${(payload as any).command}`
+        }
+        activeTools.delete(name)
       }
 
       // Handle approvals
@@ -218,8 +170,9 @@ export default function RunCard({ jobId }: { jobId: string }) {
         }
       }
     })
+    } // End check for run.events
 
-    setTools(newTools)
+    setToolExecutions(newToolExecutions)
     setPlanSteps(newPlanSteps)
     setPlanMessage(newPlanMessage)
     setPendingApproval(currentApproval)
@@ -282,6 +235,10 @@ export default function RunCard({ jobId }: { jobId: string }) {
 
       {!runUi[run.jobId]?.collapsed && (
         <div className="mt-3 space-y-3">
+          {run.events.length === 0 && run.status !== 'running' && (
+            <div className="text-xs text-muted">Waiting for events...</div>
+          )}
+
           {planMessage && (
             <div className="rounded-lg border border-primary/10 bg-accent/30 p-3">
               <div className="text-xs font-medium uppercase text-primary">Plan</div>
@@ -302,11 +259,11 @@ export default function RunCard({ jobId }: { jobId: string }) {
             </div>
           )}
 
-          {tools.size > 0 && (
+          {toolExecutions.length > 0 && (
             <div className="rounded-lg border border-primary/10 bg-accent/30 p-3">
               <div className="text-xs font-medium uppercase text-primary">Tools</div>
               <div className="mt-2">
-                <ToolTimeline tools={tools} />
+                <ToolLogs tools={toolExecutions} />
               </div>
             </div>
           )}
@@ -341,10 +298,6 @@ export default function RunCard({ jobId }: { jobId: string }) {
                 </Button>
               </div>
             </div>
-          )}
-
-          {run.events.length === 0 && run.status !== 'running' && (
-            <div className="text-xs text-muted">Waiting for events...</div>
           )}
         </div>
       )}
