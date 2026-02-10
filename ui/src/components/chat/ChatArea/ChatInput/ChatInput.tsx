@@ -24,6 +24,7 @@ import { ProviderSelector } from '@/components/chat/Sidebar/ProviderSelector'
 import { ModelSelector } from '@/components/chat/Sidebar/ModelSelector'
 import { RuntimeModeSelector } from '@/components/chat/Sidebar/RuntimeModeSelector'
 import { CloudFallbackSelector } from '@/components/chat/Sidebar/CloudFallbackSelector'
+import { TokenBudgetBar } from './TokenBudgetBar'
 
 const envAiApiUrl = process.env.NEXT_PUBLIC_AI_API_URL ?? ''
 
@@ -1014,6 +1015,7 @@ const ChatInput = () => {
           )}
         </div>
 
+        <TokenBudgetBar />
         <TextArea
           placeholder={'Ask anything'}
           value={inputMessage}
