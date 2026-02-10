@@ -350,7 +350,7 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
 
     // Default fallback order: Browser Proxy -> OpenRouter -> Ollama
     const fallbackOrder = process.env.LLM_FALLBACK_ORDER
-      ? process.env.LLM_FALLBACK_ORDER.split(',').map(p => p.trim())
+      ? process.env.LLM_FALLBACK_ORDER.split(',').map(p => p.trim()).filter(Boolean)
       : ['browser-proxy', 'openrouter', 'ollama']
 
     const llmConfig = {

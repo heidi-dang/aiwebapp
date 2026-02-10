@@ -33,6 +33,11 @@ export class LLMService {
              attemptConfig.model = 'qwen2.5-coder:7b' // Default safe local model
         }
 
+        // Normalize model for browser-proxy to let it decide
+        if (providerName === 'browser-proxy') {
+          attemptConfig.model = 'auto'
+        }
+
         const provider = this.getProvider(attemptConfig)
         console.log(`[LLM] Attempting chat with provider: ${providerName} (model: ${attemptConfig.model})`)
         return await provider.chat(attemptConfig.model, messages, tools)

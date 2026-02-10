@@ -182,16 +182,16 @@ export class CopilotClient {
     return openaiMessages.map(msg => {
       switch (msg.role) {
         case 'system':
-          return vscode.LanguageModelChatMessage.User(msg.content);
+          return vscode.LanguageModelChatMessage.User(msg.content || '');
         case 'user':
-          return vscode.LanguageModelChatMessage.User(msg.content);
+          return vscode.LanguageModelChatMessage.User(msg.content || '');
         case 'assistant':
-          return vscode.LanguageModelChatMessage.Assistant(msg.content);
+          return vscode.LanguageModelChatMessage.Assistant(msg.content || '');
         case 'tool':
           // Handle tool messages as user messages for now
-          return vscode.LanguageModelChatMessage.User(`Tool result: ${msg.content}`);
+          return vscode.LanguageModelChatMessage.User(`Tool result: ${msg.content || ''}`);
         default:
-          return vscode.LanguageModelChatMessage.User(msg.content);
+          return vscode.LanguageModelChatMessage.User(msg.content || '');
       }
     });
   }
@@ -246,25 +246,52 @@ export class CopilotClient {
     };
   }
 
-  // Streaming support (placeholder for future implementation)
+  // Streaming support
   async *createStreamingChatCompletion(request: ChatCompletionRequest): AsyncGenerator<StreamingChatCompletionResponse> {
-    // This would implement streaming responses
-    // For now, just yield the complete response
-    const response = await this.createChatCompletion(request);
+    const model = await this.selectModel(request.model);
+    if (!model) {
+      throw new Error(`Model not found: ${request.model}`);
+    }
 
+    const messages = this.convertMessages(request.messages);
+    const response = await model.sendRequest(messages, {}, new vscode.CancellationTokenSource().token);
+
+    const responseId = `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+    let responseText = '';
+
+    for await (const part of response.stream) {
+      if (part.type === 'text') {
+        responseText += part.text;
+        yield {
+          id: responseId,
+          object: 'chat.completion.chunk',
+          created: Math.floor(Date.now() / 1000),
+          model: request.model,
+          choices: [{
+            index: 0,
+            delta: {
+              content: part.text
+            },
+            finish_reason: null
+          }],
+          session_id: request.session_id
+        };
+      }
+    }
+
+    // Yield final chunk
+    const usage = this.estimateTokenUsage(request.messages, responseText);
     yield {
-      id: response.id,
+      id: responseId,
       object: 'chat.completion.chunk',
-      created: response.created,
-      model: response.model,
+      created: Math.floor(Date.now() / 1000),
+      model: request.model,
       choices: [{
         index: 0,
-        delta: {
-          content: response.choices[0].message.content
-        },
+        delta: {},
         finish_reason: 'stop'
       }],
-      usage: response.usage,
+      usage,
       session_id: request.session_id
     };
   }
