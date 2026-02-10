@@ -48,6 +48,39 @@
             font-weight: 300;
         }
 
+        .header-nav {
+            margin-top: 1.5rem;
+        }
+
+        .nav-link {
+            color: #b0b0b0;
+            text-decoration: none;
+            margin: 0 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: 25px;
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
+        }
+
+        .nav-link:hover {
+            color: #00d4ff;
+            border-color: rgba(0, 212, 255, 0.3);
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .signup-link {
+            background: linear-gradient(45deg, #00d4ff, #090979);
+            color: white;
+            border: none;
+            padding: 0.5rem 1.5rem;
+        }
+
+        .signup-link:hover {
+            background: linear-gradient(45deg, #00a8ff, #070979);
+            color: white;
+            transform: translateY(-1px);
+        }
+
         .hero {
             text-align: center;
             padding: 4rem 0;
@@ -93,6 +126,25 @@
             transform: translateY(-2px);
             box-shadow: 0 12px 40px rgba(0, 212, 255, 0.4);
             background: linear-gradient(45deg, #00a8ff, #070979);
+        }
+
+        .hero-image-container {
+            margin-top: 3rem;
+            display: flex;
+            justify-content: center;
+        }
+
+        .hero-image {
+            max-width: 300px;
+            border-radius: 20px;
+            box-shadow: 0 20px 50px rgba(0, 212, 255, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s ease;
+        }
+
+        .hero-image:hover {
+            transform: scale(1.05);
         }
 
         .features {
@@ -202,6 +254,10 @@
         <div class="container">
             <div class="logo">Heidi AI</div>
             <div class="tagline">Revolutionizing AI-Powered Solutions</div>
+            <nav class="header-nav">
+                <a href="https://user.heidiai.com.au/login" class="nav-link">Login</a>
+                <a href="https://user.heidiai.com.au/signup" class="nav-link signup-link">Sign Up</a>
+            </nav>
         </div>
     </header>
 
@@ -210,7 +266,11 @@
             <div class="container">
                 <h1 class="fade-in-up">Next-Generation AI Technology</h1>
                 <p class="fade-in-up delay-1">Experience the future of artificial intelligence with our cutting-edge platform. Advanced machine learning, seamless integration, and unparalleled performance.</p>
-                <a href="https://ai.heidi.com.au" class="cta-button fade-in-up delay-2">Get Started</a>
+                <a href="https://ai.heidi.com.au" class="cta-button fade-in-up delay-2" onclick="handleGetStarted(event)">Get Started</a>
+                <div class="hero-image-container fade-in-up delay-3">
+                    <!-- Replace with your actual image path -->
+                    <img src="https://placehold.co/400x400?text=Heidi+Photo" alt="Heidi AI" class="hero-image">
+                </div>
             </div>
         </section>
 
@@ -292,6 +352,22 @@
                 }
             });
         });
+
+        // Handle Get Started button with fallback to registration
+        function handleGetStarted(event) {
+            event.preventDefault();
+            
+            // Try to access the main app first
+            fetch('https://ai.heidiai.com.au/health', { method: 'HEAD', mode: 'no-cors' })
+                .then(() => {
+                    // If successful, redirect to main app
+                    window.location.href = 'https://ai.heidiai.com.au';
+                })
+                .catch(() => {
+                    // If main app is not available, redirect to user registration
+                    window.location.href = 'https://user.heidiai.com.au/signup';
+                });
+        }
     </script>
 </body>
 </html>

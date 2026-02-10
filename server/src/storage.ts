@@ -13,8 +13,8 @@ interface StoredSession {
 }
 
 export interface Store {
-  readonly agents: AgentDetails[]
-  readonly teams: TeamDetails[]
+  agents: AgentDetails[]
+  teams: TeamDetails[]
   readonly toolbox: ToolDetails[]
 
   listSessions(args: {
@@ -44,9 +44,9 @@ export interface Store {
   }): Promise<void>
 
   getRuns(args: {
-    dbId: string
-    entityType: EntityType
-    componentId: string
+    dbId?: string
+    entityType?: EntityType
+    componentId?: string
     sessionId: string
   }): Promise<RunRecord[]>
 
@@ -94,6 +94,9 @@ export interface Store {
   addKnowledgeDocument(title: string, content: string): Promise<string>
   addKnowledgeChunk(docId: string, content: string, embedding: number[]): Promise<void>
   searchKnowledge(embedding: number[], limit: number): Promise<Array<{ docId: string; content: string; score: number }>>
+
+  // Agent management
+  createAgent(agent: AgentDetails): Promise<void>
 }
 
 function makeSessionKey(args: {
@@ -110,8 +113,8 @@ function nowSeconds(): number {
 }
 
 export class InMemoryStore implements Store {
-  readonly agents: AgentDetails[]
-  readonly teams: TeamDetails[]
+  agents: AgentDetails[]
+  teams: TeamDetails[]
   readonly toolbox: ToolDetails[]
 
   private readonly sessionsByListKey: Map<string, SessionEntry[]> = new Map()
@@ -304,18 +307,17 @@ export class InMemoryStore implements Store {
   }
 
   async getRuns(args: {
-    dbId: string
-    entityType: EntityType
-    componentId: string
+    dbId?: string
+    entityType?: EntityType
+    componentId?: string
     sessionId: string
   }): Promise<RunRecord[]> {
-    const key = makeSessionKey({
-      dbId: args.dbId,
-      entityType: args.entityType,
-      componentId: args.componentId,
-      sessionId: args.sessionId
-    })
-    return this.sessionsByKey.get(key)?.runs ?? []
+    for (const session of this.sessionsByKey.values()) {
+      if (session.entry.session_id === args.sessionId) {
+        return session.runs
+      }
+    }
+    return []
   }
 
   async deleteSession(args: {
@@ -477,11 +479,15 @@ export class InMemoryStore implements Store {
   async updateSessionState(sessionId: string, state: Record<string, any>): Promise<void> {
     // No-op in InMemoryStore
   }
+
+  async createAgent(agent: AgentDetails): Promise<void> {
+    this.agents.push(agent)
+  }
 }
 
 export class SqliteStore implements Store {
-  readonly agents: AgentDetails[]
-  readonly teams: TeamDetails[]
+  agents: AgentDetails[]
+  teams: TeamDetails[]
   readonly toolbox: ToolDetails[]
 
   private readonly db: Database
@@ -590,6 +596,27 @@ export class SqliteStore implements Store {
         '  id TEXT PRIMARY KEY,',
         '  title TEXT NOT NULL,',
         '  content TEXT NOT NULL,',
+        '  created_at INTEGER NOT NULL',
+        ');',
+        'CREATE TABLE IF NOT EXISTS organizations (',
+        '  id TEXT PRIMARY KEY,',
+        '  name TEXT NOT NULL,',
+        '  created_at INTEGER NOT NULL',
+        ');',
+        'CREATE TABLE IF NOT EXISTS organization_members (',
+        '  org_id TEXT NOT NULL,',
+        '  user_id TEXT NOT NULL,',
+        '  role TEXT NOT NULL,', // admin, editor, viewer
+        '  joined_at INTEGER NOT NULL,',
+        '  PRIMARY KEY (org_id, user_id),',
+        '  FOREIGN KEY(org_id) REFERENCES organizations(id) ON DELETE CASCADE,',
+        '  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE',
+        ');',
+        'CREATE TABLE IF NOT EXISTS user_facts (',
+        '  id TEXT PRIMARY KEY,',
+        '  user_id TEXT NOT NULL,',
+        '  content TEXT NOT NULL,',
+        '  tags TEXT,',
         '  created_at INTEGER NOT NULL',
         ');',
         'CREATE TABLE IF NOT EXISTS knowledge_chunks (',
@@ -791,18 +818,15 @@ export class SqliteStore implements Store {
   }
 
   async getRuns(args: {
-    dbId: string
-    entityType: EntityType
-    componentId: string
+    dbId?: string
+    entityType?: EntityType
+    componentId?: string
     sessionId: string
   }): Promise<RunRecord[]> {
     const rows = await this.db.all<
       Array<{ created_at: number; run_input: string | null; content_json: string | null }>
     >(
-      'SELECT created_at, run_input, content_json FROM runs WHERE db_id = ? AND entity_type = ? AND component_id = ? AND session_id = ? ORDER BY created_at ASC, id ASC',
-      args.dbId,
-      args.entityType,
-      args.componentId,
+      'SELECT created_at, run_input, content_json FROM runs WHERE session_id = ? ORDER BY created_at ASC, id ASC',
       args.sessionId
     )
 
@@ -1082,21 +1106,89 @@ export class SqliteStore implements Store {
   }
 
   async searchKnowledge(embedding: number[], limit: number): Promise<Array<{ docId: string; content: string; score: number }>> {
-    // Fetch all chunks (inefficient for large data, but MVP)
-    const chunks = await this.db.all<{ doc_id: string; content: string; embedding: string }[]>(
-      'SELECT doc_id, content, embedding FROM knowledge_chunks'
+    // We only use this for fallback if vector service isn't available
+    return []
+  }
+
+  // --- Facts / Long-Term Memory ---
+  async addUserFact(userId: string, content: string, tags: string[] = []): Promise<string> {
+    const id = `fact_${Date.now()}_${Math.random().toString(16).slice(2)}`
+    const createdAt = nowSeconds()
+    const tagsJson = JSON.stringify(tags)
+    
+    await this.db.run(
+      'INSERT INTO user_facts (id, user_id, content, tags, created_at) VALUES (?, ?, ?, ?, ?)',
+      id, userId, content, tagsJson, createdAt
     )
+    return id
+  }
 
-    const results = chunks.map(chunk => {
-      const chunkEmbedding = JSON.parse(chunk.embedding) as number[]
-      const score = cosineSimilarity(embedding, chunkEmbedding)
-      return { docId: chunk.doc_id, content: chunk.content, score }
-    })
+  async getUserFacts(userId: string): Promise<any[]> {
+    const rows = await this.db.all(
+      'SELECT * FROM user_facts WHERE user_id = ? ORDER BY created_at DESC',
+      userId
+    )
+    return rows.map(r => ({
+      ...r,
+      tags: r.tags ? JSON.parse(r.tags) : []
+    }))
+  }
 
-    // Sort by score descending
-    results.sort((a: { score: number }, b: { score: number }) => b.score - a.score)
+  async deleteUserFact(id: string): Promise<boolean> {
+    const result = await this.db.run(
+      'DELETE FROM user_facts WHERE id = ?',
+      id
+    )
+    return (result.changes ?? 0) > 0
+  }
 
-    return results.slice(0, limit)
+  // --- Organizations & RBAC ---
+  async createOrganization(name: string, ownerId: string): Promise<string> {
+    const orgId = `org_${Date.now()}_${Math.random().toString(16).slice(2)}`
+    await this.db.run(
+      'INSERT INTO organizations (id, name, created_at) VALUES (?, ?, ?)',
+      orgId, name, nowSeconds()
+    )
+    await this.addOrgMember(orgId, ownerId, 'admin')
+    return orgId
+  }
+
+  async addOrgMember(orgId: string, userId: string, role: 'admin' | 'editor' | 'viewer'): Promise<void> {
+    await this.db.run(
+      'INSERT INTO organization_members (org_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)',
+      orgId, userId, role, nowSeconds()
+    )
+  }
+
+  async getOrgRole(orgId: string, userId: string): Promise<string | null> {
+    const row = await this.db.get<{ role: string }>(
+      'SELECT role FROM organization_members WHERE org_id = ? AND user_id = ?',
+      orgId, userId
+    )
+    return row ? row.role : null
+  }
+
+  async getUserOrgs(userId: string): Promise<Array<{ id: string; name: string; role: string }>> {
+    return this.db.all(
+      `SELECT o.id, o.name, m.role 
+       FROM organizations o 
+       JOIN organization_members m ON o.id = m.org_id 
+       WHERE m.user_id = ?`,
+      userId
+    )
+  }
+
+  async createAgent(agent: AgentDetails): Promise<void> {
+    this.agents.push(agent)
+    await this.db.run(
+      `INSERT INTO agents (id, name, db_id, model_provider, model_name, model) VALUES (?, ?, ?, ?, ?, ?)`,
+      agent.id,
+      agent.name || agent.id,
+      agent.db_id || '',
+      agent.model?.provider || '',
+      agent.model?.name || '',
+      agent.model?.model || ''
+    )
   }
 }
 

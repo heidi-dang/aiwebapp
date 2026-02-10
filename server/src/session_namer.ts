@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events'
+import { callSimpleLLM } from './llm_utils.js'
 
 export interface SessionNamingOptions {
   enabled: boolean
@@ -27,7 +28,11 @@ export class SessionNamer extends EventEmitter {
 
     try {
       const prompt = this.buildNamingPrompt(firstMessage)
-      const response = await this.callLLM(prompt)
+      const response = await callSimpleLLM(prompt, {
+        model: this.options.model,
+        maxTokens: 20,
+        temperature: 0.3
+      })
       return this.cleanTitle(response)
     } catch (error) {
       console.warn('Failed to generate session title:', error)
@@ -52,38 +57,6 @@ Examples:
 - "Help with React component" → "React Help"
 
 Title:`
-  }
-
-  private async callLLM(prompt: string): Promise<string> {
-    const apiUrl = process.env.AI_API_URL || 'https://api.openai.com/v1'
-    const apiKey = process.env.AI_API_KEY
-
-    if (!apiKey) {
-      throw new Error('API key not configured')
-    }
-
-    const response = await fetch(`${apiUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: this.options.model,
-        messages: [
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: 20,
-        temperature: 0.3
-      })
-    })
-
-    if (!response.ok) {
-      throw new Error(`LLM API failed: ${response.status}`)
-    }
-
-    const data = await response.json()
-    return data.choices?.[0]?.message?.content?.trim() || ''
   }
 
   private cleanTitle(title: string): string {

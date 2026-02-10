@@ -24,6 +24,21 @@ export async function registerAgentRoutes(app: any, store: Store) {
     res.json(store.agents)
   })
 
+  app.post('/agents', async (req: any, res: any) => {
+    requireOptionalBearerAuth(req, res)
+    if (res.headersSent) return
+    const agent = req.body
+    if (!agent.id || !agent.name) {
+      return res.status(400).json({ error: 'Missing agent id or name' })
+    }
+    // Check if agent exists
+    if (store.agents.find(a => a.id === agent.id)) {
+      return res.status(409).json({ error: 'Agent already exists' })
+    }
+    await store.createAgent(agent)
+    res.json(agent)
+  })
+
   app.put('/agents/:id/base-dir', async (req: any, res: any) => {
     requireOptionalBearerAuth(req, res)
     if (res.headersSent) return

@@ -69,6 +69,31 @@ export async function cancelJob(jobId: string) {
   return res.json()
 }
 
+export async function approveJob(jobId: string, tokenId: string, approved: boolean) {
+  // Use the server proxy endpoint for approval
+  // Note: The Server API has /jobs/:id/approve which proxies to Runner
+  // However, since we are using the /api/runner proxy here which points directly to Runner (via Next.js proxy),
+  // we should match the runner's API contract.
+  
+  // Actually, checking the README, the UI uses /api/runner/* which proxies to Runner Service.
+  // The Runner Service has POST /api/jobs/:jobId/approval
+  
+  const res = await fetch(
+    base(`/api/jobs/${encodeURIComponent(jobId)}/approval`),
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ tokenId, approved })
+    }
+  )
+
+  if (!res.ok) {
+    throw new Error(`approveJob failed: ${res.status}`)
+  }
+
+  return res.json()
+}
+
 export async function getJob(jobId: string) {
   const res = await fetch(base(`/api/jobs/${encodeURIComponent(jobId)}`), {
     method: 'GET'
@@ -121,6 +146,9 @@ export function streamJobEvents(jobId: string, cb: StreamCallbacks) {
     'tool.start',
     'tool.output',
     'tool.end',
+    'tool.refused',
+    'approval.request',
+    'approval.response',
     'error',
     'done'
   ]

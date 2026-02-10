@@ -247,7 +247,11 @@ export default function RegisterPage() {
               </div>
             )}
 
-            <Button type="submit" disabled={!canSubmit} className="mt-1">
+            <Button
+              type="submit"
+              disabled={!canSubmit}
+              className="mt-1 bg-brand text-white hover:bg-brand/90"
+            >
               {isSubmitting ? 'Creating account...' : 'Create account'}
             </Button>
 

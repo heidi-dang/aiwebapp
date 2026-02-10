@@ -2,6 +2,7 @@ import type { NextConfig } from 'next'
 import path from 'path'
 
 const nextConfig: NextConfig = {
+  output: 'standalone',
   devIndicators: false,
   outputFileTracingRoot: path.join(__dirname),
   allowedDevOrigins: ['heidiai.com.au', 'www.heidiai.com.au'],
@@ -12,7 +13,7 @@ const nextConfig: NextConfig = {
     ]
   },
   async rewrites() {
-    const runnerUrl = process.env.RUNNER_URL ?? 'http://localhost:3002'
+    const runnerUrl = process.env.RUNNER_URL ?? 'http://localhost:4002'
     return [
       {
         source: '/runner/:path*',

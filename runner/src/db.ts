@@ -15,6 +15,8 @@ export type RunnerEventType =
   | 'tool.output'
   | 'tool.end'
   | 'tool.refused'
+  | 'approval.request'
+  | 'approval.response'
   | 'memory'
   | 'error'
   | 'done'
@@ -35,6 +37,7 @@ export type JobRow = {
   finished_at: string | null
   timeout_ms: number | null
   input: string | null
+  session_id: string | null
 }
 
 export type EventRow = {
@@ -49,6 +52,7 @@ export interface JobStore {
   createJob(id: string, input?: unknown, timeoutMs?: number): Promise<void>
   getJob(id: string): Promise<JobRow | undefined>
   listJobs(limit?: number): Promise<JobRow[]>
+  listJobsBySession(sessionId: string, limit?: number): Promise<JobRow[]>
   updateJobStatus(id: string, status: JobStatus, startedAt?: string, finishedAt?: string): Promise<void>
   addEvent(event: RunnerEvent): Promise<void>
   getEvents(jobId: string): Promise<RunnerEvent[]>
@@ -78,7 +82,8 @@ export async function createSqliteStore(dbPath: string): Promise<JobStore> {
       started_at TEXT,
       finished_at TEXT,
       timeout_ms INTEGER,
-      input TEXT
+      input TEXT,
+      session_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS events (
@@ -91,16 +96,30 @@ export async function createSqliteStore(dbPath: string): Promise<JobStore> {
     );
 
     CREATE INDEX IF NOT EXISTS idx_events_job_id ON events(job_id);
+    CREATE INDEX IF NOT EXISTS idx_jobs_session_id ON jobs(session_id);
   `)
+  
+  // Migration: Add session_id column if it doesn't exist (for existing databases)
+  try {
+    await db.exec(`ALTER TABLE jobs ADD COLUMN session_id TEXT`)
+  } catch (err) {
+    // Ignore error if column already exists
+  }
 
   return {
     async createJob(id: string, input?: unknown, timeoutMs?: number) {
+      let sessionId: string | null = null
+      if (input && typeof input === 'object' && 'session_id' in input) {
+        sessionId = (input as any).session_id
+      }
+      
       await db.run(
-        `INSERT INTO jobs (id, status, created_at, timeout_ms, input) VALUES (?, 'pending', ?, ?, ?)`,
+        `INSERT INTO jobs (id, status, created_at, timeout_ms, input, session_id) VALUES (?, 'pending', ?, ?, ?, ?)`,
         id,
         new Date().toISOString(),
         timeoutMs ?? null,
-        input ? JSON.stringify(input) : null
+        input ? JSON.stringify(input) : null,
+        sessionId
       )
     },
 
@@ -110,6 +129,10 @@ export async function createSqliteStore(dbPath: string): Promise<JobStore> {
 
     async listJobs(limit = 100) {
       return db.all<JobRow[]>(`SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?`, limit)
+    },
+
+    async listJobsBySession(sessionId: string, limit = 20) {
+      return db.all<JobRow[]>(`SELECT * FROM jobs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?`, sessionId, limit)
     },
 
     async updateJobStatus(id: string, status: JobStatus, startedAt?: string, finishedAt?: string) {
@@ -160,6 +183,11 @@ export function createInMemoryStore(): JobStore {
 
   return {
     async createJob(id: string, input?: unknown, timeoutMs?: number) {
+      let sessionId: string | null = null
+      if (input && typeof input === 'object' && 'session_id' in input) {
+        sessionId = (input as any).session_id
+      }
+      
       jobs.set(id, {
         id,
         status: 'pending',
@@ -167,7 +195,8 @@ export function createInMemoryStore(): JobStore {
         started_at: null,
         finished_at: null,
         timeout_ms: timeoutMs ?? null,
-        input: input ? JSON.stringify(input) : null
+        input: input ? JSON.stringify(input) : null,
+        session_id: sessionId
       })
       events.set(id, [])
     },
@@ -178,6 +207,13 @@ export function createInMemoryStore(): JobStore {
 
     async listJobs(limit = 100) {
       return Array.from(jobs.values())
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .slice(0, limit)
+    },
+    
+    async listJobsBySession(sessionId: string, limit = 20) {
+      return Array.from(jobs.values())
+        .filter(j => j.session_id === sessionId)
         .sort((a, b) => b.created_at.localeCompare(a.created_at))
         .slice(0, limit)
     },

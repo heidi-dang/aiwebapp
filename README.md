@@ -33,7 +33,7 @@ This application consists of three main services that communicate via HTTP APIs:
 ### Data Flow
 
 ```
-UI (Port 3000) ↔ Server (Port 3001) ↔ Runner (Port 3002)
+UI (Port 4000) ↔ Server (Port 4001) ↔ Runner (Port 4002)
     ↑                                               ↑
     └─────────────── Copilot API Bridge ────────────┘
 ```
@@ -42,8 +42,8 @@ UI (Port 3000) ↔ Server (Port 3001) ↔ Runner (Port 3002)
 
 For tunneling or external access, the following services and endpoints are available:
 
-#### UI Service (Port 3000)
-- **URL**: `http://localhost:3000` (dev) / `https://ai.heidi.com.au` (prod)
+#### UI Service (Port 4000)
+- **URL**: `http://localhost:4000` (dev) / `https://ai.heidi.com.au` (prod)
 - **Purpose**: Web interface for chat and agent management
 - **Key Routes**:
   - `/` - Main chat interface
@@ -51,8 +51,8 @@ For tunneling or external access, the following services and endpoints are avail
   - `/api/runner/*` - Proxy to runner service
   - `/api/toolbox/*` - Developer toolbox endpoints
 
-#### Server API (Port 3001)
-- **URL**: `http://localhost:3001` (dev) / `https://api.ai.heidi.com.au` (prod)
+#### Server API (Port 4001)
+- **URL**: `http://localhost:4001` (dev) / `https://api.ai.heidi.com.au` (prod)
 - **Purpose**: REST API for data management
 - **Key Endpoints**:
   - `GET /health` - Health check
@@ -65,8 +65,8 @@ For tunneling or external access, the following services and endpoints are avail
   - `GET/POST /api/knowledge` - Knowledge base
   - `GET/POST /api/toolbox` - Developer utilities
 
-#### Runner Service (Port 3002)
-- **URL**: `http://localhost:3002` (dev) / `https://runner.ai.heidi.com.au` (prod)
+#### Runner Service (Port 4002)
+- **URL**: `http://localhost:4002` (dev) / `https://runner.ai.heidi.com.au` (prod)
 - **Purpose**: Agent execution and job processing
 - **Key Endpoints**:
   - `GET /health` - Health check
@@ -114,13 +114,13 @@ This script will:
 - ✅ Provide access URLs
 
 **Default Ports:**
-- UI: `http://localhost:3000`
-- Server: `http://localhost:3001`
-- Runner: `http://localhost:3002`
+- UI: `http://localhost:4000`
+- Server: `http://localhost:4001`
+- Runner: `http://localhost:4002`
 
 ### Registration Page
 
-- **Register URL:** `http://localhost:3000/register`
+- **Register URL:** `http://localhost:4000/register`
 
 ### OAuth Social Login
 
@@ -141,7 +141,7 @@ Configure in `server/.env`:
 
 ```bash
 # Needed when running behind a public URL / tunnel so redirect_uri matches exactly
-SERVER_PUBLIC_URL=http://localhost:3001
+SERVER_PUBLIC_URL=http://localhost:4001
 
 # Recommended: secret used to sign/verify OAuth state
 OAUTH_STATE_SECRET=change_me
@@ -285,12 +285,12 @@ cloudflared tunnel login
 curl http://localhost:8080/v1/models
 
 # Test through UI proxy
-curl http://localhost:3000/api/copilot/v1/models
+curl http://localhost:4000/api/copilot/v1/models
 ```
 
 ## Tunneling for Remote Access
 
-For full remote access to the application (not just Copilot), tunnel the three main services (UI 3000, API 3001, Runner 3002).
+For full remote access to the application (not just Copilot), tunnel the three main services (UI 4000, API 4001, Runner 4002).
 
 ### Using ngrok for All Services
 
@@ -300,9 +300,9 @@ npm install -g ngrok
 ngrok config add-authtoken YOUR_TOKEN
 
 # Start tunnels for each service (replace PORTS with actual ports from startup)
-ngrok http 3000  # UI
-ngrok http 3001  # Server API
-ngrok http 3002  # Runner
+ngrok http 4000  # UI
+ngrok http 4001  # Server API
+ngrok http 4002  # Runner
 
 # Update environment variables with tunnel URLs
 # In ui/.env.local:
@@ -317,9 +317,9 @@ AI_API_URL=https://copilot.ai.heidi.com.au  # if using Copilot
 
 ```bash
 # Create tunnels for each service
-cloudflared tunnel --url http://localhost:3000  # UI
-cloudflared tunnel --url http://localhost:3001  # Server
-cloudflared tunnel --url http://localhost:3002  # Runner
+cloudflared tunnel --url http://localhost:4000  # UI
+cloudflared tunnel --url http://localhost:4001  # Server
+cloudflared tunnel --url http://localhost:4002  # Runner
 
 # Configure DNS and update environment variables as above
 ```
@@ -362,14 +362,14 @@ More details coming as we build this out.
 #### Server (`server/.env`)
 ```bash
 # Server configuration
-PORT=3001
-CORS_ORIGIN=http://localhost:3000
+PORT=4001
+CORS_ORIGIN=http://localhost:4000
 
 # Database
 DB_PATH=./server.db
 
 # Runner communication
-RUNNER_URL=http://localhost:3002
+RUNNER_URL=http://localhost:4002
 
 # Optional: Authentication
 AUTH_TOKEN=your_server_token
@@ -378,8 +378,8 @@ AUTH_TOKEN=your_server_token
 #### UI (`ui/.env.local`)
 ```bash
 # API endpoints
-NEXT_PUBLIC_API_URL=http://localhost:3001
-RUNNER_URL=http://localhost:3002
+NEXT_PUBLIC_API_URL=http://localhost:4001
+RUNNER_URL=http://localhost:4002
 RUNNER_TOKEN=test_runner_token_123
 
 # Copilot integration
@@ -392,8 +392,8 @@ NEXT_PUBLIC_OS_SECURITY_KEY=your_os_token
 #### Runner (`runner/.env`)
 ```bash
 # Runner configuration
-PORT=3002
-CORS_ORIGIN=http://localhost:3000
+PORT=4002
+CORS_ORIGIN=http://localhost:4000
 
 # Authentication
 RUNNER_TOKEN=test_runner_token_123
@@ -439,7 +439,7 @@ The guided hot reload script provides the optimal development experience:
 ```
 
 **Features:**
-- Strict local ports (6868/3000/3001/3002)
+- Strict local ports (6868/4000/4001/4002)
 - Guided prompts for env + optional checks
 - Live log tailing
 - Health checks for all services
@@ -448,9 +448,9 @@ The guided hot reload script provides the optimal development experience:
 
 **Log Output:**
 ```
-[Server] {"level":30,"time":1770345175510,"msg":"Server listening at http://127.0.0.1:3001"}
-[Runner] Using SQLite store: ./runner.db
-[UI]     ▲ Next.js 15.5.10 — Local: http://localhost:3000
+[Server] {"level":30,"time":1770345175510,"msg":"Server listening at http://127.0.0.1:4001"}
+[Runner] {"level":30,"time":1770345175515,"msg":"Runner listening at http://127.0.0.1:4002"}
+[UI]     ▲ Next.js 15.5.10 — Local: http://localhost:4000
 ```
 
 ### Development Scripts
@@ -524,9 +524,9 @@ npm run start
 
 **Local defaults (strict):**
 - Landing: 6868
-- UI: 3000
-- Server: 3001
-- Runner: 3002
+- UI: 4000
+- Server: 4001
+- Runner: 4002
 
 ## API Documentation
 
@@ -584,7 +584,7 @@ Authorization: Bearer <your-token>
 aiwebapp/
 ├── landing/               # Static landing page for heidi.com.au
 │   └── index.html        # Modern landing page with signup/signin
-├── server/                 # Backend API server (Port 3001)
+├── server/                 # Backend API server (Port 4001)
 │   ├── src/
 │   │   ├── index.ts       # Main Fastify server
 │   │   ├── routes/        # API route handlers
@@ -599,7 +599,7 @@ aiwebapp/
 │   ├── .env              # Server environment
 │   ├── package.json
 │   └── tsconfig.json
-├── ui/                     # Frontend Next.js app (Port 3000)
+├── ui/                     # Frontend Next.js app (Port 4000)
 │   ├── src/
 │   │   ├── app/           # Next.js 15 app router
 │   │   │   ├── layout.tsx
@@ -618,7 +618,7 @@ aiwebapp/
 │   ├── next.config.ts
 │   ├── package.json
 │   └── tailwind.config.ts
-├── runner/                 # Agent execution service (Port 3002)
+├── runner/                 # Agent execution service (Port 4002)
 │   ├── src/
 │   │   ├── index.ts       # Main runner server
 │   │   ├── db.ts          # Job storage and state
@@ -697,10 +697,10 @@ npm run smoke
 #### Port Conflicts
 ```bash
 # Check port usage
-lsof -i :3000 -i :3001 -i :3002
+lsof -i :4000 -i :4001 -i :4002
 
 # Kill conflicting processes
-pkill -f "node.*3000"
+pkill -f "node.*4000"
 ```
 
 #### Copilot Connection Issues
@@ -709,7 +709,7 @@ pkill -f "node.*3000"
 curl http://localhost:8080/v1/models
 
 # Check UI proxy
-curl http://localhost:3000/api/copilot/v1/models
+curl http://localhost:4000/api/copilot/v1/models
 ```
 
 #### Database Issues
@@ -737,8 +737,8 @@ tail -f logs/ui.log
 tail -f logs/runner.log
 
 # Check service health
-curl http://localhost:3001/health
-curl http://localhost:3002/health
+curl http://localhost:4001/health
+curl http://localhost:4002/health
 ```
 
 ## Contributing

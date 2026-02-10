@@ -14,7 +14,7 @@ import { promisify } from 'node:util'
 import type { RunnerEvent, RunnerEventType, JobStore, JobStatus } from './db.js'
 import { BridgeClient, createBridgeClientFromEnv } from './bridge.js'
 import { runCoderAgent } from './agent.js'
-import { createOllamaClientFromEnv } from './ollama.js'
+import { createOllamaClientFromEnv } from './llm/providers/ollama.js'
 import type { FastifyReply } from 'fastify'
 
 const execAsync = promisify(execCb)
@@ -34,6 +34,8 @@ export interface JobInput {
   tools?: string[]
   provider?: string
   model?: string
+  planner_model?: string
+  writer_model?: string
   session_id?: string
   team_agents?: Array<{id: string, provider?: string, model?: string}>
   base_dir?: string
@@ -932,13 +934,13 @@ async function executeWithOllama(ctx: JobContext): Promise<void> {
   await emitEvent(ctx, 'tool.start', { tool: 'ollama', input: { model, message } })
 
   try {
-    const response = await ollama.chat([
+    const response = await ollama.chat(model, [
       { role: 'user', content: message }
     ])
 
     await emitEvent(ctx, 'tool.output', {
       tool: 'ollama',
-      output: response
+      output: response.content || ''
     })
     await emitEvent(ctx, 'tool.end', { tool: 'ollama', success: true })
   } catch (err) {
@@ -959,7 +961,7 @@ async function callLLM(ctx: JobContext, provider: string, model: string, message
       role: m.role === 'tool' ? 'assistant' : m.role,
       content: m.content || ''
     }))
-    return await ollama.chat(ollamaMessages)
+    return (await ollama.chat(model, ollamaMessages)).content || ''
   } else if (provider === 'copilotapi') {
     // For now, simple, but since executeWithCopilotApi is complex, perhaps duplicate or simplify
     // To keep simple, assume only ollama for multi-agent

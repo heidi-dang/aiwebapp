@@ -1,0 +1,66 @@
+services:
+  server:
+    image: heididang/aiwebapp-server:latest
+    build: ./server
+    ports:
+      - "4001:4001"
+    environment:
+      - PORT=4001
+      - CORS_ORIGIN=http://localhost:4000
+      - RUNNER_URL=http://runner:4002
+      - CHROMA_URL=http://chroma:8000
+      - SQLITE_PATH=/app/data/server.db
+    volumes:
+      - server_data:/app/data
+      - ./server/logs:/app/logs
+
+  runner:
+    image: heididang/aiwebapp-runner:latest
+    build: ./runner
+    ports:
+      - "4002:4002"
+    environment:
+      - PORT=4002
+      - CORS_ORIGIN=http://localhost:4000
+      - RUNNER_DB=/app/data/runner.db
+      - RUNNER_TOKEN=dev_token_123
+      - RUNNER_PERSIST=true
+    volumes:
+      - runner_data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+
+  ui:
+    image: heididang/aiwebapp-ui:latest
+    build:
+      context: ./ui
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:4001
+    ports:
+      - "4000:4000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:4001
+      - RUNNER_URL=http://runner:4002
+    depends_on:
+      - server
+      - runner
+
+  sandbox:
+    image: heididang/aiwebapp-sandbox:latest
+    build: ./sandbox
+    # We don't expose ports or start it automatically as a service
+    # This entry ensures 'docker compose build' creates the image
+    profiles: ["donotstart"] 
+
+volumes:
+  server_data:
+  runner_data:
+  chroma_data:

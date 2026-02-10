@@ -38,7 +38,7 @@ async function getCopilotBaseUrl() {
     ? 'http://localhost:8080'
     : deriveSubdomainUrl('copilot', hostHeader)
 
-  const envAiApi = process.env.NEXT_PUBLIC_AI_API_URL ?? ''
+  const envAiApi = process.env.NEXT_PUBLIC_AI_API_URL?.trim() ?? ''
 
   return envAiApi || derivedAiApiUrl || null
 }
@@ -78,7 +78,7 @@ export async function DELETE(
 async function proxyRequest(request: NextRequest, path: string[]) {
   const copilotBaseUrl = await getCopilotBaseUrl()
 
-  if (!copilotBaseUrl) {
+  if (!copilotBaseUrl || copilotBaseUrl.trim() === '') {
     return NextResponse.json(
       { error: 'Copilot API base URL is not configured' },
       { status: 400 }
@@ -86,7 +86,7 @@ async function proxyRequest(request: NextRequest, path: string[]) {
   }
 
   const pathStr = path.join('/')
-  const targetUrl = `${copilotBaseUrl}/${pathStr}`
+  const targetUrl = `${copilotBaseUrl.replace(/\/$/, '')}/${pathStr}`
 
   const url = new URL(request.url)
   const searchParams = url.searchParams.toString()
@@ -94,11 +94,22 @@ async function proxyRequest(request: NextRequest, path: string[]) {
   const finalUrl = `${targetUrl}${queryString}`
 
   try {
+    let copilotHost: string
+    try {
+      copilotHost = new URL(copilotBaseUrl).host
+    } catch (e) {
+      console.error('Invalid copilotBaseUrl:', copilotBaseUrl)
+      return NextResponse.json(
+        { error: `Invalid Copilot API base URL: ${copilotBaseUrl}` },
+        { status: 500 }
+      )
+    }
+
     const response = await fetch(finalUrl, {
       method: request.method,
       headers: {
         ...Object.fromEntries(request.headers.entries()),
-        host: new URL(copilotBaseUrl).host
+        host: copilotHost
       },
       body:
         request.method !== 'GET' && request.method !== 'HEAD'

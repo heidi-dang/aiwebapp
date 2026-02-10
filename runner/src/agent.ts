@@ -5,7 +5,17 @@
 
 import type { JobContext, JobInput } from './executor.js'
 import type { RunnerEventType } from './db.js'
-import { OllamaClient, createOllamaClientFromEnv } from './ollama.js'
+import { GitService } from './services/git.js'
+import { RepoMapper } from './services/repo-map.js'
+import { WebService } from './services/web.js'
+import { MemoryService } from './services/memory.js'
+import { ContextManager } from './services/context.js'
+import { approvalService } from './services/approval.js'
+import { llmService } from './llm/index.js'
+import type { ChatMessage } from './llm/types.js'
+
+import { tracingService } from './tracing.js'
+import { SpanStatusCode } from '@opentelemetry/api'
 
 export type AgentState = 'planning' | 'code_generation' | 'code_execution' | 'review' | 'iterate' | 'finish'
 
@@ -23,18 +33,6 @@ export interface AgentMemory {
   }>
 }
 
-type ChatMessage = {
-  role: 'system' | 'user' | 'assistant' | 'tool'
-  content?: string | null
-  name?: string
-  tool_call_id?: string
-  tool_calls?: Array<{
-    id: string
-    type: 'function'
-    function: { name: string; arguments?: string }
-  }>
-}
-
 export class CoderAgent {
   private state: AgentState = 'planning'
   private memory: AgentMemory = {
@@ -44,10 +42,19 @@ export class CoderAgent {
   private maxIterations = 5
   private currentIteration = 0
   private messages: ChatMessage[] = []
-  private ollama: OllamaClient | null = null
+  private gitService: GitService
+  private repoMapper: RepoMapper
+  private webService: WebService
+  private memoryService: MemoryService
+  private contextManager: ContextManager
 
   constructor(private ctx: JobContext) {
-    this.ollama = createOllamaClientFromEnv()
+    const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
+    this.gitService = new GitService(baseDir)
+    this.repoMapper = new RepoMapper(baseDir)
+    this.webService = new WebService()
+    this.memoryService = new MemoryService(baseDir)
+    this.contextManager = new ContextManager(llmService)
     this.initializeMessages()
     this.loadMemory()
   }
@@ -57,19 +64,12 @@ export class CoderAgent {
     if (!sessionId) return
 
     // Load previous conversation from jobs with the same session_id
-    // For now, we'll load from recent jobs. In a full implementation,
-    // we'd have a separate memory table or better indexing
-
     try {
-      // Get recent jobs (this is a simplified approach)
-      const recentJobs = await this.ctx.store.listJobs(10) // Get last 10 jobs
+      // Use the optimized query by session_id
+      const recentJobs = await this.ctx.store.listJobsBySession(sessionId, 10)
 
       for (const job of recentJobs) {
         if (job.id === this.ctx.jobId) continue // Skip current job
-
-        // Check if this job has the same session_id
-        // For now, we'll assume jobs with similar input are related
-        // In a full implementation, we'd store session_id in the job record
 
         const jobEvents = await this.ctx.store.getEvents(job.id)
         const memoryEvents = jobEvents.filter(e => e.type === 'memory')
@@ -141,19 +141,60 @@ Be thorough and systematic in your approach.`
   }
 
   async run(): Promise<void> {
-    while (this.state !== 'finish' && this.currentIteration < this.maxIterations) {
-      await this.processState()
-      this.currentIteration++
-    }
+    const tracer = tracingService.getTracer()
+    return tracer.startActiveSpan('CoderAgent.run', async (span) => {
+      span.setAttribute('job_id', this.ctx.jobId)
+      
+      try {
+        // Inject repo map into system prompt
+        const mapSpan = tracer.startSpan('generate_repo_map')
+        try {
+          const map = await this.repoMapper.generateMap()
+          if (this.messages.length > 0 && this.messages[0].role === 'system') {
+            this.messages[0].content += `\n\nCurrent Repository Map:\n${map}`
+          }
+          mapSpan.setStatus({ code: SpanStatusCode.OK })
+        } catch (err) {
+          console.warn('Failed to generate repo map:', err)
+          mapSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(err) })
+        } finally {
+          mapSpan.end()
+        }
 
-    // Save memory before finishing
-    await this.saveMemory()
+        while (this.state !== 'finish' && this.currentIteration < this.maxIterations) {
+          if (this.ctx.aborted) {
+            await this.emitEvent('job.cancelled')
+            span.setAttribute('aborted', true)
+            return
+          }
+          
+          const iterSpan = tracer.startSpan(`iteration_${this.currentIteration}`)
+          iterSpan.setAttribute('state', this.state)
+          
+          await this.processState()
+          
+          iterSpan.end()
+          this.currentIteration++
+        }
 
-    if (this.state === 'finish') {
-      await this.emitEvent('done', { message: 'Task completed successfully' })
-    } else {
-      await this.emitEvent('done', { message: 'Task completed after max iterations' })
-    }
+        // Save memory before finishing
+        await this.saveMemory()
+
+        if (this.state === 'finish') {
+          await this.emitEvent('done', { message: 'Task completed successfully' })
+          span.setStatus({ code: SpanStatusCode.OK })
+        } else {
+          await this.emitEvent('done', { message: 'Task completed after max iterations' })
+          span.setStatus({ code: SpanStatusCode.OK, message: 'Max iterations reached' })
+        }
+      } catch (err) {
+        span.recordException(err instanceof Error ? err : new Error(String(err)))
+        span.setStatus({ code: SpanStatusCode.ERROR })
+        throw err
+      } finally {
+        span.end()
+      }
+    })
   }
 
   private async processState(): Promise<void> {
@@ -234,13 +275,13 @@ Generate the code now.`
     const execPrompt = `Execute and test the generated code.
 - If it's a script, run it with the appropriate runtime (node for .js, python for .py, etc.)
 - If it's a web application, check if it can be built/started
-- If there are tests, run them
+- **Run Tests/Lint**: Use 'run_test' and 'run_lint' tools if available to verify correctness.
 - Check for any runtime errors or issues
 - Verify the code works as expected and fulfills the user's request
 
 User request: "${this.ctx.input.message || this.ctx.input.instruction}"
 
-Execute the code and report the results.`
+Execute the code and report the results. If tests fail, try to fix the code.`
 
     this.messages.push({ role: 'user', content: execPrompt })
 
@@ -290,50 +331,52 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   private async callLLMWithTools(): Promise<ChatMessage> {
     const provider = this.ctx.input.provider || 'bridge'
 
-    if (provider === 'ollama' && this.ollama) {
-      return this.callLLMWithOllama()
-    }
-
     // Use bridge if available (preferred for Copilot access)
     if (this.ctx.bridge && provider === 'bridge') {
       return this.callLLMWithBridge()
     }
 
-    // Fallback to direct API
+    // Determine model based on state (Architect/Editor pattern)
+    let model = this.ctx.input.model || 'gpt-4o'
+    if (this.state === 'planning' && this.ctx.input.planner_model) {
+      model = this.ctx.input.planner_model
+    } else if (this.state !== 'planning' && this.ctx.input.writer_model) {
+      model = this.ctx.input.writer_model
+    }
+
+    // Configure LLM Service
+    // Note: We might want to pass API keys from ctx.input if provided, or rely on env vars
+    // For now, we assume env vars are set or ctx.input might have them in future
+    const llmConfig = {
+      provider: provider === 'bridge' ? 'openai' : provider, // Fallback to openai if bridge not available but requested? Or just use provider.
+      model,
+      // We can pass apiKey if we have it in ctx.input securely, otherwise LLMService uses env
+    }
+    
+    // If provider was 'bridge' but we got here, it means bridge wasn't available. 
+    // We should probably default to 'openai' or 'ollama' depending on config.
+    if (llmConfig.provider === 'bridge') {
+      llmConfig.provider = 'openai'
+    }
+
     const tools = this.getAvailableTools()
     const maxRetries = 3
     let lastError: Error | null = null
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const res = await fetch(`${process.env.AI_API_URL}/v1/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.AI_API_KEY}`,
-            ...(process.env.AI_API_KEY && { 'X-API-Key': process.env.AI_API_KEY })
-          },
-          body: JSON.stringify({
-            model: this.ctx.input.model || 'gpt-4o',
-            messages: this.messages,
-            tools,
-            tool_choice: 'auto',
-            temperature: 0.2,
-            max_tokens: 4000
-          })
-        })
-
-        if (!res.ok) {
-          const errorText = await res.text()
-          throw new Error(`LLM API request failed (${res.status}): ${errorText}`)
-        }
-
-        const json = await res.json()
-        const choice = json.choices?.[0]
-        const message = choice?.message as ChatMessage
-
-        if (!message) {
-          throw new Error('LLM API returned no message')
+        // Compress context before sending
+        const compressedMessages = await this.contextManager.compress(this.messages)
+        
+        const response = await llmService.chat(llmConfig, compressedMessages, tools)
+        
+        // Normalize response if needed (LLMService returns ChatResponse which is compatible with ChatMessage mostly)
+        // ChatResponse doesn't have 'name' or 'tool_call_id' usually, but 'tool_calls' matches.
+        
+        const message: ChatMessage = {
+          role: 'assistant',
+          content: response.content,
+          tool_calls: response.tool_calls
         }
 
         this.messages.push(message)
@@ -350,8 +393,42 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             })
           }
           // Continue the loop to get the next response after tool execution
+          // We need to call LLM again with the tool results
+          // Recursive call or loop? 
+          // The original code was: "Continue the loop to get the next response after tool execution"
+          // But it was inside the retry loop which is wrong. The retry loop is for *one* request.
+          // The original code actually had a bug or I misread it. 
+          // "Continue the loop to get the next response after tool execution" implies we go back to top of retry loop?
+          // No, that would re-send the original request.
+          
+          // Actually, the original code had:
+          // } else { return message }
+          // If tool calls, it looped? But the loop is `for (let attempt = 1...)`.
+          // If it successfully got a message and handled tool calls, it *should* call the API again.
+          // But the `attempt` loop is for retries of a *single* call.
+          
+          // Let's look at the original code:
+          // It seems the original code was confusingly structured or I am misinterpreting "Continue the loop".
+          // If `message.tool_calls` exists, it executes tools, pushes results.
+          // Then it falls through to... where?
+          // If it falls through the `try` block, it continues the `attempt` loop? No, `attempt` loop is for retries.
+          // If success, we should break the `attempt` loop.
+          
+          // Wait, the original code:
+          // if (message.tool_calls) { ... } else { return message }
+          // If it handled tool calls, it *finishes* the try block.
+          // Then it continues to `attempt++`? That means it retries the *same* request?
+          // That seems wrong. It should be a new request with the tool outputs.
+          
+          // The standard pattern is:
+          // 1. Call LLM
+          // 2. If tool calls: execute, append results, GOTO 1.
+          // 3. If no tool calls: return response.
+          
+          // I will implement this standard pattern here using recursion or a `while(true)` loop.
+          
+          return await this.callLLMWithTools()
         } else {
-          // No more tool calls, return the response
           return message
         }
       } catch (err) {
@@ -359,14 +436,12 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
         console.log(`LLM API attempt ${attempt} failed:`, lastError.message)
 
         if (attempt < maxRetries) {
-          // Exponential backoff: wait 1s, 2s, 4s...
           const delay = Math.pow(2, attempt - 1) * 1000
           await new Promise(resolve => setTimeout(resolve, delay))
         }
       }
     }
 
-    // All retries failed
     throw new Error(`LLM API failed after ${maxRetries} attempts. Last error: ${lastError?.message}`)
   }
 
@@ -420,30 +495,6 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       }
     } catch (err) {
       throw new Error(`Bridge Copilot call failed: ${err instanceof Error ? err.message : String(err)}`)
-    }
-  }
-
-  private async callLLMWithOllama(): Promise<ChatMessage> {
-    if (!this.ollama) {
-      throw new Error('Ollama client not available')
-    }
-
-    try {
-      // Convert messages to Ollama format
-      const ollamaMessages = this.messages.map(m => ({
-        role: m.role === 'tool' ? 'assistant' : m.role, // Ollama doesn't have 'tool' role
-        content: m.content || ''
-      }))
-
-      const response = await this.ollama.chat(ollamaMessages)
-
-      // For now, assume no tool calls; just return the content
-      return {
-        role: 'assistant',
-        content: response
-      }
-    } catch (err) {
-      throw new Error(`Ollama call failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -572,11 +623,188 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             required: ['path', 'range', 'text']
           }
         }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_commit',
+          description: 'Stage all files and commit changes with a message',
+          parameters: {
+            type: 'object',
+            properties: {
+              message: { type: 'string', description: 'Commit message' }
+            },
+            required: ['message']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_diff',
+          description: 'Show changes between commits or working tree',
+          parameters: {
+            type: 'object',
+            properties: {
+              target: { type: 'string', description: 'Target to diff against (default: HEAD)' }
+            }
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_log',
+          description: 'Show recent commit history',
+          parameters: {
+            type: 'object',
+            properties: {
+              limit: { type: 'number', description: 'Number of commits to show' }
+            }
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_undo',
+          description: 'Undo the last commit (soft reset)',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'run_test',
+          description: 'Run project tests (e.g. npm test)',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'run_lint',
+          description: 'Run project linter (e.g. npm run lint)',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'web_fetch',
+          description: 'Fetch and extract text from a URL',
+          parameters: {
+            type: 'object',
+            properties: {
+              url: { type: 'string', description: 'URL to fetch' }
+            },
+            required: ['url']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'memory_store',
+          description: 'Store valuable information in long-term memory',
+          parameters: {
+            type: 'object',
+            properties: {
+              content: { type: 'string', description: 'Information to store' },
+              tags: { type: 'array', items: { type: 'string' }, description: 'Tags for retrieval' }
+            },
+            required: ['content']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'memory_search',
+          description: 'Search long-term memory',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search query' }
+            },
+            required: ['query']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'search_knowledge',
+          description: 'Search the vector knowledge base for relevant code snippets or documentation',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search query' }
+            },
+            required: ['query']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'search_web',
+          description: 'Search the web for documentation or technical solutions (via DuckDuckGo)',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search query' }
+            },
+            required: ['query']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'run_sql_query',
+          description: 'Execute a SQL query against a database',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'SQL query to execute' },
+              connection_string: { type: 'string', description: 'Database connection string (optional, uses env if not provided)' }
+            },
+            required: ['query']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'call_api',
+          description: 'Make an external API call',
+          parameters: {
+            type: 'object',
+            properties: {
+              method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE'], description: 'HTTP method' },
+              url: { type: 'string', description: 'Full URL' },
+              headers: { type: 'object', description: 'JSON object of headers' },
+              body: { type: 'string', description: 'Request body' }
+            },
+            required: ['method', 'url']
+          }
+        }
       }
     ]
   }
 
   private async executeTool(call: NonNullable<ChatMessage['tool_calls']>[0]): Promise<any> {
+    if (this.ctx.aborted) return { error: 'Job cancelled' }
     const { name, arguments: args } = call.function!
     const params = args ? JSON.parse(args) : {}
 
@@ -606,6 +834,45 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
           break
         case 'apply_edit':
           result = await this.handleApplyEdit(params.path, params.range, params.text)
+          break
+        case 'git_commit':
+          result = await this.handleGitCommit(params.message)
+          break
+        case 'git_diff':
+          result = await this.handleGitDiff(params.target)
+          break
+        case 'git_log':
+          result = await this.handleGitLog(params.limit)
+          break
+        case 'git_undo':
+          result = await this.handleGitUndo()
+          break
+        case 'run_test':
+          result = await this.handleRunTest()
+          break
+        case 'run_lint':
+          result = await this.handleRunLint()
+          break
+        case 'web_fetch':
+          result = await this.handleWebFetch(params.url)
+          break
+        case 'memory_store':
+          result = await this.handleMemoryStore(params.content, params.tags)
+          break
+        case 'memory_search':
+          result = await this.handleMemorySearch(params.query)
+          break
+        case 'search_knowledge':
+          result = await this.handleSearchKnowledge(params.query)
+          break
+        case 'search_web':
+          result = await this.handleSearchWeb(params.query)
+          break
+        case 'run_sql_query':
+          result = await this.handleRunSqlQuery(params.query, params.connection_string)
+          break
+        case 'call_api':
+          result = await this.handleCallApi(params.method, params.url, params.headers, params.body)
           break
         default:
           throw new Error(`Unknown tool: ${name}`)
@@ -729,11 +996,55 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   }
 
   private async handleRunCommand(command: string) {
+    if (this.ctx.aborted) return { error: 'Job cancelled' }
+
+    // Check for sensitive commands requiring approval
+    if (this.isSensitiveCommand(command)) {
+      const { tokenId, wait } = approvalService.createRequest(this.ctx.jobId)
+      
+      await this.emitEvent('approval.request', {
+        tokenId,
+        type: 'run_command',
+        description: `Execute command: ${command}`,
+        data: { command }
+      })
+
+      const approved = await wait(300000) // 5 minutes timeout
+
+      await this.emitEvent('approval.response', {
+        tokenId,
+        approved
+      })
+
+      if (!approved) {
+        return { error: 'Command execution denied by user or timed out' }
+      }
+    }
+
     const { exec } = await import('child_process')
     const { promisify } = await import('util')
     const execAsync = promisify(exec)
-    const result = await execAsync(command, { timeout: 15000 })
-    return { stdout: result.stdout, stderr: result.stderr }
+    try {
+      const result = await execAsync(command, { timeout: 15000 })
+      return { stdout: result.stdout, stderr: result.stderr }
+    } catch (err: any) {
+      return { stdout: err.stdout || '', stderr: err.stderr || err.message, error: err.message }
+    }
+  }
+
+  private isSensitiveCommand(command: string): boolean {
+    const sensitivePatterns = [
+      /\brm\b/i,
+      /\bmv\b/i,
+      /\bchmod\b/i,
+      /\bchown\b/i,
+      /\bsudo\b/i,
+      /\bgit push\b/i,
+      /\bnpm publish\b/i,
+      /\byarn publish\b/i,
+      />/  // redirection
+    ]
+    return sensitivePatterns.some(p => p.test(command))
   }
 
   private async handleApplyEdit(path: string, range: { start: { line: number; character: number }; end: { line: number; character: number } }, text: string) {
@@ -782,6 +1093,144 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       await fs.writeFile(path, newContent, 'utf8')
     }
     return { path, range, textLength: text.length }
+  }
+
+  private async handleGitCommit(message: string) {
+    await this.gitService.add()
+    const hash = await this.gitService.commit(message)
+    return { hash, message }
+  }
+
+  private async handleGitDiff(target?: string) {
+    const diff = await this.gitService.diff(target)
+    return { diff }
+  }
+
+  private async handleGitLog(limit?: number) {
+    const log = await this.gitService.log(limit)
+    return { log }
+  }
+
+  private async handleGitUndo() {
+    await this.gitService.undo()
+    return { success: true, message: 'Undid last commit' }
+  }
+
+  private async handleRunTest() {
+    return this.runPackageScript('test')
+  }
+
+  private async handleRunLint() {
+    return this.runPackageScript('lint')
+  }
+
+  private async runPackageScript(scriptName: string) {
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    const baseDir = this.ctx.input.base_dir && this.ctx.input.base_dir.trim() ? this.ctx.input.base_dir : process.cwd()
+    const pkgPath = path.join(baseDir, 'package.json')
+
+    try {
+      const content = await fs.readFile(pkgPath, 'utf8')
+      const pkg = JSON.parse(content)
+      if (pkg.scripts && pkg.scripts[scriptName]) {
+        return await this.handleRunCommand(`npm run ${scriptName}`)
+      }
+      return { error: `No "${scriptName}" script found in package.json` }
+    } catch (err) {
+      return { error: 'Could not read package.json' }
+    }
+  }
+
+  private async handleWebFetch(url: string) {
+    const text = await this.webService.fetchPage(url)
+    return { url, text }
+  }
+
+  private async handleMemoryStore(content: string, tags?: string[]) {
+    await this.memoryService.store(content, tags)
+    return { success: true, message: 'Stored in memory' }
+  }
+
+  private async handleMemorySearch(query: string) {
+    const results = await this.memoryService.search(query)
+    return { query, results }
+  }
+
+  private async handleSearchWeb(query: string) {
+    // Use DuckDuckGo HTML search for simplicity (no API key required)
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
+    const text = await this.webService.fetchPage(url)
+    // Extract results (simple regex parsing)
+    // This is brittle but works for MVP without external paid API
+    // Real implementation should use SerpApi or similar
+    return { query, raw_html_snippet: text.slice(0, 2000), note: 'For better results, upgrade to SerpApi' }
+  }
+
+  private async handleRunSqlQuery(query: string, connectionString?: string) {
+    // For MVP, we only support SQLite local or the internal DB
+    // Security: Only allow SELECT statements
+    if (!query.trim().toLowerCase().startsWith('select')) {
+      return { error: 'Only SELECT statements are allowed in this tool' }
+    }
+
+    if (!connectionString) {
+      // Use internal runner DB as default for demo purposes?
+      // Or return error that connection string is needed
+      return { error: 'Connection string is required' }
+    }
+    
+    // In a real implementation, we'd use 'pg' or 'mysql2' or 'sqlite3' based on connection string
+    // Here we'll just mock it or return a placeholder
+    return { 
+      query, 
+      result: 'SQL execution not fully implemented in this MVP. Please upgrade to Phase 13 Complete.',
+      status: 'simulated'
+    }
+  }
+
+  private async handleCallApi(method: string, url: string, headers?: any, body?: string) {
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: headers || { 'Content-Type': 'application/json' },
+        body: body
+      })
+      const text = await response.text()
+      let json
+      try {
+        json = JSON.parse(text)
+      } catch {
+        // ignore
+      }
+      return {
+        status: response.status,
+        statusText: response.statusText,
+        data: json || text
+      }
+    } catch (err) {
+      return { error: `API call failed: ${err instanceof Error ? err.message : String(err)}` }
+    }
+  }
+
+  private async handleSearchKnowledge(query: string) {
+    // Call server to search knowledge base
+    // We assume the runner can talk to the server API
+    const serverUrl = process.env.SERVER_URL || 'http://localhost:4001'
+    try {
+      const response = await fetch(`${serverUrl}/knowledge/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, limit: 5 })
+      })
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`)
+      }
+      const data = await response.json()
+      return data
+    } catch (err) {
+      return { error: `Failed to search knowledge: ${err instanceof Error ? err.message : String(err)}` }
+    }
   }
 
   private async emitEvent(type: RunnerEventType, data?: unknown): Promise<void> {
