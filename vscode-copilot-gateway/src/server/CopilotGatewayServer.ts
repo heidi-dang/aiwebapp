@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
+import * as crypto from 'crypto';
 import { Server as HttpServer } from 'http';
 import { WebSocketServer } from 'ws';
 
@@ -325,7 +326,40 @@ export class CopilotGatewayServer {
         await this.sessionManager.updateSession(request.session_id, request.messages);
       }
 
-      // Queue the request
+      // Handle streaming request
+      if (request.stream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        try {
+          for await (const chunk of this.copilotClient.createStreamingChatCompletion(request)) {
+            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+          }
+          res.write('data: [DONE]\n\n');
+          res.end();
+
+          // Record metrics for successful stream (simplified)
+          if (this.metricsService) {
+            await this.metricsService.recordRequest({
+              timestamp: startTime,
+              user_id: authResult.userId,
+              session_id: request.session_id,
+              model: request.model,
+              tokens_used: 0, // In streaming we'd need to extract this from the last chunk
+              request_duration: Date.now() - startTime,
+              status: 'success'
+            });
+          }
+        } catch (streamError) {
+          console.error('Error in stream:', streamError);
+          res.write(`data: ${JSON.stringify({ error: 'Stream error' })}\n\n`);
+          res.end();
+        }
+        return;
+      }
+
+      // Queue the non-streaming request
       const result = await this.requestQueue.add(async () => {
         return await this.copilotClient.createChatCompletion(request);
       });
@@ -380,7 +414,17 @@ export class CopilotGatewayServer {
     // Check API key if configured
     if (this.config.apiKey) {
       const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ') || authHeader.substring(7) !== this.config.apiKey) {
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return { success: false, status: 401, error: 'Unauthorized' };
+      }
+
+      const providedKey = authHeader.substring(7);
+      try {
+        if (!crypto.timingSafeEqual(Buffer.from(providedKey), Buffer.from(this.config.apiKey))) {
+          return { success: false, status: 401, error: 'Unauthorized' };
+        }
+      } catch (e) {
+        // Handle cases where Buffer lengths differ
         return { success: false, status: 401, error: 'Unauthorized' };
       }
     }
@@ -411,7 +455,16 @@ export class CopilotGatewayServer {
       request.model &&
       Array.isArray(request.messages) &&
       request.messages.length > 0 &&
-      request.messages.every(msg => msg.role && msg.content)
+      request.messages.every(msg => {
+        if (!msg.role) {
+          return false;
+        }
+        // Assistant messages can have null content if they have tool calls
+        if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+          return true;
+        }
+        return typeof msg.content === 'string';
+      })
     );
   }
 
