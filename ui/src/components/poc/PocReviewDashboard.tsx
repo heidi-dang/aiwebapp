@@ -8,6 +8,7 @@ import { PocGameHud } from '@/components/poc/PocGameHud'
 import { PocRunTimeline } from '@/components/poc/PocRunTimeline'
 import { PocBadgeToasts } from '@/components/poc/PocBadgeToasts'
 import { PocLeaderboard } from '@/components/poc/PocLeaderboard'
+import { PocBadgeCabinet } from '@/components/poc/PocBadgeCabinet'
 
 function formatTs(tsSeconds: number) {
   const d = new Date(tsSeconds * 1000)
@@ -83,6 +84,7 @@ export function PocReviewDashboard() {
             </div>
           </div>
           <PocLeaderboard />
+          <PocBadgeCabinet />
         </div>
 
         <div className="min-h-0 rounded-xl border border-primary/15 bg-background/60 p-3">
