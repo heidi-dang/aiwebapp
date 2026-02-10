@@ -6,13 +6,14 @@ import compression from 'compression';
 import morgan from 'morgan';
 import * as crypto from 'crypto';
 import { Server as HttpServer } from 'http';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
 
 import {
   ServerConfig,
   ChatCompletionRequest,
   ModelsResponse,
-  ServerStats
+  ServerStats,
+  WebSocketMessage
 } from '../types';
 import { AuthService } from '../services/AuthService';
 import { SessionManager } from '../services/SessionManager';
@@ -237,7 +238,7 @@ export class CopilotGatewayServer {
     }, 5000);
   }
 
-  private handleWebSocketMessage(ws: any, data: any): void {
+  private handleWebSocketMessage(ws: WebSocket, data: WebSocketMessage): void {
     // Handle WebSocket messages for real-time features
     switch (data.type) {
       case 'subscribe':
@@ -379,7 +380,7 @@ export class CopilotGatewayServer {
 
       // Add session ID to response if present
       if (request.session_id) {
-        (result as any).session_id = request.session_id;
+        result.session_id = request.session_id;
       }
 
       res.json(result);
@@ -391,7 +392,7 @@ export class CopilotGatewayServer {
       if (this.metricsService) {
         await this.metricsService.recordRequest({
           timestamp: startTime,
-          user_id: (req as any).userId,
+          user_id: (req as { userId?: string }).userId,
           session_id: req.body?.session_id,
           model: req.body?.model || 'unknown',
           tokens_used: 0,
@@ -423,7 +424,7 @@ export class CopilotGatewayServer {
         if (!crypto.timingSafeEqual(Buffer.from(providedKey), Buffer.from(this.config.apiKey))) {
           return { success: false, status: 401, error: 'Unauthorized' };
         }
-      } catch (e) {
+      } catch {
         // Handle cases where Buffer lengths differ
         return { success: false, status: 401, error: 'Unauthorized' };
       }
@@ -437,9 +438,9 @@ export class CopilotGatewayServer {
         if (authToken) {
           try {
             const user = await this.authService.validateToken(authToken);
-            (req as any).userId = user.user_id;
+            (req as { userId?: string }).userId = user.user_id;
             return { success: true, userId: user.user_id };
-          } catch (error) {
+          } catch {
             return { success: false, status: 401, error: 'Invalid auth token' };
           }
         }
@@ -530,7 +531,7 @@ export class CopilotGatewayServer {
     res.json(metrics);
   }
 
-  private handleError(err: any, req: express.Request, res: express.Response, _next: express.NextFunction): void {
+  private handleError(err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction): void {
     console.error('Unhandled error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }

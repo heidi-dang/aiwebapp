@@ -1,4 +1,4 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
 import dotenvExpand from 'dotenv-expand'
 dotenvExpand.expand(dotenv.config({ path: '../../.env' }))
 
@@ -16,11 +16,11 @@ const PORT = process.env.AUTH_PORT || 4003
 
 app.use(cors())
 app.use(express.json())
-app.use(express.static(path.join(__dirname, 'public')))
+app.use(express.static(path.join(__dirname, '..', 'public')))
 
 // Login page
 app.get('/login', (req, res) => {
-  const filePath = path.join(__dirname, 'public', 'login.html')
+  const filePath = path.join(__dirname, '..', 'public', 'login.html')
   const isLocal = req.hostname.includes('localhost') || req.hostname.includes('127.0.0.1')
   let html = fs.readFileSync(filePath, 'utf8')
   if (isLocal) {
@@ -35,7 +35,7 @@ app.get('/login', (req, res) => {
 
 // Signup/Register page
 app.get('/signup', (req, res) => {
-  const filePath = path.join(__dirname, 'public', 'register.html')
+  const filePath = path.join(__dirname, '..', 'public', 'register.html')
   const isLocal = req.hostname.includes('localhost') || req.hostname.includes('127.0.0.1')
   let html = fs.readFileSync(filePath, 'utf8')
   if (isLocal) {

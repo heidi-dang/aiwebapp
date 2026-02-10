@@ -1,0 +1,401 @@
+warning: in the working copy of 'ui/src/hooks/useAIResponseStream.tsx', CRLF will be replaced by LF the next time Git touches it
+diff --git a/runner/src/agent.ts b/runner/src/agent.ts
+index ac512ae..b2a5939 100644
+--- a/runner/src/agent.ts
++++ b/runner/src/agent.ts
+@@ -101,13 +101,29 @@ export class CoderAgent {
+   }
+
+   private async saveMemory(): Promise<void> {
+-    // Save current conversation to events
+-    for (const msg of this.memory.conversation) {
+-      await this.emitEvent('memory', {
++    // Save current conversation to events in batch
++    const memoryEvents = this.memory.conversation.map(msg => ({
++      id: `evt_${Date.now()}_${Math.random().toString(16).slice(2)}_${Math.random().toString(16).slice(2)}`,
++      type: 'memory' as RunnerEventType,
++      ts: new Date().toISOString(),
++      job_id: this.ctx.jobId,
++      data: {
+         role: msg.role,
+         content: msg.content,
+         timestamp: msg.timestamp
+-      })
++      }
++    }))
++
++    if (memoryEvents.length > 0) {
++      await this.ctx.store.addEvents(memoryEvents)
++
++      // Also emit to subscribers
++      for (const event of memoryEvents) {
++        for (const sub of this.ctx.subscribers) {
++          sub.raw.write(`event: memory\n`)
++          sub.raw.write(`data: ${JSON.stringify(event)}\n\n`)
++        }
++      }
+     }
+   }
+
+diff --git a/runner/src/db.ts b/runner/src/db.ts
+index 77bfbf9..7d807e6 100644
+--- a/runner/src/db.ts
++++ b/runner/src/db.ts
+@@ -55,6 +55,7 @@ export interface JobStore {
+   listJobsBySession(sessionId: string, limit?: number): Promise<JobRow[]>
+   updateJobStatus(id: string, status: JobStatus, startedAt?: string, finishedAt?: string): Promise<void>
+   addEvent(event: RunnerEvent): Promise<void>
++  addEvents(events: RunnerEvent[]): Promise<void>
+   getEvents(jobId: string): Promise<RunnerEvent[]>
+   deleteJob(id: string): Promise<void>
+ }
+@@ -98,7 +99,7 @@ export async function createSqliteStore(dbPath: string): Promise<JobStore> {
+     CREATE INDEX IF NOT EXISTS idx_events_job_id ON events(job_id);
+     CREATE INDEX IF NOT EXISTS idx_jobs_session_id ON jobs(session_id);
+   `)
+-
++
+   // Migration: Add session_id column if it doesn't exist (for existing databases)
+   try {
+     await db.exec(`ALTER TABLE jobs ADD COLUMN session_id TEXT`)
+@@ -112,7 +113,7 @@ export async function createSqliteStore(dbPath: string): Promise<JobStore> {
+       if (input && typeof input === 'object' && 'session_id' in input) {
+         sessionId = (input as any).session_id
+       }
+-
++
+       await db.run(
+         `INSERT INTO jobs (id, status, created_at, timeout_ms, input, session_id) VALUES (?, 'pending', ?, ?, ?, ?)`,
+         id,
+@@ -156,6 +157,30 @@ export async function createSqliteStore(dbPath: string): Promise<JobStore> {
+       )
+     },
+
++    async addEvents(events: RunnerEvent[]) {
++      if (events.length === 0) return
++      await db.run('BEGIN TRANSACTION')
++      try {
++        const stmt = await db.prepare(
++          `INSERT INTO events (id, job_id, type, ts, data) VALUES (?, ?, ?, ?, ?)`
++        )
++        for (const event of events) {
++          await stmt.run(
++            event.id,
++            event.job_id,
++            event.type,
++            event.ts,
++            event.data ? JSON.stringify(event.data) : null
++          )
++        }
++        await stmt.finalize()
++        await db.run('COMMIT')
++      } catch (err) {
++        await db.run('ROLLBACK')
++        throw err
++      }
++    },
++
+     async getEvents(jobId: string) {
+       const rows = await db.all<EventRow[]>(`SELECT * FROM events WHERE job_id = ? ORDER BY ts ASC`, jobId)
+       return rows.map((row) => ({
+@@ -187,7 +212,7 @@ export function createInMemoryStore(): JobStore {
+       if (input && typeof input === 'object' && 'session_id' in input) {
+         sessionId = (input as any).session_id
+       }
+-
++
+       jobs.set(id, {
+         id,
+         status: 'pending',
+@@ -210,7 +235,7 @@ export function createInMemoryStore(): JobStore {
+         .sort((a, b) => b.created_at.localeCompare(a.created_at))
+         .slice(0, limit)
+     },
+-
++
+     async listJobsBySession(sessionId: string, limit = 20) {
+       return Array.from(jobs.values())
+         .filter(j => j.session_id === sessionId)
+@@ -233,6 +258,14 @@ export function createInMemoryStore(): JobStore {
+       events.set(event.job_id, list)
+     },
+
++    async addEvents(eventsList: RunnerEvent[]) {
++      for (const event of eventsList) {
++        const list = events.get(event.job_id) ?? []
++        list.push(event)
++        events.set(event.job_id, list)
++      }
++    },
++
+     async getEvents(jobId: string) {
+       return events.get(jobId) ?? []
+     },
+diff --git a/server/src/storage.ts b/server/src/storage.ts
+index 0620cce..53edad1 100644
+--- a/server/src/storage.ts
++++ b/server/src/storage.ts
+@@ -190,13 +190,13 @@ export class InMemoryStore implements Store {
+     componentId: string
+   }): Promise<SessionEntry[]> {
+     const listKey = `${args.dbId}::${args.entityType}::${args.componentId}`
+-
++
+     // Check cache first
+     const cached = sessionCache.getSessionList(listKey)
+     if (cached) {
+       return cached
+     }
+-
++
+     const result = this.sessionsByListKey.get(listKey) ?? []
+     sessionCache.setSessionList(listKey, result)
+     return result
+@@ -208,7 +208,7 @@ export class InMemoryStore implements Store {
+     if (cached) {
+       return cached
+     }
+-
++
+     const allSessions: SessionEntry[] = []
+     for (const session of this.sessionsByKey.values()) {
+       allSessions.push(session.entry)
+@@ -224,7 +224,7 @@ export class InMemoryStore implements Store {
+     if (cached) {
+       return cached
+     }
+-
++
+     for (const session of this.sessionsByKey.values()) {
+       if (session.entry.session_id === sessionId) {
+         sessionCache.setSession(sessionId, session.entry)
+@@ -300,7 +300,7 @@ export class InMemoryStore implements Store {
+
+     session.runs.push(args.run)
+     session.entry.updated_at = nowSeconds()
+-
++
+     // Invalidate cache
+     sessionCache.deleteSession(args.sessionId)
+     sessionCache.deleteSessionList('all_sessions')
+@@ -349,13 +349,13 @@ export class InMemoryStore implements Store {
+     const createdAt = nowSeconds();
+     const role = (await this.getUserCount()) === 0 ? 'admin' : 'user';
+     const id = (this.users.length + 1).toString();
+-    const user: User = {
+-      id,
+-      email,
++    const user: User = {
++      id,
++      email,
+       name,
+       password_hash: hashedPassword,
+       email_verified: false,
+-      role,
++      role,
+       created_at: createdAt,
+       updated_at: createdAt
+     };
+@@ -444,7 +444,7 @@ export class InMemoryStore implements Store {
+         break
+       }
+     }
+-
++
+     // Invalidate cache
+     sessionCache.deleteSession(sessionId)
+     sessionCache.deleteSessionList('all_sessions')
+@@ -562,6 +562,7 @@ export class SqliteStore implements Store {
+         '  PRIMARY KEY (db_id, entity_type, component_id, session_id)',
+         ');',
+         'CREATE INDEX IF NOT EXISTS sessions_list_idx ON sessions (db_id, entity_type, component_id, created_at DESC);',
++        'CREATE INDEX IF NOT EXISTS sessions_created_at_idx ON sessions (created_at DESC);',
+         'CREATE TABLE IF NOT EXISTS runs (',
+         '  id INTEGER PRIMARY KEY AUTOINCREMENT,',
+         '  db_id TEXT NOT NULL,',
+@@ -573,6 +574,7 @@ export class SqliteStore implements Store {
+         '  content_json TEXT',
+         ');',
+         'CREATE INDEX IF NOT EXISTS runs_session_idx ON runs (db_id, entity_type, component_id, session_id, created_at ASC);',
++        'CREATE INDEX IF NOT EXISTS runs_session_id_idx ON runs (session_id, created_at ASC);',
+         'CREATE TABLE IF NOT EXISTS users (',
+         '  id INTEGER PRIMARY KEY AUTOINCREMENT,',
+         '  email TEXT NOT NULL UNIQUE,',
+@@ -643,13 +645,13 @@ export class SqliteStore implements Store {
+     componentId: string
+   }): Promise<SessionEntry[]> {
+     const listKey = `${args.dbId}::${args.entityType}::${args.componentId}`
+-
++
+     // Check cache first
+     const cached = sessionCache.getSessionList(listKey)
+     if (cached) {
+       return cached
+     }
+-
++
+     const rows = await this.db.all<
+       Array<{ session_id: string; session_name: string; created_at: number; updated_at: number | null }>
+     >(
+@@ -667,7 +669,7 @@ export class SqliteStore implements Store {
+       entity_type: args.entityType,
+       component_id: args.componentId
+     }))
+-
++
+     sessionCache.setSessionList(listKey, result)
+     return result
+   }
+@@ -678,7 +680,7 @@ export class SqliteStore implements Store {
+     if (cached) {
+       return cached
+     }
+-
++
+     const rows = await this.db.all<
+       Array<{ session_id: string; session_name: string; created_at: number; updated_at: number | null; entity_type: EntityType; component_id: string }>
+     >(
+@@ -693,7 +695,7 @@ export class SqliteStore implements Store {
+       entity_type: r.entity_type,
+       component_id: r.component_id
+     }))
+-
++
+     sessionCache.setSessionList(cacheKey, result)
+     return result
+   }
+@@ -704,7 +706,7 @@ export class SqliteStore implements Store {
+     if (cached) {
+       return cached
+     }
+-
++
+     const row = await this.db.get<
+       { session_id: string; session_name: string; created_at: number; updated_at: number | null; entity_type: EntityType; component_id: string } | undefined
+     >(
+@@ -722,7 +724,7 @@ export class SqliteStore implements Store {
+       entity_type: row.entity_type,
+       component_id: row.component_id
+     }
+-
++
+     sessionCache.setSession(sessionId, result)
+     return result
+   }
+@@ -811,7 +813,7 @@ export class SqliteStore implements Store {
+       args.componentId,
+       args.sessionId
+     )
+-
++
+     // Invalidate cache
+     sessionCache.deleteSession(args.sessionId)
+     sessionCache.deleteSessionList('all_sessions')
+@@ -1044,7 +1046,7 @@ export class SqliteStore implements Store {
+       nowSeconds(),
+       sessionId
+     )
+-
++
+     // Invalidate cache
+     sessionCache.deleteSession(sessionId)
+     sessionCache.deleteSessionList('all_sessions')
+@@ -1063,11 +1065,11 @@ export class SqliteStore implements Store {
+       'SELECT state_data FROM session_state WHERE session_id = ?',
+       sessionId
+     )
+-
++
+     if (!row) {
+       return null
+     }
+-
++
+     try {
+       return JSON.parse(row.state_data)
+     } catch (error) {
+@@ -1079,7 +1081,7 @@ export class SqliteStore implements Store {
+   async updateSessionState(sessionId: string, state: Record<string, any>): Promise<void> {
+     const stateData = JSON.stringify(state)
+     const updatedAt = nowSeconds()
+-
++
+     await this.db.run(
+       'INSERT OR REPLACE INTO session_state (session_id, state_data, updated_at) VALUES (?, ?, ?)',
+       sessionId,
+@@ -1115,7 +1117,7 @@ export class SqliteStore implements Store {
+     const id = `fact_${Date.now()}_${Math.random().toString(16).slice(2)}`
+     const createdAt = nowSeconds()
+     const tagsJson = JSON.stringify(tags)
+-
++
+     await this.db.run(
+       'INSERT INTO user_facts (id, user_id, content, tags, created_at) VALUES (?, ?, ?, ?, ?)',
+       id, userId, content, tagsJson, createdAt
+@@ -1170,9 +1172,9 @@ export class SqliteStore implements Store {
+
+   async getUserOrgs(userId: string): Promise<Array<{ id: string; name: string; role: string }>> {
+     return this.db.all(
+-      `SELECT o.id, o.name, m.role
+-       FROM organizations o
+-       JOIN organization_members m ON o.id = m.org_id
++      `SELECT o.id, o.name, m.role
++       FROM organizations o
++       JOIN organization_members m ON o.id = m.org_id
+        WHERE m.user_id = ?`,
+       userId
+     )
+diff --git a/ui/src/hooks/useAIResponseStream.tsx b/ui/src/hooks/useAIResponseStream.tsx
+index 26964a4..2f69fe2 100644
+--- a/ui/src/hooks/useAIResponseStream.tsx
++++ b/ui/src/hooks/useAIResponseStream.tsx
+@@ -65,19 +65,18 @@ function parseBuffer(
+   buffer: string,
+   onChunk: (chunk: RunResponseContent) => void
+ ): string {
+-  let currentIndex = 0
+-  let jsonStartIndex = buffer.indexOf('{', currentIndex)
++  let lastEndIndex = 0
++  let jsonStartIndex = buffer.indexOf('{', lastEndIndex)
+
+   // Process as many complete JSON objects as possible.
+-  while (jsonStartIndex !== -1 && jsonStartIndex < buffer.length) {
++  while (jsonStartIndex !== -1) {
+     let braceCount = 0
+     let inString = false
+     let escapeNext = false
+     let jsonEndIndex = -1
+-    let i = jsonStartIndex
+
+     // Walk through the string to find the matching closing brace.
+-    for (; i < buffer.length; i++) {
++    for (let i = jsonStartIndex; i < buffer.length; i++) {
+       const char = buffer[i]
+
+       if (inString) {
+@@ -119,13 +118,9 @@ function parseBuffer(
+         continue
+       }
+
+-      // Move currentIndex past the parsed JSON and trim any leading whitespace.
+-      currentIndex = jsonEndIndex + 1
+-      buffer = buffer.slice(currentIndex).trim()
+-
+-      // Reset currentIndex and search for the next JSON object.
+-      currentIndex = 0
+-      jsonStartIndex = buffer.indexOf('{', currentIndex)
++      // Move lastEndIndex past the parsed JSON.
++      lastEndIndex = jsonEndIndex + 1
++      jsonStartIndex = buffer.indexOf('{', lastEndIndex)
+     } else {
+       // If a complete JSON object is not found, break out and wait for more data.
+       break
+@@ -133,7 +128,7 @@ function parseBuffer(
+   }
+
+   // Return any unprocessed (partial) data.
+-  return buffer
++  return lastEndIndex > 0 ? buffer.slice(lastEndIndex).trim() : buffer
+ }
+
+ /**

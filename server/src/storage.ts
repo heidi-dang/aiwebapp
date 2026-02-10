@@ -1,5 +1,6 @@
 import { AgentDetails, EntityType, RunRecord, SessionEntry, TeamDetails, User, UserSession, SocialAccount, ModelConfig, ToolDetails } from './types.js'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 import sqlite3 from 'sqlite3'
 import { open, type Database } from 'sqlite'
@@ -348,7 +349,7 @@ export class InMemoryStore implements Store {
   async createUser(email: string, name: string, hashedPassword: string): Promise<User> {
     const createdAt = nowSeconds();
     const role = (await this.getUserCount()) === 0 ? 'admin' : 'user';
-    const id = (this.users.length + 1).toString();
+    const id = randomUUID();
     const user: User = {
       id,
       email,
@@ -576,7 +577,7 @@ export class SqliteStore implements Store {
         'CREATE INDEX IF NOT EXISTS runs_session_idx ON runs (db_id, entity_type, component_id, session_id, created_at ASC);',
         'CREATE INDEX IF NOT EXISTS runs_session_id_idx ON runs (session_id, created_at ASC);',
         'CREATE TABLE IF NOT EXISTS users (',
-        '  id INTEGER PRIMARY KEY AUTOINCREMENT,',
+        '  id TEXT PRIMARY KEY,',
         '  email TEXT NOT NULL UNIQUE,',
         '  name TEXT NOT NULL,',
         '  hashed_password TEXT NOT NULL,',

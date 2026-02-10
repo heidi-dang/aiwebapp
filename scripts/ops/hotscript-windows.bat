@@ -223,17 +223,13 @@ if "%result%"=="" (
     call :set_env_value "%ENV_FILE%" "NEXT_PUBLIC_AI_API_URL" "%NEXT_PUBLIC_AI_API_URL%"
 )
 
-call :get_env_value "%ENV_FILE%" "CLOUDFLARE_TUNNEL_NAME"
-if "%result%"=="" (
-    call :prompt_user "Would you like to use Cloudflare Tunnel"
-    if !errorlevel! equ 0 (
-        call :prompt_value "Enter Cloudflare Tunnel Name/ID" "aiwebapp-dev"
-        set "CLOUDFLARE_TUNNEL_NAME=!result!"
-        call :set_env_value "%ENV_FILE%" "CLOUDFLARE_TUNNEL_NAME" "!CLOUDFLARE_TUNNEL_NAME!"
+REM Get CLOUDFLARE_TUNNEL_NAME
+for /f "tokens=1,* delims==" %%a in ('findstr /b "CLOUDFLARE_TUNNEL_NAME=" "%ENV_FILE%" 2^>nul') do (
+    if "%%a"=="CLOUDFLARE_TUNNEL_NAME" (
+        set "CLOUDFLARE_TUNNEL_NAME=%%b"
     )
-) else (
-    set "CLOUDFLARE_TUNNEL_NAME=%result%"
 )
+if "%CLOUDFLARE_TUNNEL_NAME%"=="" set "CLOUDFLARE_TUNNEL_NAME="
 
 call :step "Step 4: Dependency Installation"
 call :prompt_user "Would you like to install/update dependencies"
@@ -261,14 +257,29 @@ if %errorlevel% equ 0 (
 call :step "Step 5: Port Availability Check"
 set LANDING_PORT=6868
 
-call :get_env_value "%ENV_FILE%" "PORT"
-if "%result%"=="" set "UI_PORT=4000" else set "UI_PORT=%result%"
+REM Get PORT
+for /f "tokens=1,* delims==" %%a in ('findstr /b "PORT=" "%ENV_FILE%" 2^>nul') do (
+    if "%%a"=="PORT" (
+        set "UI_PORT=%%b"
+    )
+)
+if "%UI_PORT%"=="" set "UI_PORT=4000"
 
-call :get_env_value "%ENV_FILE%" "SERVER_PORT"
-if "%result%"=="" set "SERVER_PORT=4001" else set "SERVER_PORT=%result%"
+REM Get SERVER_PORT
+for /f "tokens=1,* delims==" %%a in ('findstr /b "SERVER_PORT=" "%ENV_FILE%" 2^>nul') do (
+    if "%%a"=="SERVER_PORT" (
+        set "SERVER_PORT=%%b"
+    )
+)
+if "%SERVER_PORT%"=="" set "SERVER_PORT=4001"
 
-call :get_env_value "%ENV_FILE%" "RUNNER_PORT"
-if "%result%"=="" set "RUNNER_PORT=4002" else set "RUNNER_PORT=%result%"
+REM Get RUNNER_PORT
+for /f "tokens=1,* delims==" %%a in ('findstr /b "RUNNER_PORT=" "%ENV_FILE%" 2^>nul') do (
+    if "%%a"=="RUNNER_PORT" (
+        set "RUNNER_PORT=%%b"
+    )
+)
+if "%RUNNER_PORT%"=="" set "RUNNER_PORT=4002"
 
 echo Checking availability of critical ports...
 for %%p in (4000 4001 4002 4003 4004 4005 4006 6868 8080) do (
@@ -286,9 +297,9 @@ for %%p in (4000 4001 4002 4003 4004 4005 4006 6868 8080) do (
 echo.
 echo Service URLs:
 echo   Landing: http://localhost:%LANDING_PORT%
-echo   UI:      http://localhost:%UI_PORT%
-echo   API:     http://localhost:%SERVER_PORT%
-echo   Runner:  http://localhost:%RUNNER_PORT%
+echo   UI:      http://localhost:!UI_PORT!
+echo   API:     http://localhost:!SERVER_PORT!
+echo   Runner:  http://localhost:!RUNNER_PORT!
 echo   Ollama:  http://localhost:11434
 echo   Proxy:   http://localhost:8080
 
@@ -298,19 +309,20 @@ echo.
 echo Press Ctrl+C to stop all services
 echo.
 
-set PORT=%UI_PORT%
-set SERVER_PORT=%SERVER_PORT%
-set RUNNER_PORT=%RUNNER_PORT%
-set RUNNER_URL=http://localhost:%RUNNER_PORT%
-set CORS_ORIGIN=http://localhost:%UI_PORT%
-set NEXT_PUBLIC_API_URL=http://localhost:%SERVER_PORT%
-set NEXT_PUBLIC_RUNNER_BASE_URL=http://localhost:%RUNNER_PORT%
-call :get_env_value "%ENV_FILE%" "NEXT_PUBLIC_AI_API_URL"
-if "%result%"=="" (
-    set NEXT_PUBLIC_AI_API_URL=http://localhost:8080
-) else (
-    set NEXT_PUBLIC_AI_API_URL=%result%
+set PORT=!UI_PORT!
+set SERVER_PORT=!SERVER_PORT!
+set RUNNER_PORT=!RUNNER_PORT!
+set RUNNER_URL=http://localhost:!RUNNER_PORT!
+set CORS_ORIGIN=http://localhost:!UI_PORT!
+set NEXT_PUBLIC_API_URL=http://localhost:!SERVER_PORT!
+set NEXT_PUBLIC_RUNNER_BASE_URL=http://localhost:!RUNNER_PORT!
+REM Get NEXT_PUBLIC_AI_API_URL
+for /f "tokens=1,* delims==" %%a in ('findstr /b "NEXT_PUBLIC_AI_API_URL=" "%ENV_FILE%" 2^>nul') do (
+    if "%%a"=="NEXT_PUBLIC_AI_API_URL" (
+        set "NEXT_PUBLIC_AI_API_URL=%%b"
+    )
 )
+if "%NEXT_PUBLIC_AI_API_URL%"=="" set "NEXT_PUBLIC_AI_API_URL=http://localhost:8080"
 
 start "Landing Service" cmd /k "node landing/server.mjs"
 echo ✓ Landing service started

@@ -137,3 +137,12 @@ export interface ServerStats {
   averageResponseTime: number;
   errorRate: number;
 }
+
+export interface WebSocketMessage {
+  type: 'subscribe' | 'ping' | 'pong';
+  [key: string]: unknown;
+}
+
+export interface AuthenticatedRequest extends express.Request {
+  userId?: string;
+}

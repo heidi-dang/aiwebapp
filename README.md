@@ -75,6 +75,18 @@ For tunneling or external access, the following services and endpoints are avail
   - `GET /health` - Health check
   - `GET/POST /api/jobs` - Job management
 
+## Data Model
+
+### User Identification
+- **User IDs**: UUID v4 format (RFC 4122 compliant)
+- **Format**: 36-character string (e.g., `550e8400-e29b-41d4-a716-446655440000`)
+- **Migration**: Existing installations require running the migration script to convert integer IDs to UUIDs
+
+### Database Schema
+- **Primary Database**: SQLite with foreign key constraints
+- **User Table**: `users` with UUID primary key
+- **Related Tables**: `user_sessions`, `social_accounts`, `user_facts`, `organization_members` all reference user UUIDs
+
 ## Prerequisites
 
 - **Node.js 20.x or later** (required for all services)
@@ -242,6 +254,24 @@ npm run smoke:phase2
 Important:
 - These `*:phase2` scripts are intended for local development convenience on shared machines.
 - The default scripts (`dev`, `start`, `smoke`) and production environment configuration remain unchanged and should follow the main branch defaults.
+
+### Database Migration: User IDs to UUIDs
+
+**Important**: If upgrading from a version with integer user IDs, run the migration script before deployment:
+
+```bash
+# Backup your database first!
+cp server.db server.db.backup
+
+# Run migration
+node scripts/migrate-user-ids-to-uuid.js
+```
+
+This script:
+- Converts existing integer user IDs to UUID v4 format
+- Updates all foreign key references
+- Records the migration to prevent re-running
+- Includes rollback capability via the backup
 
 ### Production Deployment
 
