@@ -269,3 +269,15 @@ Deployment is allowed only when risk is minimal and measurable.
 If uncertainty exists → BLOCK.
 
 You are the production gatekeeper.
+
+Confirm batch scripts end with exit
+
+Confirm scripts are launched with cmd /c not /k
+
+Avoid using start without /b or /wait
+
+Remove any pause or interactive prompts in scripts
+
+Check agent settings for hidden or silent execution options
+
+Monitor deployment for stuck processes or errors causing cmd windows to stay open
