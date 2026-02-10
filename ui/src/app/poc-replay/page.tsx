@@ -25,6 +25,12 @@ function parseArtifact(jsonText: string): PocReplayArtifact {
 function PocReplayPageInner() {
   const sp = useSearchParams()
   const d = sp.get('d') || ''
+  const cinematic = (sp.get('cinematic') || '') === '1'
+  const autoplay = (sp.get('autoplay') || '') === '1'
+  const speedRaw = sp.get('speed') || ''
+  const initialSpeed = speedRaw === '1' || speedRaw === '2' || speedRaw === '4'
+    ? (Number(speedRaw) as 1 | 2 | 4)
+    : 2
   const [artifact, setArtifact] = useState<PocReplayArtifact | null>(null)
   const [raw, setRaw] = useState('')
 
@@ -46,8 +52,8 @@ function PocReplayPageInner() {
   }, [artifact])
 
   return (
-    <div className="min-h-screen bg-background/80 p-4 font-dmmono">
-      <div className="mx-auto w-full max-w-5xl">
+    <div className={`min-h-screen bg-background/80 font-dmmono ${cinematic ? 'p-0' : 'p-4'}`}>
+      <div className={`mx-auto w-full ${cinematic ? 'max-w-none' : 'max-w-5xl'}`}>
         <div className="rounded-xl border border-primary/15 bg-background/60 p-3">
           <div className="text-xs font-medium uppercase text-primary">{title}</div>
           <div className="mt-1 text-sm text-secondary">
@@ -55,7 +61,8 @@ function PocReplayPageInner() {
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className={`mt-4 grid grid-cols-1 gap-4 ${cinematic ? '' : 'lg:grid-cols-2'}`}>
+          {!cinematic && (
           <div className="rounded-xl border border-primary/15 bg-background/60 p-3">
             <div className="text-xs font-medium uppercase text-primary">Import</div>
             <TextArea
@@ -113,12 +120,18 @@ function PocReplayPageInner() {
               />
             </div>
           </div>
+          )}
 
           <div className="rounded-xl border border-primary/15 bg-background/60 p-3">
             <div className="text-xs font-medium uppercase text-primary">Replay</div>
             <div className="mt-3">
               {artifact ? (
-                <PocReplayPlayer artifact={artifact} cinematic />
+                <PocReplayPlayer
+                  artifact={artifact}
+                  cinematic={cinematic}
+                  autoplay={autoplay}
+                  initialSpeed={initialSpeed}
+                />
               ) : (
                 <div className="text-xs text-muted">No artifact loaded</div>
               )}
@@ -137,4 +150,3 @@ export default function PocReplayPage() {
     </Suspense>
   )
 }
-
