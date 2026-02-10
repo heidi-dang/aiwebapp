@@ -27,10 +27,47 @@ function PocReplayPageInner() {
   const d = sp.get('d') || ''
   const cinematic = (sp.get('cinematic') || '') === '1'
   const autoplay = (sp.get('autoplay') || '') === '1'
+  const director = (sp.get('director') || '') === '1'
+  const filterRaw = sp.get('filter') || ''
+  const filter =
+    filterRaw === 'pass' || filterRaw === 'fail' || filterRaw === 'all'
+      ? (filterRaw as 'all' | 'pass' | 'fail')
+      : director
+        ? 'fail'
+        : 'all'
+  const startRaw = sp.get('start') || ''
+  const endRaw = sp.get('end') || ''
+  const startParsed = startRaw ? Number(startRaw) : 0
+  const endParsed = endRaw ? Number(endRaw) : undefined
+  const start = Number.isFinite(startParsed) ? startParsed : 0
+  const end =
+    endParsed === undefined ? undefined : Number.isFinite(endParsed) ? endParsed : undefined
+  const pauseFailRaw = sp.get('pauseFail') || ''
+  const pausePassRaw = sp.get('pausePass') || ''
+  const pauseFailParsed = pauseFailRaw ? Number(pauseFailRaw) : undefined
+  const pausePassParsed = pausePassRaw ? Number(pausePassRaw) : undefined
+  const pauseOnFailMs =
+    pauseFailParsed !== undefined
+      ? Number.isFinite(pauseFailParsed)
+        ? pauseFailParsed
+        : 0
+      : director
+        ? 1400
+        : 0
+  const pauseOnPassMs =
+    pausePassParsed !== undefined
+      ? Number.isFinite(pausePassParsed)
+        ? pausePassParsed
+        : 0
+      : director
+        ? 0
+        : 0
   const speedRaw = sp.get('speed') || ''
   const initialSpeed = speedRaw === '1' || speedRaw === '2' || speedRaw === '4'
     ? (Number(speedRaw) as 1 | 2 | 4)
-    : 2
+    : director
+      ? 1
+      : 2
   const [artifact, setArtifact] = useState<PocReplayArtifact | null>(null)
   const [raw, setRaw] = useState('')
 
@@ -52,8 +89,8 @@ function PocReplayPageInner() {
   }, [artifact])
 
   return (
-    <div className={`min-h-screen bg-background/80 font-dmmono ${cinematic ? 'p-0' : 'p-4'}`}>
-      <div className={`mx-auto w-full ${cinematic ? 'max-w-none' : 'max-w-5xl'}`}>
+    <div className={`min-h-screen bg-background/80 font-dmmono ${(cinematic || director) ? 'p-0' : 'p-4'}`}>
+      <div className={`mx-auto w-full ${(cinematic || director) ? 'max-w-none' : 'max-w-5xl'}`}>
         <div className="rounded-xl border border-primary/15 bg-background/60 p-3">
           <div className="text-xs font-medium uppercase text-primary">{title}</div>
           <div className="mt-1 text-sm text-secondary">
@@ -61,8 +98,8 @@ function PocReplayPageInner() {
           </div>
         </div>
 
-        <div className={`mt-4 grid grid-cols-1 gap-4 ${cinematic ? '' : 'lg:grid-cols-2'}`}>
-          {!cinematic && (
+        <div className={`mt-4 grid grid-cols-1 gap-4 ${(cinematic || director) ? '' : 'lg:grid-cols-2'}`}>
+          {!(cinematic || director) && (
           <div className="rounded-xl border border-primary/15 bg-background/60 p-3">
             <div className="text-xs font-medium uppercase text-primary">Import</div>
             <TextArea
@@ -128,9 +165,15 @@ function PocReplayPageInner() {
               {artifact ? (
                 <PocReplayPlayer
                   artifact={artifact}
-                  cinematic={cinematic}
-                  autoplay={autoplay}
+                  cinematic={cinematic || director}
+                  autoplay={autoplay || director}
                   initialSpeed={initialSpeed}
+                  filter={filter}
+                  start={start}
+                  end={end}
+                  pauseOnFailMs={pauseOnFailMs}
+                  pauseOnPassMs={pauseOnPassMs}
+                  label={director ? 'Director Cut' : undefined}
                 />
               ) : (
                 <div className="text-xs text-muted">No artifact loaded</div>

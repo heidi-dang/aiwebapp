@@ -447,6 +447,28 @@ function PocRunTimelineInner({
               >
                 Cinematic Autoplay
               </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const artifact = buildReplayArtifact({
+                      jobId,
+                      proofHash: summary?.proofHash || '',
+                      claims
+                    })
+                    const artifactJson = JSON.stringify(artifact)
+                    const encoded = base64UrlEncodeUtf8(artifactJson)
+                    const url = `${window.location.origin}/poc-replay?d=${encoded}&director=1`
+                    await navigator.clipboard.writeText(url)
+                    toast.success('Director cut link copied')
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : String(err))
+                  }
+                }}
+                className="rounded-md border border-primary/10 bg-primaryAccent px-2 py-1 text-[11px] uppercase text-secondary"
+              >
+                Director Cut
+              </button>
               {variant === 'default' && (
                 <button
                   type="button"

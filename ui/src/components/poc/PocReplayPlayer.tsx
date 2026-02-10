@@ -16,17 +16,43 @@ export function PocReplayPlayer({
   artifact,
   cinematic = false,
   autoplay = false,
-  initialSpeed = 2
+  initialSpeed = 2,
+  filter = 'all',
+  start = 0,
+  end,
+  pauseOnFailMs = 0,
+  pauseOnPassMs = 0,
+  label
 }: {
   artifact: PocReplayArtifact
   cinematic?: boolean
   autoplay?: boolean
   initialSpeed?: 1 | 2 | 4
+  filter?: 'all' | 'pass' | 'fail'
+  start?: number
+  end?: number
+  pauseOnFailMs?: number
+  pauseOnPassMs?: number
+  label?: string
 }) {
   const claims = useMemo(() => (Array.isArray(artifact.claims) ? artifact.claims : []), [artifact])
   const [count, setCount] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [speed, setSpeed] = useState<1 | 2 | 4>(initialSpeed)
+
+  const filteredClaims = useMemo(() => {
+    if (filter === 'pass') return claims.filter((c) => c.ok === true)
+    if (filter === 'fail') return claims.filter((c) => c.ok === false)
+    return claims
+  }, [claims, filter])
+
+  const windowClaims = useMemo(() => {
+    const s = Number.isFinite(start) ? Math.max(0, Math.floor(start)) : 0
+    const e = Number.isFinite(end as number)
+      ? Math.max(s, Math.floor(end as number))
+      : filteredClaims.length
+    return filteredClaims.slice(s, e)
+  }, [filteredClaims, start, end])
 
   useEffect(() => {
     setCount(0)
@@ -35,22 +61,28 @@ export function PocReplayPlayer({
   }, [artifact.jobId, artifact.proof_hash, autoplay, claims.length, initialSpeed])
 
   useEffect(() => {
-    if (!isPlaying) return
-    const intervalMs = 700 / speed
-    const t = setInterval(() => {
-      setCount((c) => {
-        const next = c + 1
-        if (next >= claims.length) {
-          setIsPlaying(false)
-          return claims.length
-        }
-        return next
-      })
-    }, intervalMs)
-    return () => clearInterval(t)
-  }, [isPlaying, speed, claims.length])
+    setCount(0)
+  }, [filter, start, end])
 
-  const displayClaims = useMemo(() => claims.slice(0, Math.max(0, count)), [claims, count])
+  useEffect(() => {
+    if (!isPlaying) return
+    if (count >= windowClaims.length) {
+      setIsPlaying(false)
+      return
+    }
+    const baseDelay = 700 / speed
+    const prev = count > 0 ? windowClaims[count - 1] : undefined
+    const pause =
+      prev && prev.ok === false ? pauseOnFailMs : prev && prev.ok === true ? pauseOnPassMs : 0
+    const delay = Math.max(0, baseDelay + pause)
+    const t = setTimeout(() => setCount((c) => Math.min(windowClaims.length, c + 1)), delay)
+    return () => clearTimeout(t)
+  }, [isPlaying, speed, count, windowClaims, pauseOnFailMs, pauseOnPassMs])
+
+  const displayClaims = useMemo(
+    () => windowClaims.slice(0, Math.max(0, count)),
+    [windowClaims, count]
+  )
 
   const { passedWeight, totalWeight, pct } = useMemo(() => {
     const passedWeight = displayClaims.reduce((sum, c) => sum + (c.ok ? (c.weight || 1) : 0), 0)
@@ -67,6 +99,11 @@ export function PocReplayPlayer({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-xs font-medium uppercase text-primary">PoC Replay</div>
+          {label && (
+            <div className="mt-1 text-[11px] font-medium uppercase text-secondary/80">
+              {label}
+            </div>
+          )}
           <div className="mt-1 break-words font-mono text-[11px] text-secondary/80">
             job: {artifact.jobId} · proof: {artifact.proof_hash}
             {artifact.createdAt ? ` · ${fmtTs(artifact.createdAt)}` : ''}
@@ -105,7 +142,7 @@ export function PocReplayPlayer({
       <div className="mt-3">
         <div className="flex items-center justify-between gap-2">
           <div className="text-[11px] font-medium uppercase text-primary">
-            Replay {count}/{claims.length}
+            Replay {count}/{windowClaims.length}
           </div>
           <div className="text-[11px] text-secondary">
             {totalWeight > 0 ? `${passedWeight}/${totalWeight} (${pct}%)` : 'Waiting…'}
@@ -117,7 +154,7 @@ export function PocReplayPlayer({
         <input
           type="range"
           min={0}
-          max={claims.length}
+          max={windowClaims.length}
           value={count}
           onChange={(e) => {
             setIsPlaying(false)
