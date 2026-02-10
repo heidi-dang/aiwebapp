@@ -8,16 +8,18 @@
  * 4. Completing with done event
  */
 import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import { glob } from 'glob'
-import { exec as execCb, spawn } from 'node:child_process'
-import { promisify } from 'node:util'
+import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import type { RunnerEvent, RunnerEventType, JobStore, JobStatus } from './db.js'
 import { BridgeClient, createBridgeClientFromEnv } from './bridge.js'
 import { runCoderAgent } from './agent.js'
 import { createOllamaClientFromEnv } from './llm/providers/ollama.js'
+import { llmService } from './llm/index.js'
+import { sandboxService } from './services/sandbox.js'
+import { registerJobProcess } from './process-registry.js'
 import type { FastifyReply } from 'fastify'
-
-const execAsync = promisify(execCb)
 
 function nowIso() {
   return new Date().toISOString()
@@ -39,6 +41,18 @@ export interface JobInput {
   session_id?: string
   team_agents?: Array<{id: string, provider?: string, model?: string}>
   base_dir?: string
+  runtime_mode?: 'local' | 'sandbox'
+  cloud_fallback?: boolean
+  sleep_ms?: number
+  poc_commands?: string[]
+  poc_checks?: Array<{
+    id?: string
+    statement: string
+    command: string
+    dependencies?: string[]
+    weight?: number
+    enabled?: boolean
+  }>
 }
 
 type ToolCall = {
@@ -62,6 +76,8 @@ export interface JobContext {
   bridge: BridgeClient | null
   input: JobInput
   aborted: boolean
+  baseDirResolved: string
+  signal?: AbortSignal
 }
 
 function sendSse(reply: FastifyReply, event: RunnerEvent) {
@@ -99,23 +115,60 @@ function parseToolArgs(raw?: string): Record<string, unknown> {
   }
 }
 
+function sha256Hex(input: string) {
+  return createHash('sha256').update(input).digest('hex')
+}
+
+function stableClaimJson(claim: {
+  id: string
+  statement: string
+  command: string
+  dependencies: string[]
+  weight: number
+}) {
+  return JSON.stringify({
+    id: claim.id,
+    statement: claim.statement,
+    command: claim.command,
+    dependencies: [...claim.dependencies],
+    weight: claim.weight
+  })
+}
+
+function resolveWithinBase(baseDir: string, targetPath: string) {
+  const candidate = path.isAbsolute(targetPath)
+    ? targetPath
+    : path.resolve(baseDir, targetPath)
+  const baseResolved = path.resolve(baseDir)
+  const normalizedCandidate = path.resolve(candidate)
+  if (
+    normalizedCandidate !== baseResolved &&
+    !normalizedCandidate.startsWith(baseResolved + path.sep)
+  ) {
+    throw new Error('Access outside of base_dir is not allowed')
+  }
+  return normalizedCandidate
+}
+
+function toSandboxPath(baseDir: string, absoluteHostPath: string) {
+  const rel = path.relative(path.resolve(baseDir), path.resolve(absoluteHostPath))
+  if (rel.startsWith('..' + path.sep) || rel === '..') {
+    throw new Error('Access outside of base_dir is not allowed')
+  }
+  return rel === '' ? '/app/workspace' : path.posix.join('/app/workspace', rel.split(path.sep).join('/'))
+}
+
 async function handleReadFileTool(ctx: JobContext, path: string) {
   await emitEvent(ctx, 'tool.start', { tool: 'read_file', input: { path } })
   try {
-    const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
-    const { resolve, isAbsolute, sep } = await import('node:path')
-    const resolvedPath = (() => {
-      const candidate = isAbsolute(path) ? path : resolve(baseDir, path)
-      const baseResolved = resolve(baseDir)
-      const normalizedCandidate = resolve(candidate)
-      if (normalizedCandidate !== baseResolved && !normalizedCandidate.startsWith(baseResolved + sep)) {
-        throw new Error('Access outside of base_dir is not allowed')
-      }
-      return normalizedCandidate
-    })()
-    const res = ctx.bridge
-      ? await ctx.bridge.readFile(resolvedPath)
-      : { path: resolvedPath, text: await fs.readFile(resolvedPath, 'utf8') }
+    const baseDir = ctx.baseDirResolved
+    const resolvedPath = resolveWithinBase(baseDir, path)
+    const res =
+      ctx.input.runtime_mode === 'sandbox'
+        ? { path: resolvedPath, text: await sandboxService.readFile(ctx.jobId, toSandboxPath(baseDir, resolvedPath)) }
+        : ctx.bridge
+          ? await ctx.bridge.readFile(resolvedPath)
+          : { path: resolvedPath, text: await fs.readFile(resolvedPath, 'utf8') }
 
     await emitEvent(ctx, 'tool.output', {
       tool: 'read_file',
@@ -133,18 +186,11 @@ async function handleReadFileTool(ctx: JobContext, path: string) {
 async function handleWriteFileTool(ctx: JobContext, path: string, content: string) {
   await emitEvent(ctx, 'tool.start', { tool: 'write_file', input: { path } })
   try {
-    const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
-    const { resolve, isAbsolute, sep } = await import('node:path')
-    const resolvedPath = (() => {
-      const candidate = isAbsolute(path) ? path : resolve(baseDir, path)
-      const baseResolved = resolve(baseDir)
-      const normalizedCandidate = resolve(candidate)
-      if (normalizedCandidate !== baseResolved && !normalizedCandidate.startsWith(baseResolved + sep)) {
-        throw new Error('Access outside of base_dir is not allowed')
-      }
-      return normalizedCandidate
-    })()
-    if (ctx.bridge) {
+    const baseDir = ctx.baseDirResolved
+    const resolvedPath = resolveWithinBase(baseDir, path)
+    if (ctx.input.runtime_mode === 'sandbox') {
+      await sandboxService.writeFile(ctx.jobId, toSandboxPath(baseDir, resolvedPath), content)
+    } else if (ctx.bridge) {
       let current = ''
       try {
         const existing = await ctx.bridge.readFile(resolvedPath)
@@ -208,20 +254,74 @@ async function handleListFilesTool(ctx: JobContext, globPattern: string) {
 async function handleRunCommandTool(ctx: JobContext, command: string) {
   await emitEvent(ctx, 'tool.start', { tool: 'run_command', input: { command } })
   try {
-    const { stdout, stderr } = await execAsync(command, {
-      timeout: 15000,
-      maxBuffer: 1024 * 1024
-    })
+    const baseDir = ctx.baseDirResolved
+    if (ctx.input.runtime_mode === 'sandbox') {
+      const res = await sandboxService.execCommand(ctx.jobId, command, '/app/workspace')
+      const output = (res.stdout || '').slice(0, 4000)
+      const errOut = (res.stderr || '').slice(0, 4000)
 
-    const output = (stdout || '').slice(0, 4000)
-    const errOut = (stderr || '').slice(0, 4000)
+      await emitEvent(ctx, 'tool.output', {
+        tool: 'run_command',
+        output: output || errOut || '(no output)'
+      })
+      await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: res.exitCode === 0 })
+      return { stdout: output, stderr: errOut, exitCode: res.exitCode }
+    }
+
+    const maxOutput = 4000
+    const timeoutMs = 15000
+
+    const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
+      const child = spawn('bash', ['-lc', command], { cwd: baseDir })
+      registerJobProcess(ctx.jobId, child)
+
+      let stdout = ''
+      let stderr = ''
+      let resolved = false
+
+      const timer = setTimeout(() => {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+        }
+      }, timeoutMs)
+
+      const onAbort = () => {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+        }
+      }
+
+      ctx.signal?.addEventListener('abort', onAbort, { once: true })
+
+      child.stdout.on('data', (chunk) => {
+        if (stdout.length < maxOutput) stdout += chunk.toString()
+      })
+      child.stderr.on('data', (chunk) => {
+        if (stderr.length < maxOutput) stderr += chunk.toString()
+      })
+
+      child.on('error', (err) => {
+        if (resolved) return
+        resolved = true
+        clearTimeout(timer)
+        reject(err)
+      })
+      child.on('close', (code) => {
+        if (resolved) return
+        resolved = true
+        clearTimeout(timer)
+        resolve({ stdout: stdout.slice(0, maxOutput), stderr: stderr.slice(0, maxOutput), exitCode: code ?? 0 })
+      })
+    })
 
     await emitEvent(ctx, 'tool.output', {
       tool: 'run_command',
-      output: output || errOut || '(no output)'
+      output: result.stdout || result.stderr || '(no output)'
     })
-    await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: true })
-    return { stdout: output, stderr: errOut }
+    await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: result.exitCode === 0 })
+    return result
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
@@ -295,6 +395,7 @@ async function handleGrepSearchTool(ctx: JobContext, query: string, includePatte
     const timeoutMs = 10000
     const lines = await new Promise<string[]>((resolve, reject) => {
       const child = spawn('grep', args, { cwd: baseDir })
+      registerJobProcess(ctx.jobId, child)
       let stdoutBuffer = ''
       let stderrBuffer = ''
       const results: string[] = []
@@ -303,6 +404,14 @@ async function handleGrepSearchTool(ctx: JobContext, query: string, includePatte
       const timer = setTimeout(() => {
         child.kill('SIGKILL')
       }, timeoutMs)
+
+      const onAbort = () => {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+        }
+      }
+      ctx.signal?.addEventListener('abort', onAbort, { once: true })
 
       child.stdout.on('data', (chunk) => {
         stdoutBuffer += chunk.toString()
@@ -950,6 +1059,254 @@ async function executeWithOllama(ctx: JobContext): Promise<void> {
   }
 }
 
+async function executeWithSleep(ctx: JobContext): Promise<void> {
+  const ms = typeof ctx.input.sleep_ms === 'number' ? ctx.input.sleep_ms : 60000
+  await emitEvent(ctx, 'tool.start', { tool: 'sleep', input: { ms } })
+
+  const result = await new Promise<{ exitCode: number }>((resolve, reject) => {
+    const seconds = Math.max(1, Math.ceil(ms / 1000))
+    const child = spawn('bash', ['-lc', `sleep ${seconds}`], { cwd: ctx.baseDirResolved })
+    registerJobProcess(ctx.jobId, child)
+
+    const onAbort = () => {
+      try {
+        child.kill('SIGKILL')
+      } catch {
+      }
+    }
+    ctx.signal?.addEventListener('abort', onAbort, { once: true })
+
+    child.on('error', reject)
+    child.on('close', (code) => resolve({ exitCode: code ?? 0 }))
+  })
+
+  await emitEvent(ctx, 'tool.output', { tool: 'sleep', output: `exitCode=${result.exitCode}` })
+  await emitEvent(ctx, 'tool.end', { tool: 'sleep', success: result.exitCode === 0 })
+}
+
+async function runReviewCommand(
+  ctx: JobContext,
+  command: string
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  if (ctx.input.runtime_mode === 'sandbox') {
+    const res = await sandboxService.execCommand(ctx.jobId, command, '/app/workspace')
+    return {
+      stdout: (res.stdout || '').slice(0, 12000),
+      stderr: (res.stderr || '').slice(0, 12000),
+      exitCode: res.exitCode
+    }
+  }
+
+  const maxOutput = 12000
+  const timeoutMs = 10 * 60 * 1000
+
+  return new Promise((resolve, reject) => {
+    const child = spawn('bash', ['-lc', command], { cwd: ctx.baseDirResolved })
+    registerJobProcess(ctx.jobId, child)
+
+    let stdout = ''
+    let stderr = ''
+    let resolved = false
+
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL')
+      } catch {
+      }
+    }, timeoutMs)
+
+    const onAbort = () => {
+      try {
+        child.kill('SIGKILL')
+      } catch {
+      }
+    }
+    ctx.signal?.addEventListener('abort', onAbort, { once: true })
+
+    child.stdout.on('data', (chunk) => {
+      if (stdout.length < maxOutput) stdout += chunk.toString()
+    })
+    child.stderr.on('data', (chunk) => {
+      if (stderr.length < maxOutput) stderr += chunk.toString()
+    })
+
+    child.on('error', (err) => {
+      if (resolved) return
+      resolved = true
+      clearTimeout(timer)
+      reject(err)
+    })
+    child.on('close', (code) => {
+      if (resolved) return
+      resolved = true
+      clearTimeout(timer)
+      resolve({
+        stdout: stdout.slice(0, maxOutput),
+        stderr: stderr.slice(0, maxOutput),
+        exitCode: code ?? 0
+      })
+    })
+  })
+}
+
+async function executeWithPocReview(ctx: JobContext): Promise<void> {
+  const checksFromInput = Array.isArray(ctx.input.poc_checks) ? ctx.input.poc_checks : []
+  const commands = (Array.isArray(ctx.input.poc_commands) && ctx.input.poc_commands.length > 0)
+    ? ctx.input.poc_commands
+    : []
+
+  const checks: Array<{ id: string; statement: string; command: string; dependencies: string[]; weight: number }> =
+    checksFromInput.length > 0
+      ? checksFromInput
+          .filter((c) => c && typeof c === 'object' && c.enabled !== false)
+          .map((c, i) => ({
+            id: (c.id && String(c.id).trim()) ? String(c.id).trim() : `C${i + 1}`,
+            statement: String(c.statement ?? '').trim() || `Claim ${i + 1}`,
+            command: String(c.command ?? '').trim(),
+            dependencies: Array.isArray(c.dependencies) ? c.dependencies.filter((d) => typeof d === 'string') : [],
+            weight: typeof c.weight === 'number' && Number.isFinite(c.weight) ? c.weight : 1
+          }))
+          .filter((c) => c.command.length > 0)
+      : commands.length > 0
+        ? commands.map((command, i) => ({
+            id: `C${i + 1}`,
+            statement: `Command succeeds: ${command}`,
+            command,
+            dependencies: i === 0 ? [] : [`C${i}`],
+            weight: 1
+          }))
+        : [
+            { id: 'C1', statement: 'Node is available', command: 'node -v', dependencies: [], weight: 1 },
+            { id: 'C2', statement: 'npm is available', command: 'npm -v', dependencies: ['C1'], weight: 1 },
+            { id: 'C3', statement: 'Runner builds', command: 'cd runner && npm run build', dependencies: ['C2'], weight: 3 },
+            { id: 'C4', statement: 'Server builds', command: 'cd server && npm run build', dependencies: ['C2'], weight: 3 },
+            { id: 'C5', statement: 'UI builds', command: 'cd ui && npm run build', dependencies: ['C2'], weight: 3 }
+          ]
+
+  const unique = new Set<string>()
+  for (const c of checks) {
+    let id = c.id
+    if (!id) id = 'C'
+    if (!unique.has(id)) {
+      unique.add(id)
+      c.id = id
+      continue
+    }
+    let n = 2
+    while (unique.has(`${id}_${n}`)) n++
+    c.id = `${id}_${n}`
+    unique.add(c.id)
+  }
+
+  await emitEvent(ctx, 'tool.start', {
+    tool: 'poc_review',
+    input: {
+      base_dir: ctx.input.base_dir ?? '',
+      runtime_mode: ctx.input.runtime_mode ?? 'local',
+      checks: checks.length
+    }
+  })
+
+  const results: Array<{
+    id: string
+    statement: string
+    command: string
+    ok: boolean
+    exitCode: number
+    stdout: string
+    stderr: string
+  }> = []
+
+  for (let i = 0; i < checks.length; i++) {
+    if (ctx.aborted) break
+    const check = checks[i]
+    const res = await runReviewCommand(ctx, check.command)
+    const ok = res.exitCode === 0
+    const claimHash = sha256Hex(stableClaimJson(check))
+    const stdoutHash = sha256Hex(res.stdout || '')
+    const stderrHash = sha256Hex(res.stderr || '')
+    results.push({
+      id: check.id,
+      statement: check.statement,
+      command: check.command,
+      ok,
+      exitCode: res.exitCode,
+      stdout: res.stdout,
+      stderr: res.stderr
+    })
+
+    const line = `${ok ? '✅' : '❌'} ${check.id} (w=${check.weight}): ${check.statement} (exit ${res.exitCode})`
+    await emitEvent(ctx, 'tool.output', {
+      tool: 'poc_review',
+      output: line + '\n',
+      claim: {
+        id: check.id,
+        hash: claimHash,
+        statement: check.statement,
+        dependencies: check.dependencies,
+        command: check.command,
+        weight: check.weight,
+        ok,
+        exitCode: res.exitCode
+      },
+      evidence: {
+        stdout: res.stdout,
+        stderr: res.stderr,
+        stdout_hash: stdoutHash,
+        stderr_hash: stderrHash
+      }
+    })
+  }
+
+  const passed = results.filter(r => r.ok).length
+  const failed = results.length - passed
+  const totalWeight = results.reduce((sum, r) => {
+    const w = checks.find(c => c.id === r.id)?.weight ?? 1
+    return sum + w
+  }, 0)
+  const passedWeight = results.reduce((sum, r) => {
+    const w = checks.find(c => c.id === r.id)?.weight ?? 1
+    return sum + (r.ok ? w : 0)
+  }, 0)
+
+  const summaryLines = [
+    `PoC Review: ${passed} passed, ${failed} failed`,
+    `Weight: ${passedWeight}/${totalWeight}`,
+    ...results.map(r => {
+      const check = checks.find(c => c.id === r.id)
+      const w = check?.weight ?? 1
+      return `- ${r.ok ? '✅' : '❌'} ${r.id} (w=${w}): ${r.statement}`
+    })
+  ]
+
+  await emitEvent(ctx, 'tool.output', {
+    tool: 'poc_review',
+    output: '\n' + summaryLines.join('\n') + '\n'
+  })
+  await emitEvent(ctx, 'tool.end', { tool: 'poc_review', success: failed === 0 })
+}
+
+async function executeWithOpenRouter(ctx: JobContext): Promise<void> {
+  const message = ctx.input.message ?? ctx.input.instruction ?? 'Hello'
+  if (!process.env.OPENROUTER_API_KEY) {
+    throw new Error('OPENROUTER_API_KEY is not set')
+  }
+  const model =
+    (ctx.input.model && ctx.input.model.includes('/'))
+      ? ctx.input.model
+      : (process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini')
+
+  await emitEvent(ctx, 'tool.start', { tool: 'openrouter', input: { model, message } })
+
+  const response = await llmService.chat(
+    { provider: 'openrouter', model },
+    [{ role: 'user', content: message }]
+  )
+
+  await emitEvent(ctx, 'tool.output', { tool: 'openrouter', output: response.content || '' })
+  await emitEvent(ctx, 'tool.end', { tool: 'openrouter', success: true })
+}
+
 /**
  * Call LLM based on provider
  */
@@ -1019,6 +1376,9 @@ export async function executeJob(
   signal?: AbortSignal
 ): Promise<void> {
   const bridge = createBridgeClientFromEnv()
+  const baseDirResolved = path.resolve(
+    input.base_dir && input.base_dir.trim() ? input.base_dir : process.cwd()
+  )
 
   const ctx: JobContext = {
     jobId,
@@ -1026,13 +1386,20 @@ export async function executeJob(
     subscribers,
     bridge,
     input,
-    aborted: false
+    aborted: false,
+    baseDirResolved,
+    signal
   }
+
+  let sandboxCreated = false
 
   if (signal) {
     if (signal.aborted) ctx.aborted = true
     signal.addEventListener('abort', () => {
       ctx.aborted = true
+      if (ctx.input.runtime_mode === 'sandbox') {
+        sandboxService.destroySandbox(jobId).catch(() => {})
+      }
     })
   }
 
@@ -1046,6 +1413,11 @@ export async function executeJob(
     await store.updateJobStatus(jobId, 'running', nowIso())
     await emitEvent(ctx, 'job.started', { input })
 
+    if (ctx.input.runtime_mode === 'sandbox') {
+      await sandboxService.createSandbox(jobId, ctx.baseDirResolved)
+      sandboxCreated = true
+    }
+
     // Execute based on provider
     // When the provider is "copilotapi" we should call the Copilot API directly
     // rather than using the internal CoderAgent. The CoderAgent is designed
@@ -1055,12 +1427,22 @@ export async function executeJob(
     // (see `AI_API_URL` and `AI_API_KEY` in environment) and stream back
     // natural language answers. For other providers we fall back to the bridge
     // client if available, otherwise use the simulated executor.
-    if (input.provider === 'copilotapi') {
+    if (input.provider === 'sleep') {
+      await executeWithSleep(ctx)
+    } else if (input.provider === 'poc_review') {
+      await executeWithPocReview(ctx)
+    } else if (input.provider === 'copilotapi') {
       console.log(`[Runner] Using Copilot API for job ${jobId}`);
       await executeWithCopilotApi(ctx);
     } else if (input.provider === 'ollama') {
       console.log(`[Runner] Using Ollama for job ${jobId}`);
-      await executeWithOllama(ctx);
+      try {
+        await executeWithOllama(ctx)
+      } catch (err) {
+        if (!ctx.input.cloud_fallback) throw err
+        console.log(`[Runner] Ollama failed for job ${jobId}, using cloud fallback`)
+        await executeWithOpenRouter(ctx)
+      }
     } else if (input.team_agents && input.team_agents.length > 0) {
       console.log(`[Runner] Using multi-agent for job ${jobId}`);
       await executeMultiAgent(ctx);
@@ -1095,6 +1477,10 @@ export async function executeJob(
     await emitEvent(ctx, 'error', { message: err instanceof Error ? err.message : String(err) })
     await emitEvent(ctx, 'done', { status: 'error' })
     onComplete('error')
+  } finally {
+    if (sandboxCreated) {
+      await sandboxService.destroySandbox(jobId)
+    }
   }
 }
 

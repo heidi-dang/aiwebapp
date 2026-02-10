@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { TextArea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { useStore } from '@/store'
-import { createJob, startJob, streamJobEvents } from '@/lib/runner/client'
+import { cancelJob, createJob, startJob, streamJobEvents } from '@/lib/runner/client'
 import { useQueryState } from 'nuqs'
 import Icon from '@/components/ui/icon'
 import Tooltip from '@/components/ui/tooltip'
@@ -22,6 +22,9 @@ import { ModeSelector } from '@/components/chat/Sidebar/ModeSelector'
 import { EntitySelector } from '@/components/chat/Sidebar/EntitySelector'
 import { ProviderSelector } from '@/components/chat/Sidebar/ProviderSelector'
 import { ModelSelector } from '@/components/chat/Sidebar/ModelSelector'
+import { RuntimeModeSelector } from '@/components/chat/Sidebar/RuntimeModeSelector'
+import { CloudFallbackSelector } from '@/components/chat/Sidebar/CloudFallbackSelector'
+import { TokenBudgetBar } from './TokenBudgetBar'
 
 const envAiApiUrl = process.env.NEXT_PUBLIC_AI_API_URL ?? ''
 
@@ -48,6 +51,9 @@ const ChatInput = () => {
     initRun,
     applyRunnerEvent,
     setRunUnsubscribe,
+    runs,
+    runtimeMode,
+    cloudFallbackEnabled,
     systemPromptMode,
     systemPromptCustom
   } = useStore()
@@ -350,6 +356,9 @@ const ChatInput = () => {
         : 'bg-muted-foreground'
 
   const toolCalls = messages.flatMap((m) => m.tool_calls ?? [])
+  const runningJobIds = Object.values(runs)
+    .filter((r) => r.status === 'running' || r.status === 'pending')
+    .map((r) => r.jobId)
 
   const handleTestAgent = useCallback(async () => {
     if (!inputMessage.trim()) return
@@ -371,7 +380,10 @@ const ChatInput = () => {
         message: currentMessage,
         provider: 'agent',
         model: selectedModel,
-        system_prompt: systemPromptMode === 'custom' ? systemPromptCustom : systemPromptMode
+        system_prompt:
+          systemPromptMode === 'custom' ? systemPromptCustom : systemPromptMode,
+        runtime_mode: runtimeMode,
+        cloud_fallback: cloudFallbackEnabled
       })
 
       initRun(jobId)
@@ -416,6 +428,8 @@ const ChatInput = () => {
     setMessages,
     setRunUnsubscribe,
     selectedModel,
+    runtimeMode,
+    cloudFallbackEnabled,
     systemPromptCustom,
     systemPromptMode
   ])
@@ -443,7 +457,9 @@ const ChatInput = () => {
         message: currentMessage,
         provider,
         model: selectedModel,
-        system_prompt
+        system_prompt,
+        runtime_mode: runtimeMode,
+        cloud_fallback: cloudFallbackEnabled
       })
 
       initRun(jobId)
@@ -489,6 +505,8 @@ const ChatInput = () => {
     setRunUnsubscribe,
     provider,
     selectedModel,
+    runtimeMode,
+    cloudFallbackEnabled,
     systemPromptCustom,
     systemPromptMode
   ])
@@ -515,7 +533,9 @@ const ChatInput = () => {
         message: currentMessage,
         provider,
         model: selectedModel,
-        system_prompt
+        system_prompt,
+        runtime_mode: runtimeMode,
+        cloud_fallback: cloudFallbackEnabled
       })
 
       initRun(jobId)
@@ -569,6 +589,8 @@ const ChatInput = () => {
             <ModeSelector />
             <EntitySelector />
             <ProviderSelector />
+            <RuntimeModeSelector />
+            <CloudFallbackSelector />
           </div>
         </DialogContent>
       </Dialog>
@@ -876,6 +898,30 @@ const ChatInput = () => {
         <div className="pointer-events-auto absolute bottom-2 left-2 z-10 flex items-center gap-x-1">
           {mode === 'agent' && (
             <>
+              {runningJobIds.length > 0 && (
+                <Tooltip content="Emergency stop" side="top" delayDuration={300}>
+                  <Button
+                    type="button"
+                    aria-label="Emergency stop"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-lg text-red-400"
+                    onClick={async () => {
+                      await Promise.all(
+                        runningJobIds.map(async (jobId) => {
+                          try {
+                            await cancelJob(jobId)
+                          } catch {
+                          }
+                        })
+                      )
+                      toast.success('Emergency stop requested')
+                    }}
+                  >
+                    <Icon type="x" size="xs" />
+                  </Button>
+                </Tooltip>
+              )}
               <Tooltip content="Test Agent (Run Coder)" side="top" delayDuration={300}>
                 <Button
                   type="button"
@@ -969,6 +1015,7 @@ const ChatInput = () => {
           )}
         </div>
 
+        <TokenBudgetBar />
         <TextArea
           placeholder={'Ask anything'}
           value={inputMessage}

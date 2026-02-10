@@ -52,6 +52,24 @@ interface Store {
   setMode: (mode: 'agent' | 'team') => void
   provider: 'bridge' | 'copilotapi' | 'ollama'
   setProvider: (provider: 'bridge' | 'copilotapi' | 'ollama') => void
+  runtimeMode: 'local' | 'sandbox'
+  setRuntimeMode: (runtimeMode: 'local' | 'sandbox') => void
+  cloudFallbackEnabled: boolean
+  setCloudFallbackEnabled: (cloudFallbackEnabled: boolean) => void
+  pocReviewBaseDir: string
+  setPocReviewBaseDir: (pocReviewBaseDir: string) => void
+  pocReviewChecksJson: string
+  setPocReviewChecksJson: (pocReviewChecksJson: string) => void
+  pocReviewTemplates: Array<{ id: string; name: string; checksJson: string }>
+  setPocReviewTemplates: (
+    templates:
+      | Array<{ id: string; name: string; checksJson: string }>
+      | ((
+          prev: Array<{ id: string; name: string; checksJson: string }>
+        ) => Array<{ id: string; name: string; checksJson: string }>)
+  ) => void
+  selectedPocReviewTemplateId: string
+  setSelectedPocReviewTemplateId: (id: string) => void
   // System prompt for agents
   systemPromptMode: 'default' | 'strict' | 'custom'
   setSystemPromptMode: (mode: 'default' | 'strict' | 'custom') => void
@@ -116,6 +134,28 @@ export const useStore = create<Store>()(
       setMode: (mode) => set(() => ({ mode })),
       provider: 'bridge',
       setProvider: (provider) => set(() => ({ provider })),
+      runtimeMode: 'sandbox',
+      setRuntimeMode: (runtimeMode) => set(() => ({ runtimeMode })),
+      cloudFallbackEnabled: true,
+      setCloudFallbackEnabled: (cloudFallbackEnabled) =>
+        set(() => ({ cloudFallbackEnabled })),
+      pocReviewBaseDir: '',
+      setPocReviewBaseDir: (pocReviewBaseDir) =>
+        set(() => ({ pocReviewBaseDir })),
+      pocReviewChecksJson: '',
+      setPocReviewChecksJson: (pocReviewChecksJson) =>
+        set(() => ({ pocReviewChecksJson })),
+      pocReviewTemplates: [],
+      setPocReviewTemplates: (pocReviewTemplates) =>
+        set((state) => ({
+          pocReviewTemplates:
+            typeof pocReviewTemplates === 'function'
+              ? pocReviewTemplates(state.pocReviewTemplates)
+              : pocReviewTemplates
+        })),
+      selectedPocReviewTemplateId: '',
+      setSelectedPocReviewTemplateId: (selectedPocReviewTemplateId) =>
+        set(() => ({ selectedPocReviewTemplateId })),
       // System prompt defaults (agent mode only)
       systemPromptMode: 'default',
       setSystemPromptMode: (systemPromptMode) =>
@@ -243,7 +283,9 @@ export const useStore = create<Store>()(
       name: 'endpoint-storage',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        selectedEndpoint: state.selectedEndpoint
+        selectedEndpoint: state.selectedEndpoint,
+        pocReviewTemplates: state.pocReviewTemplates,
+        selectedPocReviewTemplateId: state.selectedPocReviewTemplateId
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHydrated?.()
