@@ -101,13 +101,29 @@ export class CoderAgent {
   }
 
   private async saveMemory(): Promise<void> {
-    // Save current conversation to events
-    for (const msg of this.memory.conversation) {
-      await this.emitEvent('memory', {
+    // Save current conversation to events in batch
+    const memoryEvents = this.memory.conversation.map(msg => ({
+      id: `evt_${Date.now()}_${Math.random().toString(16).slice(2)}_${Math.random().toString(16).slice(2)}`,
+      type: 'memory' as RunnerEventType,
+      ts: new Date().toISOString(),
+      job_id: this.ctx.jobId,
+      data: {
         role: msg.role,
         content: msg.content,
         timestamp: msg.timestamp
-      })
+      }
+    }))
+
+    if (memoryEvents.length > 0) {
+      await this.ctx.store.addEvents(memoryEvents)
+
+      // Also emit to subscribers
+      for (const event of memoryEvents) {
+        for (const sub of this.ctx.subscribers) {
+          sub.raw.write(`event: memory\n`)
+          sub.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+        }
+      }
     }
   }
 

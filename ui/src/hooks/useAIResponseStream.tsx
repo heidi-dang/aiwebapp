@@ -65,19 +65,18 @@ function parseBuffer(
   buffer: string,
   onChunk: (chunk: RunResponseContent) => void
 ): string {
-  let currentIndex = 0
-  let jsonStartIndex = buffer.indexOf('{', currentIndex)
+  let lastEndIndex = 0
+  let jsonStartIndex = buffer.indexOf('{', lastEndIndex)
 
   // Process as many complete JSON objects as possible.
-  while (jsonStartIndex !== -1 && jsonStartIndex < buffer.length) {
+  while (jsonStartIndex !== -1) {
     let braceCount = 0
     let inString = false
     let escapeNext = false
     let jsonEndIndex = -1
-    let i = jsonStartIndex
 
     // Walk through the string to find the matching closing brace.
-    for (; i < buffer.length; i++) {
+    for (let i = jsonStartIndex; i < buffer.length; i++) {
       const char = buffer[i]
 
       if (inString) {
@@ -119,13 +118,9 @@ function parseBuffer(
         continue
       }
 
-      // Move currentIndex past the parsed JSON and trim any leading whitespace.
-      currentIndex = jsonEndIndex + 1
-      buffer = buffer.slice(currentIndex).trim()
-
-      // Reset currentIndex and search for the next JSON object.
-      currentIndex = 0
-      jsonStartIndex = buffer.indexOf('{', currentIndex)
+      // Move lastEndIndex past the parsed JSON.
+      lastEndIndex = jsonEndIndex + 1
+      jsonStartIndex = buffer.indexOf('{', lastEndIndex)
     } else {
       // If a complete JSON object is not found, break out and wait for more data.
       break
@@ -133,7 +128,7 @@ function parseBuffer(
   }
 
   // Return any unprocessed (partial) data.
-  return buffer
+  return lastEndIndex > 0 ? buffer.slice(lastEndIndex).trim() : buffer
 }
 
 /**

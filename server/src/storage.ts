@@ -190,13 +190,13 @@ export class InMemoryStore implements Store {
     componentId: string
   }): Promise<SessionEntry[]> {
     const listKey = `${args.dbId}::${args.entityType}::${args.componentId}`
-    
+
     // Check cache first
     const cached = sessionCache.getSessionList(listKey)
     if (cached) {
       return cached
     }
-    
+
     const result = this.sessionsByListKey.get(listKey) ?? []
     sessionCache.setSessionList(listKey, result)
     return result
@@ -208,7 +208,7 @@ export class InMemoryStore implements Store {
     if (cached) {
       return cached
     }
-    
+
     const allSessions: SessionEntry[] = []
     for (const session of this.sessionsByKey.values()) {
       allSessions.push(session.entry)
@@ -224,7 +224,7 @@ export class InMemoryStore implements Store {
     if (cached) {
       return cached
     }
-    
+
     for (const session of this.sessionsByKey.values()) {
       if (session.entry.session_id === sessionId) {
         sessionCache.setSession(sessionId, session.entry)
@@ -300,7 +300,7 @@ export class InMemoryStore implements Store {
 
     session.runs.push(args.run)
     session.entry.updated_at = nowSeconds()
-    
+
     // Invalidate cache
     sessionCache.deleteSession(args.sessionId)
     sessionCache.deleteSessionList('all_sessions')
@@ -349,13 +349,13 @@ export class InMemoryStore implements Store {
     const createdAt = nowSeconds();
     const role = (await this.getUserCount()) === 0 ? 'admin' : 'user';
     const id = (this.users.length + 1).toString();
-    const user: User = { 
-      id, 
-      email, 
+    const user: User = {
+      id,
+      email,
       name,
       password_hash: hashedPassword,
       email_verified: false,
-      role, 
+      role,
       created_at: createdAt,
       updated_at: createdAt
     };
@@ -444,7 +444,7 @@ export class InMemoryStore implements Store {
         break
       }
     }
-    
+
     // Invalidate cache
     sessionCache.deleteSession(sessionId)
     sessionCache.deleteSessionList('all_sessions')
@@ -562,6 +562,7 @@ export class SqliteStore implements Store {
         '  PRIMARY KEY (db_id, entity_type, component_id, session_id)',
         ');',
         'CREATE INDEX IF NOT EXISTS sessions_list_idx ON sessions (db_id, entity_type, component_id, created_at DESC);',
+        'CREATE INDEX IF NOT EXISTS sessions_created_at_idx ON sessions (created_at DESC);',
         'CREATE TABLE IF NOT EXISTS runs (',
         '  id INTEGER PRIMARY KEY AUTOINCREMENT,',
         '  db_id TEXT NOT NULL,',
@@ -573,6 +574,7 @@ export class SqliteStore implements Store {
         '  content_json TEXT',
         ');',
         'CREATE INDEX IF NOT EXISTS runs_session_idx ON runs (db_id, entity_type, component_id, session_id, created_at ASC);',
+        'CREATE INDEX IF NOT EXISTS runs_session_id_idx ON runs (session_id, created_at ASC);',
         'CREATE TABLE IF NOT EXISTS users (',
         '  id INTEGER PRIMARY KEY AUTOINCREMENT,',
         '  email TEXT NOT NULL UNIQUE,',
@@ -643,13 +645,13 @@ export class SqliteStore implements Store {
     componentId: string
   }): Promise<SessionEntry[]> {
     const listKey = `${args.dbId}::${args.entityType}::${args.componentId}`
-    
+
     // Check cache first
     const cached = sessionCache.getSessionList(listKey)
     if (cached) {
       return cached
     }
-    
+
     const rows = await this.db.all<
       Array<{ session_id: string; session_name: string; created_at: number; updated_at: number | null }>
     >(
@@ -667,7 +669,7 @@ export class SqliteStore implements Store {
       entity_type: args.entityType,
       component_id: args.componentId
     }))
-    
+
     sessionCache.setSessionList(listKey, result)
     return result
   }
@@ -678,7 +680,7 @@ export class SqliteStore implements Store {
     if (cached) {
       return cached
     }
-    
+
     const rows = await this.db.all<
       Array<{ session_id: string; session_name: string; created_at: number; updated_at: number | null; entity_type: EntityType; component_id: string }>
     >(
@@ -693,7 +695,7 @@ export class SqliteStore implements Store {
       entity_type: r.entity_type,
       component_id: r.component_id
     }))
-    
+
     sessionCache.setSessionList(cacheKey, result)
     return result
   }
@@ -704,7 +706,7 @@ export class SqliteStore implements Store {
     if (cached) {
       return cached
     }
-    
+
     const row = await this.db.get<
       { session_id: string; session_name: string; created_at: number; updated_at: number | null; entity_type: EntityType; component_id: string } | undefined
     >(
@@ -722,7 +724,7 @@ export class SqliteStore implements Store {
       entity_type: row.entity_type,
       component_id: row.component_id
     }
-    
+
     sessionCache.setSession(sessionId, result)
     return result
   }
@@ -811,7 +813,7 @@ export class SqliteStore implements Store {
       args.componentId,
       args.sessionId
     )
-    
+
     // Invalidate cache
     sessionCache.deleteSession(args.sessionId)
     sessionCache.deleteSessionList('all_sessions')
@@ -1044,7 +1046,7 @@ export class SqliteStore implements Store {
       nowSeconds(),
       sessionId
     )
-    
+
     // Invalidate cache
     sessionCache.deleteSession(sessionId)
     sessionCache.deleteSessionList('all_sessions')
@@ -1063,11 +1065,11 @@ export class SqliteStore implements Store {
       'SELECT state_data FROM session_state WHERE session_id = ?',
       sessionId
     )
-    
+
     if (!row) {
       return null
     }
-    
+
     try {
       return JSON.parse(row.state_data)
     } catch (error) {
@@ -1079,7 +1081,7 @@ export class SqliteStore implements Store {
   async updateSessionState(sessionId: string, state: Record<string, any>): Promise<void> {
     const stateData = JSON.stringify(state)
     const updatedAt = nowSeconds()
-    
+
     await this.db.run(
       'INSERT OR REPLACE INTO session_state (session_id, state_data, updated_at) VALUES (?, ?, ?)',
       sessionId,
@@ -1115,7 +1117,7 @@ export class SqliteStore implements Store {
     const id = `fact_${Date.now()}_${Math.random().toString(16).slice(2)}`
     const createdAt = nowSeconds()
     const tagsJson = JSON.stringify(tags)
-    
+
     await this.db.run(
       'INSERT INTO user_facts (id, user_id, content, tags, created_at) VALUES (?, ?, ?, ?, ?)',
       id, userId, content, tagsJson, createdAt
@@ -1170,9 +1172,9 @@ export class SqliteStore implements Store {
 
   async getUserOrgs(userId: string): Promise<Array<{ id: string; name: string; role: string }>> {
     return this.db.all(
-      `SELECT o.id, o.name, m.role 
-       FROM organizations o 
-       JOIN organization_members m ON o.id = m.org_id 
+      `SELECT o.id, o.name, m.role
+       FROM organizations o
+       JOIN organization_members m ON o.id = m.org_id
        WHERE m.user_id = ?`,
       userId
     )

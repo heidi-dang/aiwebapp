@@ -55,6 +55,7 @@ export interface JobStore {
   listJobsBySession(sessionId: string, limit?: number): Promise<JobRow[]>
   updateJobStatus(id: string, status: JobStatus, startedAt?: string, finishedAt?: string): Promise<void>
   addEvent(event: RunnerEvent): Promise<void>
+  addEvents(events: RunnerEvent[]): Promise<void>
   getEvents(jobId: string): Promise<RunnerEvent[]>
   deleteJob(id: string): Promise<void>
 }
@@ -98,7 +99,7 @@ export async function createSqliteStore(dbPath: string): Promise<JobStore> {
     CREATE INDEX IF NOT EXISTS idx_events_job_id ON events(job_id);
     CREATE INDEX IF NOT EXISTS idx_jobs_session_id ON jobs(session_id);
   `)
-  
+
   // Migration: Add session_id column if it doesn't exist (for existing databases)
   try {
     await db.exec(`ALTER TABLE jobs ADD COLUMN session_id TEXT`)
@@ -112,7 +113,7 @@ export async function createSqliteStore(dbPath: string): Promise<JobStore> {
       if (input && typeof input === 'object' && 'session_id' in input) {
         sessionId = (input as any).session_id
       }
-      
+
       await db.run(
         `INSERT INTO jobs (id, status, created_at, timeout_ms, input, session_id) VALUES (?, 'pending', ?, ?, ?, ?)`,
         id,
@@ -156,6 +157,30 @@ export async function createSqliteStore(dbPath: string): Promise<JobStore> {
       )
     },
 
+    async addEvents(events: RunnerEvent[]) {
+      if (events.length === 0) return
+      await db.run('BEGIN TRANSACTION')
+      try {
+        const stmt = await db.prepare(
+          `INSERT INTO events (id, job_id, type, ts, data) VALUES (?, ?, ?, ?, ?)`
+        )
+        for (const event of events) {
+          await stmt.run(
+            event.id,
+            event.job_id,
+            event.type,
+            event.ts,
+            event.data ? JSON.stringify(event.data) : null
+          )
+        }
+        await stmt.finalize()
+        await db.run('COMMIT')
+      } catch (err) {
+        await db.run('ROLLBACK')
+        throw err
+      }
+    },
+
     async getEvents(jobId: string) {
       const rows = await db.all<EventRow[]>(`SELECT * FROM events WHERE job_id = ? ORDER BY ts ASC`, jobId)
       return rows.map((row) => ({
@@ -187,7 +212,7 @@ export function createInMemoryStore(): JobStore {
       if (input && typeof input === 'object' && 'session_id' in input) {
         sessionId = (input as any).session_id
       }
-      
+
       jobs.set(id, {
         id,
         status: 'pending',
@@ -210,7 +235,7 @@ export function createInMemoryStore(): JobStore {
         .sort((a, b) => b.created_at.localeCompare(a.created_at))
         .slice(0, limit)
     },
-    
+
     async listJobsBySession(sessionId: string, limit = 20) {
       return Array.from(jobs.values())
         .filter(j => j.session_id === sessionId)
@@ -231,6 +256,14 @@ export function createInMemoryStore(): JobStore {
       const list = events.get(event.job_id) ?? []
       list.push(event)
       events.set(event.job_id, list)
+    },
+
+    async addEvents(eventsList: RunnerEvent[]) {
+      for (const event of eventsList) {
+        const list = events.get(event.job_id) ?? []
+        list.push(event)
+        events.set(event.job_id, list)
+      }
     },
 
     async getEvents(jobId: string) {

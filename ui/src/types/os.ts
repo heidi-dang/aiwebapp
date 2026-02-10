@@ -114,8 +114,6 @@ export enum RunEvent {
   ReasoningStep = 'ReasoningStep',
   ReasoningCompleted = 'ReasoningCompleted',
   RunCancelled = 'RunCancelled',
-  RunPaused = 'RunPaused',
-  RunContinued = 'RunContinued',
   // Team Events
   TeamRunStarted = 'TeamRunStarted',
   TeamRunContent = 'TeamRunContent',
@@ -140,7 +138,7 @@ export interface ResponseAudio {
 }
 
 export interface NewRunResponse {
-  status: 'RUNNING' | 'PAUSED' | 'CANCELLED'
+  status: 'RUNNING' | 'CANCELLED'
 }
 
 export interface RunResponseContent {
