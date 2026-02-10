@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 
 import { Button } from '@/components/ui/button'
-import Icon from '@/components/ui/icon'
 
 type LoginFormState = {
   email: string
@@ -219,7 +218,6 @@ export default function LoginPage() {
               variant="outline"
               className="w-full"
             >
-              <Icon name="google" className="w-4 h-4 mr-2" />
               {isOAuthSubmitting === 'google' ? 'Connecting...' : 'Google'}
             </Button>
             <Button
@@ -228,7 +226,6 @@ export default function LoginPage() {
               variant="outline"
               className="w-full"
             >
-              <Icon name="github" className="w-4 h-4 mr-2" />
               {isOAuthSubmitting === 'github' ? 'Connecting...' : 'GitHub'}
             </Button>
           </div>
