@@ -43,6 +43,7 @@ export interface JobInput {
   runtime_mode?: 'local' | 'sandbox'
   cloud_fallback?: boolean
   sleep_ms?: number
+  poc_commands?: string[]
 }
 
 type ToolCall = {
@@ -1054,6 +1055,141 @@ async function executeWithSleep(ctx: JobContext): Promise<void> {
   await emitEvent(ctx, 'tool.end', { tool: 'sleep', success: result.exitCode === 0 })
 }
 
+async function runReviewCommand(
+  ctx: JobContext,
+  command: string
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  if (ctx.input.runtime_mode === 'sandbox') {
+    const res = await sandboxService.execCommand(ctx.jobId, command, '/app/workspace')
+    return {
+      stdout: (res.stdout || '').slice(0, 12000),
+      stderr: (res.stderr || '').slice(0, 12000),
+      exitCode: res.exitCode
+    }
+  }
+
+  const maxOutput = 12000
+  const timeoutMs = 10 * 60 * 1000
+
+  return new Promise((resolve, reject) => {
+    const child = spawn('bash', ['-lc', command], { cwd: ctx.baseDirResolved })
+    registerJobProcess(ctx.jobId, child)
+
+    let stdout = ''
+    let stderr = ''
+    let resolved = false
+
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL')
+      } catch {
+      }
+    }, timeoutMs)
+
+    const onAbort = () => {
+      try {
+        child.kill('SIGKILL')
+      } catch {
+      }
+    }
+    ctx.signal?.addEventListener('abort', onAbort, { once: true })
+
+    child.stdout.on('data', (chunk) => {
+      if (stdout.length < maxOutput) stdout += chunk.toString()
+    })
+    child.stderr.on('data', (chunk) => {
+      if (stderr.length < maxOutput) stderr += chunk.toString()
+    })
+
+    child.on('error', (err) => {
+      if (resolved) return
+      resolved = true
+      clearTimeout(timer)
+      reject(err)
+    })
+    child.on('close', (code) => {
+      if (resolved) return
+      resolved = true
+      clearTimeout(timer)
+      resolve({
+        stdout: stdout.slice(0, maxOutput),
+        stderr: stderr.slice(0, maxOutput),
+        exitCode: code ?? 0
+      })
+    })
+  })
+}
+
+async function executeWithPocReview(ctx: JobContext): Promise<void> {
+  const commands = (Array.isArray(ctx.input.poc_commands) && ctx.input.poc_commands.length > 0)
+    ? ctx.input.poc_commands
+    : [
+        'node -v',
+        'npm -v',
+        'cd runner && npm run build',
+        'cd server && npm run build',
+        'cd ui && npm run build'
+      ]
+
+  await emitEvent(ctx, 'tool.start', {
+    tool: 'poc_review',
+    input: {
+      base_dir: ctx.input.base_dir ?? '',
+      runtime_mode: ctx.input.runtime_mode ?? 'local',
+      checks: commands.length
+    }
+  })
+
+  const results: Array<{
+    id: string
+    statement: string
+    command: string
+    ok: boolean
+    exitCode: number
+    stdout: string
+    stderr: string
+  }> = []
+
+  for (let i = 0; i < commands.length; i++) {
+    if (ctx.aborted) break
+    const command = commands[i]
+    const id = `C${i + 1}`
+    const statement = `Command succeeds: ${command}`
+    const res = await runReviewCommand(ctx, command)
+    const ok = res.exitCode === 0
+    results.push({ id, statement, command, ok, exitCode: res.exitCode, stdout: res.stdout, stderr: res.stderr })
+
+    await emitEvent(ctx, 'tool.output', {
+      tool: 'poc_review',
+      claim: {
+        id,
+        statement,
+        dependencies: i === 0 ? [] : [`C${i}`],
+        command,
+        ok,
+        exitCode: res.exitCode
+      },
+      evidence: {
+        stdout: res.stdout,
+        stderr: res.stderr
+      }
+    })
+  }
+
+  const passed = results.filter(r => r.ok).length
+  const failed = results.length - passed
+  const summaryLines = [
+    `PoC Review: ${passed} passed, ${failed} failed`,
+    ...results.map(r => `- ${r.ok ? '✅' : '❌'} ${r.id}: ${r.command}`)
+  ]
+
+  await emitEvent(ctx, 'tool.output', {
+    tool: 'poc_review',
+    output: summaryLines.join('\n')
+  })
+  await emitEvent(ctx, 'tool.end', { tool: 'poc_review', success: failed === 0 })
+}
+
 async function executeWithOpenRouter(ctx: JobContext): Promise<void> {
   const message = ctx.input.message ?? ctx.input.instruction ?? 'Hello'
   if (!process.env.OPENROUTER_API_KEY) {
@@ -1197,6 +1333,8 @@ export async function executeJob(
     // client if available, otherwise use the simulated executor.
     if (input.provider === 'sleep') {
       await executeWithSleep(ctx)
+    } else if (input.provider === 'poc_review') {
+      await executeWithPocReview(ctx)
     } else if (input.provider === 'copilotapi') {
       console.log(`[Runner] Using Copilot API for job ${jobId}`);
       await executeWithCopilotApi(ctx);
