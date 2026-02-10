@@ -1,8 +1,10 @@
-require('dotenv').config({ path: '../.env' })
-require('dotenv-expand').config()
-
+import dotenv from 'dotenv'
+import { expand } from 'dotenv-expand'
 import type { NextConfig } from 'next'
 import path from 'path'
+
+const env = dotenv.config({ path: '../.env' })
+expand(env)
 
 const nextConfig: NextConfig = {
   output: 'standalone',
