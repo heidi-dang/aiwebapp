@@ -31,6 +31,38 @@ function statusClass(status: RunState['status']) {
   }
 }
 
+type PocClaim = {
+  id?: string
+  statement?: string
+  command?: string
+  ok?: boolean
+  exitCode?: number
+  dependencies?: string[]
+  weight?: number
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function getPocClaimFromPayload(payload: unknown): PocClaim | null {
+  if (!isRecord(payload)) return null
+  if (payload['tool'] !== 'poc_review') return null
+  const claim = payload['claim']
+  if (!isRecord(claim)) return null
+
+  const dependencies = claim['dependencies']
+  return {
+    id: typeof claim['id'] === 'string' ? claim['id'] : undefined,
+    statement: typeof claim['statement'] === 'string' ? claim['statement'] : undefined,
+    command: typeof claim['command'] === 'string' ? claim['command'] : undefined,
+    ok: typeof claim['ok'] === 'boolean' ? claim['ok'] : undefined,
+    exitCode: typeof claim['exitCode'] === 'number' ? claim['exitCode'] : undefined,
+    weight: typeof claim['weight'] === 'number' ? claim['weight'] : undefined,
+    dependencies: Array.isArray(dependencies) ? dependencies.filter((d) => typeof d === 'string') : undefined
+  }
+}
+
 interface ApprovalState {
   tokenId: string
   description: string
@@ -91,14 +123,17 @@ export default function RunCard({ jobId }: { jobId: string }) {
         activeTools.set(name, idx)
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (type === 'tool.output' && payload && typeof payload === 'object' && payload !== null && 'tool' in payload && typeof (payload as any).tool === 'string') {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const name = (payload as any).tool
+      if (type === 'tool.output' && isRecord(payload) && typeof payload['tool'] === 'string') {
+        const name = payload['tool']
         const idx = activeTools.get(name)
         if (idx !== undefined) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          newToolExecutions[idx].output = (newToolExecutions[idx].output || '') + ((payload as any).output || '')
+          const output =
+            typeof payload['output'] === 'string'
+              ? payload['output']
+              : payload['claim']
+                ? JSON.stringify(payload['claim'])
+                : ''
+          newToolExecutions[idx].output = (newToolExecutions[idx].output || '') + (output || '')
         }
       }
 
@@ -197,6 +232,10 @@ export default function RunCard({ jobId }: { jobId: string }) {
   }
 
   const bg = statusClass(run.status)
+  const pocClaims = run.events
+    .filter((e) => e.type === 'tool.output')
+    .map((e) => getPocClaimFromPayload(e.payload))
+    .filter((c): c is PocClaim => !!c)
 
   return (
     <div className="w-full" data-testid="run-thinking">
@@ -216,6 +255,41 @@ export default function RunCard({ jobId }: { jobId: string }) {
               onClick={() => cancelJob(run.jobId)}
             >
               Cancel
+            </Button>
+          )}
+          {pocClaims.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const lines = [
+                  `# PoC Review Report`,
+                  ``,
+                  `Job: ${run.jobId}`,
+                  `Status: ${run.status}`,
+                  ``,
+                  `## Claims`,
+                  ...pocClaims.map((c) => {
+                    const deps = Array.isArray(c.dependencies) ? c.dependencies.join(', ') : ''
+                    const weight = typeof c.weight === 'number' ? c.weight : 1
+                    const ok = !!c.ok
+                    const statement = typeof c.statement === 'string' ? c.statement : ''
+                    const cmd = typeof c.command === 'string' ? c.command : ''
+                    return `- ${ok ? '✅' : '❌'} ${c.id ?? ''} (w=${weight}) deps=[${deps}]\n  - ${statement}\n  - \`${cmd}\``
+                  })
+                ]
+                const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/markdown' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `poc-review-${run.jobId}.md`
+                document.body.appendChild(a)
+                a.click()
+                a.remove()
+                URL.revokeObjectURL(url)
+              }}
+            >
+              Export PoC Report
             </Button>
           )}
           <Button

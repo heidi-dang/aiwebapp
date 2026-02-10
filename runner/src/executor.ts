@@ -1123,20 +1123,31 @@ async function runReviewCommand(
 async function executeWithPocReview(ctx: JobContext): Promise<void> {
   const commands = (Array.isArray(ctx.input.poc_commands) && ctx.input.poc_commands.length > 0)
     ? ctx.input.poc_commands
-    : [
-        'node -v',
-        'npm -v',
-        'cd runner && npm run build',
-        'cd server && npm run build',
-        'cd ui && npm run build'
-      ]
+    : []
+
+  const checks: Array<{ id: string; statement: string; command: string; dependencies: string[]; weight: number }> =
+    commands.length > 0
+      ? commands.map((command, i) => ({
+          id: `C${i + 1}`,
+          statement: `Command succeeds: ${command}`,
+          command,
+          dependencies: i === 0 ? [] : [`C${i}`],
+          weight: 1
+        }))
+      : [
+          { id: 'C1', statement: 'Node is available', command: 'node -v', dependencies: [], weight: 1 },
+          { id: 'C2', statement: 'npm is available', command: 'npm -v', dependencies: ['C1'], weight: 1 },
+          { id: 'C3', statement: 'Runner builds', command: 'cd runner && npm run build', dependencies: ['C2'], weight: 3 },
+          { id: 'C4', statement: 'Server builds', command: 'cd server && npm run build', dependencies: ['C2'], weight: 3 },
+          { id: 'C5', statement: 'UI builds', command: 'cd ui && npm run build', dependencies: ['C2'], weight: 3 }
+        ]
 
   await emitEvent(ctx, 'tool.start', {
     tool: 'poc_review',
     input: {
       base_dir: ctx.input.base_dir ?? '',
       runtime_mode: ctx.input.runtime_mode ?? 'local',
-      checks: commands.length
+      checks: checks.length
     }
   })
 
@@ -1150,22 +1161,31 @@ async function executeWithPocReview(ctx: JobContext): Promise<void> {
     stderr: string
   }> = []
 
-  for (let i = 0; i < commands.length; i++) {
+  for (let i = 0; i < checks.length; i++) {
     if (ctx.aborted) break
-    const command = commands[i]
-    const id = `C${i + 1}`
-    const statement = `Command succeeds: ${command}`
-    const res = await runReviewCommand(ctx, command)
+    const check = checks[i]
+    const res = await runReviewCommand(ctx, check.command)
     const ok = res.exitCode === 0
-    results.push({ id, statement, command, ok, exitCode: res.exitCode, stdout: res.stdout, stderr: res.stderr })
+    results.push({
+      id: check.id,
+      statement: check.statement,
+      command: check.command,
+      ok,
+      exitCode: res.exitCode,
+      stdout: res.stdout,
+      stderr: res.stderr
+    })
 
+    const line = `${ok ? '✅' : '❌'} ${check.id} (w=${check.weight}): ${check.statement} (exit ${res.exitCode})`
     await emitEvent(ctx, 'tool.output', {
       tool: 'poc_review',
+      output: line + '\n',
       claim: {
-        id,
-        statement,
-        dependencies: i === 0 ? [] : [`C${i}`],
-        command,
+        id: check.id,
+        statement: check.statement,
+        dependencies: check.dependencies,
+        command: check.command,
+        weight: check.weight,
         ok,
         exitCode: res.exitCode
       },
@@ -1178,14 +1198,28 @@ async function executeWithPocReview(ctx: JobContext): Promise<void> {
 
   const passed = results.filter(r => r.ok).length
   const failed = results.length - passed
+  const totalWeight = results.reduce((sum, r) => {
+    const w = checks.find(c => c.id === r.id)?.weight ?? 1
+    return sum + w
+  }, 0)
+  const passedWeight = results.reduce((sum, r) => {
+    const w = checks.find(c => c.id === r.id)?.weight ?? 1
+    return sum + (r.ok ? w : 0)
+  }, 0)
+
   const summaryLines = [
     `PoC Review: ${passed} passed, ${failed} failed`,
-    ...results.map(r => `- ${r.ok ? '✅' : '❌'} ${r.id}: ${r.command}`)
+    `Weight: ${passedWeight}/${totalWeight}`,
+    ...results.map(r => {
+      const check = checks.find(c => c.id === r.id)
+      const w = check?.weight ?? 1
+      return `- ${r.ok ? '✅' : '❌'} ${r.id} (w=${w}): ${r.statement}`
+    })
   ]
 
   await emitEvent(ctx, 'tool.output', {
     tool: 'poc_review',
-    output: summaryLines.join('\n')
+    output: '\n' + summaryLines.join('\n') + '\n'
   })
   await emitEvent(ctx, 'tool.end', { tool: 'poc_review', success: failed === 0 })
 }
