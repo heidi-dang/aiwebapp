@@ -1,6 +1,6 @@
 # Heidi Web App
 
-A modern full-stack web application built with Next.js, Fastify, and Node.js. Features user authentication, real-time chat, and a modular architecture with separate services for UI, API, and background processing.
+A modern full-stack AI Web App built with Next.js, Fastify, and Node.js. Features user authentication, real-time chat, and a modular architecture with separate services for UI, API, and background processing.
 
 ## Websites
 
