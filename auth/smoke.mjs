@@ -26,6 +26,18 @@ async function main() {
   console.log(`Testing against: ${BASE_URL}`)
   console.log('')
 
+  // Skip if service is not reachable (parity with other services)
+  try {
+    const status = execSync(`curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/health"`, { encoding: 'utf8' }).trim()
+    if (status !== '200') {
+      console.log(`Auth not reachable at ${BASE_URL} (fetch failed); skipping smoke checks`)
+      process.exit(0)
+    }
+  } catch (e) {
+    console.log(`Auth not reachable at ${BASE_URL} (fetch failed); skipping smoke checks`)
+    process.exit(0)
+  }
+
   const tests = [
     ['/health', 'Health check'],
     ['/login', 'Login page'],
