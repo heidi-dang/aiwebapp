@@ -86,3 +86,12 @@ export class OllamaProvider implements LLMProvider {
     }
   }
 }
+
+export function createOllamaClientFromEnv(): OllamaProvider | null {
+  // Check if Ollama is configured via env
+  const baseUrl = process.env.OLLAMA_API_URL || process.env.AI_API_URL
+  if (baseUrl || process.env.OLLAMA_HOST) {
+    return new OllamaProvider(baseUrl)
+  }
+  return null
+}
