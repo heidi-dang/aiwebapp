@@ -27,7 +27,7 @@ export class LLMService {
       try {
         // Create a temporary config for this attempt
         const attemptConfig = { ...config, provider: providerName }
-        
+
         // Adjust model if switching to Ollama (fallback usually implies local)
         if (providerName === 'ollama' && !attemptConfig.model.includes(':')) {
              attemptConfig.model = 'qwen2.5-coder:7b' // Default safe local model
@@ -39,6 +39,8 @@ export class LLMService {
       } catch (err) {
         console.warn(`[LLM] Provider ${providerName} failed:`, err instanceof Error ? err.message : String(err))
         lastError = err
+        // If we got a NEEDS_AUTH error from browser-proxy, we should notify but still fallback
+        // The calling agent might handle this event if we exposed it, but for now we just log and fallback.
         // Continue to next provider
       }
     }
@@ -52,14 +54,14 @@ export class LLMService {
     // Note: We might need to key by provider+apiKey if different keys are used
     // For simplicity, we assume one global key per provider from env if not passed
     // But config.apiKey might change.
-    
+
     // To support per-request keys, we might need to recreate the provider or pass the key to chat()
     // The current interface assumes provider is configured at creation.
     // Let's create a key for the map that includes the API key hash or similar if we want to cache.
     // Or simpler: just re-instantiate if we have explicit config, or cache the default one.
-    
+
     const cacheKey = `${config.provider}:${config.apiKey || 'default'}`
-    
+
     if (this.providers.has(cacheKey)) {
       return this.providers.get(cacheKey)!
     }
@@ -76,6 +78,11 @@ export class LLMService {
         'HTTP-Referer': 'https://heidiai.com.au', // Required by OpenRouter
         'X-Title': 'HeidiAI Runner'
       })
+    } else if (config.provider === 'browser-proxy') {
+      // Connect to the internal Browser Proxy service
+      const baseUrl = process.env.BROWSER_PROXY_URL || 'http://browser-proxy:3003/v1'
+      const apiKey = 'internal' // No auth needed for internal docker network, or could use shared secret
+      provider = new OpenAIProvider(apiKey, baseUrl)
     } else if (config.provider === 'ollama') {
       provider = new OllamaProvider(config.baseUrl)
     } else if (config.provider === 'anthropic') {

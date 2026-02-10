@@ -144,7 +144,7 @@ Be thorough and systematic in your approach.`
     const tracer = tracingService.getTracer()
     return tracer.startActiveSpan('CoderAgent.run', async (span) => {
       span.setAttribute('job_id', this.ctx.jobId)
-      
+
       try {
         // Inject repo map into system prompt
         const mapSpan = tracer.startSpan('generate_repo_map')
@@ -167,12 +167,12 @@ Be thorough and systematic in your approach.`
             span.setAttribute('aborted', true)
             return
           }
-          
+
           const iterSpan = tracer.startSpan(`iteration_${this.currentIteration}`)
           iterSpan.setAttribute('state', this.state)
-          
+
           await this.processState()
-          
+
           iterSpan.end()
           this.currentIteration++
         }
@@ -347,10 +347,11 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     // Configure LLM Service
     // Note: We might want to pass API keys from ctx.input if provided, or rely on env vars
     // For now, we assume env vars are set or ctx.input might have them in future
-    
-    const fallbackOrder = process.env.LLM_FALLBACK_ORDER 
-      ? process.env.LLM_FALLBACK_ORDER.split(',').map(p => p.trim()) 
-      : ['openrouter', 'ollama']
+
+    // Default fallback order: Browser Proxy -> OpenRouter -> Ollama
+    const fallbackOrder = process.env.LLM_FALLBACK_ORDER
+      ? process.env.LLM_FALLBACK_ORDER.split(',').map(p => p.trim())
+      : ['browser-proxy', 'openrouter', 'ollama']
 
     const llmConfig = {
       provider: provider === 'bridge' ? 'openai' : provider, // Fallback to openai if bridge not available but requested? Or just use provider.
@@ -358,8 +359,8 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       fallbackOrder
       // We can pass apiKey if we have it in ctx.input securely, otherwise LLMService uses env
     }
-    
-    // If provider was 'bridge' but we got here, it means bridge wasn't available. 
+
+    // If provider was 'bridge' but we got here, it means bridge wasn't available.
     // We should probably default to 'openai' or 'ollama' depending on config.
     if (llmConfig.provider === 'bridge') {
       llmConfig.provider = 'openai'
@@ -373,12 +374,12 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       try {
         // Compress context before sending
         const compressedMessages = await this.contextManager.compress(this.messages)
-        
+
         const response = await llmService.chat(llmConfig, compressedMessages, tools)
-        
+
         // Normalize response if needed (LLMService returns ChatResponse which is compatible with ChatMessage mostly)
         // ChatResponse doesn't have 'name' or 'tool_call_id' usually, but 'tool_calls' matches.
-        
+
         const message: ChatMessage = {
           role: 'assistant',
           content: response.content,
@@ -400,39 +401,39 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
           }
           // Continue the loop to get the next response after tool execution
           // We need to call LLM again with the tool results
-          // Recursive call or loop? 
+          // Recursive call or loop?
           // The original code was: "Continue the loop to get the next response after tool execution"
           // But it was inside the retry loop which is wrong. The retry loop is for *one* request.
-          // The original code actually had a bug or I misread it. 
+          // The original code actually had a bug or I misread it.
           // "Continue the loop to get the next response after tool execution" implies we go back to top of retry loop?
           // No, that would re-send the original request.
-          
+
           // Actually, the original code had:
           // } else { return message }
           // If tool calls, it looped? But the loop is `for (let attempt = 1...)`.
           // If it successfully got a message and handled tool calls, it *should* call the API again.
           // But the `attempt` loop is for retries of a *single* call.
-          
+
           // Let's look at the original code:
           // It seems the original code was confusingly structured or I am misinterpreting "Continue the loop".
           // If `message.tool_calls` exists, it executes tools, pushes results.
           // Then it falls through to... where?
           // If it falls through the `try` block, it continues the `attempt` loop? No, `attempt` loop is for retries.
           // If success, we should break the `attempt` loop.
-          
+
           // Wait, the original code:
           // if (message.tool_calls) { ... } else { return message }
           // If it handled tool calls, it *finishes* the try block.
           // Then it continues to `attempt++`? That means it retries the *same* request?
           // That seems wrong. It should be a new request with the tool outputs.
-          
+
           // The standard pattern is:
           // 1. Call LLM
           // 2. If tool calls: execute, append results, GOTO 1.
           // 3. If no tool calls: return response.
-          
+
           // I will implement this standard pattern here using recursion or a `while(true)` loop.
-          
+
           return await this.callLLMWithTools()
         } else {
           return message
@@ -601,11 +602,11 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             type: 'object',
             properties: {
               path: { type: 'string', description: 'Path to the file to edit' },
-              range: { 
+              range: {
                 type: 'object',
                 description: 'Range to replace (start and end positions)',
                 properties: {
-                  start: { 
+                  start: {
                     type: 'object',
                     properties: {
                       line: { type: 'number', description: '0-based line number' },
@@ -613,7 +614,7 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
                     },
                     required: ['line', 'character']
                   },
-                  end: { 
+                  end: {
                     type: 'object',
                     properties: {
                       line: { type: 'number', description: '0-based line number' },
@@ -1007,7 +1008,7 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     // Check for sensitive commands requiring approval
     if (this.isSensitiveCommand(command)) {
       const { tokenId, wait } = approvalService.createRequest(this.ctx.jobId)
-      
+
       await this.emitEvent('approval.request', {
         tokenId,
         type: 'run_command',
@@ -1058,19 +1059,19 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       // Convert line/character range to absolute positions for bridge
       const content = await this.handleReadFile(path)
       const lines = content.text.split('\n')
-      
+
       let startPos = 0
       for (let i = 0; i < range.start.line; i++) {
         startPos += lines[i].length + 1 // +1 for newline
       }
       startPos += range.start.character
-      
+
       let endPos = 0
       for (let i = 0; i < range.end.line; i++) {
         endPos += lines[i].length + 1
       }
       endPos += range.end.character
-      
+
       await this.ctx.bridge.applyEdits([{
         path,
         range: { start: startPos, end: endPos },
@@ -1081,20 +1082,20 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       const fs = await import('fs/promises')
       const content = await fs.readFile(path, 'utf8')
       const lines = content.split('\n')
-      
+
       // Convert range to string positions
       let startPos = 0
       for (let i = 0; i < range.start.line; i++) {
         startPos += lines[i].length + 1 // +1 for newline
       }
       startPos += range.start.character
-      
+
       let endPos = 0
       for (let i = 0; i < range.end.line; i++) {
         endPos += lines[i].length + 1
       }
       endPos += range.end.character
-      
+
       const newContent = content.slice(0, startPos) + text + content.slice(endPos)
       await fs.writeFile(path, newContent, 'utf8')
     }
@@ -1185,11 +1186,11 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       // Or return error that connection string is needed
       return { error: 'Connection string is required' }
     }
-    
+
     // In a real implementation, we'd use 'pg' or 'mysql2' or 'sqlite3' based on connection string
     // Here we'll just mock it or return a placeholder
-    return { 
-      query, 
+    return {
+      query,
       result: 'SQL execution not fully implemented in this MVP. Please upgrade to Phase 13 Complete.',
       status: 'simulated'
     }
