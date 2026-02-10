@@ -1,31 +1,271 @@
-import { CopilotClientConfig, ChatCompletionRequest } from '../types';
+import * as vscode from 'vscode';
+import {
+  ChatCompletionRequest,
+  ChatCompletionResponse,
+  StreamingChatCompletionResponse,
+  ModelInfo
+} from '../types';
+
+interface CopilotClientConfig {
+  timeout: number;
+  retryAttempts: number;
+}
 
 export class CopilotClient {
-  constructor(config: CopilotClientConfig) {}
+  private config: CopilotClientConfig;
 
-  async getAvailableModels(): Promise<any[]> {
-    return [];
+  constructor(config: CopilotClientConfig) {
+    this.config = config;
   }
 
-  async createChatCompletion(request: ChatCompletionRequest): Promise<any> {
+  async getAvailableModels(): Promise<ModelInfo[]> {
+    // Get available models from VS Code's language model API
+    const models: ModelInfo[] = [];
+
+    try {
+      // Check if Copilot is available
+      const chatModels = await vscode.lm.selectChatModels({
+        vendor: 'copilot',
+        family: 'gpt-4o'
+      });
+
+      if (chatModels && chatModels.length > 0) {
+        models.push({
+          id: 'gpt-4o',
+          object: 'model',
+          created: Date.now() / 1000,
+          owned_by: 'github-copilot'
+        });
+      }
+
+      // Add other potential models
+      const gpt35Models = await vscode.lm.selectChatModels({
+        vendor: 'copilot',
+        family: 'gpt-3.5-turbo'
+      });
+
+      if (gpt35Models && gpt35Models.length > 0) {
+        models.push({
+          id: 'gpt-3.5-turbo',
+          object: 'model',
+          created: Date.now() / 1000,
+          owned_by: 'github-copilot'
+        });
+      }
+
+    } catch (error) {
+      console.warn('Failed to get Copilot models:', error);
+      // Return default models if API fails
+      models.push(
+        {
+          id: 'gpt-4o',
+          object: 'model',
+          created: Date.now() / 1000,
+          owned_by: 'github-copilot'
+        },
+        {
+          id: 'gpt-3.5-turbo',
+          object: 'model',
+          created: Date.now() / 1000,
+          owned_by: 'github-copilot'
+        }
+      );
+    }
+
+    return models;
+  }
+
+  async createChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+    // Validate that Copilot is available
+    if (!await this.isCopilotAvailable()) {
+      throw new Error('GitHub Copilot is not available. Please ensure Copilot Chat extension is installed and you are signed in.');
+    }
+
+    // Convert OpenAI format to VS Code LM API format
+    const messages = this.convertMessages(request.messages);
+
+    // Select appropriate model
+    const model = await this.selectModel(request.model);
+    if (!model) {
+      throw new Error(`Model ${request.model} is not available`);
+    }
+
+    // Prepare request options
+    const options: vscode.LanguageModelChatRequestOptions = {
+      justification: 'AIWebApp Copilot Gateway API request'
+    };
+
+    // Add temperature if specified
+    if (request.temperature !== undefined) {
+      // VS Code API doesn't directly support temperature, but we can try to set it
+      (options as any).temperature = request.temperature;
+    }
+
+    // Add max tokens if specified
+    if (request.max_tokens !== undefined) {
+      (options as any).maxTokens = request.max_tokens;
+    }
+
+    let attempts = 0;
+    let lastError: Error | null = null;
+
+    while (attempts <= this.config.retryAttempts) {
+      try {
+        // Make the request to Copilot using the correct API
+        const response = await model.sendRequest(messages, options, new vscode.CancellationTokenSource().token);
+
+        // Convert response back to OpenAI format
+        const completion = await this.processCopilotResponse(response, request);
+
+        // Add usage information (estimated)
+        const usage = this.estimateTokenUsage(request.messages, completion.choices[0].message.content);
+
+        return {
+          ...completion,
+          usage,
+          session_id: request.session_id
+        };
+
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        attempts++;
+
+        if (attempts <= this.config.retryAttempts) {
+          // Wait before retrying (exponential backoff)
+          const delay = Math.min(1000 * Math.pow(2, attempts - 1), 10000);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    throw lastError || new Error('Failed to get response from Copilot after retries');
+  }
+
+  private async isCopilotAvailable(): Promise<boolean> {
+    try {
+      const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+      return models && models.length > 0;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  private async selectModel(modelName: string): Promise<vscode.LanguageModelChat | undefined> {
+    try {
+      // Map common model names to Copilot families
+      let family: string;
+      switch (modelName.toLowerCase()) {
+        case 'gpt-4':
+        case 'gpt-4o':
+          family = 'gpt-4o';
+          break;
+        case 'gpt-3.5-turbo':
+          family = 'gpt-3.5-turbo';
+          break;
+        default:
+          family = 'gpt-4o'; // Default to GPT-4
+      }
+
+      const models = await vscode.lm.selectChatModels({
+        vendor: 'copilot',
+        family: family
+      });
+
+      return models && models.length > 0 ? models[0] : undefined;
+    } catch (error) {
+      console.error('Error selecting model:', error);
+      return undefined;
+    }
+  }
+
+  private convertMessages(openaiMessages: any[]): vscode.LanguageModelChatMessage[] {
+    return openaiMessages.map(msg => {
+      switch (msg.role) {
+        case 'system':
+          return vscode.LanguageModelChatMessage.User(msg.content);
+        case 'user':
+          return vscode.LanguageModelChatMessage.User(msg.content);
+        case 'assistant':
+          return vscode.LanguageModelChatMessage.Assistant(msg.content);
+        case 'tool':
+          // Handle tool messages as user messages for now
+          return vscode.LanguageModelChatMessage.User(`Tool result: ${msg.content}`);
+        default:
+          return vscode.LanguageModelChatMessage.User(msg.content);
+      }
+    });
+  }
+
+  private async processCopilotResponse(
+    response: vscode.LanguageModelChatResponse,
+    originalRequest: ChatCompletionRequest
+  ): Promise<ChatCompletionResponse> {
+    const responseText = await this.streamToString(response.stream);
+
     return {
-      id: `chatcmpl-${Date.now()}`,
+      id: `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`,
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
-      model: request.model,
+      model: originalRequest.model,
       choices: [{
         index: 0,
         message: {
           role: 'assistant',
-          content: 'Hello from Heidi AI Copilot Dashboard'
+          content: responseText
         },
         finish_reason: 'stop'
       }],
       usage: {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0
+        prompt_tokens: 0, // Will be estimated
+        completion_tokens: 0, // Will be estimated
+        total_tokens: 0 // Will be estimated
       }
+    };
+  }
+
+  private async streamToString(stream: AsyncIterable<any>): Promise<string> {
+    let result = '';
+    for await (const part of stream) {
+      if (part.type === 'text') {
+        result += part.text;
+      }
+    }
+    return result;
+  }
+
+  private estimateTokenUsage(messages: any[], response: string): { prompt_tokens: number; completion_tokens: number; total_tokens: number } {
+    // Rough estimation: ~4 characters per token
+    const promptText = messages.map(m => m.content).join(' ');
+    const promptTokens = Math.ceil(promptText.length / 4);
+    const completionTokens = Math.ceil(response.length / 4);
+
+    return {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: promptTokens + completionTokens
+    };
+  }
+
+  // Streaming support (placeholder for future implementation)
+  async *createStreamingChatCompletion(request: ChatCompletionRequest): AsyncGenerator<StreamingChatCompletionResponse> {
+    // This would implement streaming responses
+    // For now, just yield the complete response
+    const response = await this.createChatCompletion(request);
+
+    yield {
+      id: response.id,
+      object: 'chat.completion.chunk',
+      created: response.created,
+      model: response.model,
+      choices: [{
+        index: 0,
+        delta: {
+          content: response.choices[0].message.content
+        },
+        finish_reason: 'stop'
+      }],
+      usage: response.usage,
+      session_id: request.session_id
     };
   }
 }

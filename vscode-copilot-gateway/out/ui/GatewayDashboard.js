@@ -1,51 +1,66 @@
-import * as vscode from 'vscode';
-import { CopilotGatewayServer } from '../server/CopilotGatewayServer';
-
-export class GatewayDashboard {
-  private panel: vscode.WebviewPanel | undefined;
-  private context: vscode.ExtensionContext;
-  private server: CopilotGatewayServer | undefined;
-
-  constructor(context: vscode.ExtensionContext) {
-    this.context = context;
-  }
-
-  show(): void {
-    if (this.panel) {
-      this.panel.reveal(vscode.ViewColumn.One);
-      return;
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
     }
-
-    this.panel = vscode.window.createWebviewPanel(
-      'aiwebapp-copilot-gateway-dashboard',
-      'AIWebApp Copilot Gateway Dashboard',
-      vscode.ViewColumn.One,
-      {
-        enableScripts: true,
-        localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')]
-      }
-    );
-
-    this.panel.webview.html = this.getWebviewContent();
-    this.panel.onDidDispose(() => {
-      this.panel = undefined;
-    }, null, this.context.subscriptions);
-
-    // Handle messages from the webview
-    this.panel.webview.onDidReceiveMessage(
-      async (message) => {
-        await this.handleWebviewMessage(message);
-      },
-      undefined,
-      this.context.subscriptions
-    );
-
-    // Update dashboard periodically
-    this.startDashboardUpdates();
-  }
-
-  private getWebviewContent(): string {
-    return `
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.GatewayDashboard = void 0;
+const vscode = __importStar(require("vscode"));
+class GatewayDashboard {
+    constructor(context) {
+        this.context = context;
+    }
+    show() {
+        if (this.panel) {
+            this.panel.reveal(vscode.ViewColumn.One);
+            return;
+        }
+        this.panel = vscode.window.createWebviewPanel('aiwebapp-copilot-gateway-dashboard', 'AIWebApp Copilot Gateway Dashboard', vscode.ViewColumn.One, {
+            enableScripts: true,
+            localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')]
+        });
+        this.panel.webview.html = this.getWebviewContent();
+        this.panel.onDidDispose(() => {
+            this.panel = undefined;
+        }, null, this.context.subscriptions);
+        // Handle messages from the webview
+        this.panel.webview.onDidReceiveMessage(async (message) => {
+            await this.handleWebviewMessage(message);
+        }, undefined, this.context.subscriptions);
+        // Update dashboard periodically
+        this.startDashboardUpdates();
+    }
+    getWebviewContent() {
+        return `
       <!DOCTYPE html>
       <html lang="en">
       <head>
@@ -290,47 +305,44 @@ export class GatewayDashboard {
       </body>
       </html>
     `;
-  }
-
-  private async handleWebviewMessage(message: any): Promise<void> {
-    switch (message.command) {
-      case 'startServer':
-        vscode.commands.executeCommand('aiwebapp-copilot-gateway.startServer');
-        break;
-      case 'stopServer':
-        vscode.commands.executeCommand('aiwebapp-copilot-gateway.stopServer');
-        break;
-      case 'openSettings':
-        vscode.commands.executeCommand('aiwebapp-copilot-gateway.openSettings');
-        break;
     }
-  }
-
-  private startDashboardUpdates(): void {
-    // Update dashboard every 2 seconds
-    const updateInterval = setInterval(() => {
-      if (this.panel && this.server) {
-        const stats = this.server.getStats();
-        this.panel.webview.postMessage({
-          type: 'updateStats',
-          stats
+    async handleWebviewMessage(message) {
+        switch (message.command) {
+            case 'startServer':
+                vscode.commands.executeCommand('aiwebapp-copilot-gateway.startServer');
+                break;
+            case 'stopServer':
+                vscode.commands.executeCommand('aiwebapp-copilot-gateway.stopServer');
+                break;
+            case 'openSettings':
+                vscode.commands.executeCommand('aiwebapp-copilot-gateway.openSettings');
+                break;
+        }
+    }
+    startDashboardUpdates() {
+        // Update dashboard every 2 seconds
+        const updateInterval = setInterval(() => {
+            if (this.panel && this.server) {
+                const stats = this.server.getStats();
+                this.panel.webview.postMessage({
+                    type: 'updateStats',
+                    stats
+                });
+            }
+        }, 2000);
+        // Clean up interval when panel is disposed
+        this.panel?.onDidDispose(() => {
+            clearInterval(updateInterval);
         });
-      }
-    }, 2000);
-
-    // Clean up interval when panel is disposed
-    this.panel?.onDidDispose(() => {
-      clearInterval(updateInterval);
-    });
-  }
-
-  setServer(server: CopilotGatewayServer): void {
-    this.server = server;
-  }
-
-  dispose(): void {
-    if (this.panel) {
-      this.panel.dispose();
     }
-  }
+    setServer(server) {
+        this.server = server;
+    }
+    dispose() {
+        if (this.panel) {
+            this.panel.dispose();
+        }
+    }
 }
+exports.GatewayDashboard = GatewayDashboard;
+//# sourceMappingURL=GatewayDashboard.js.map

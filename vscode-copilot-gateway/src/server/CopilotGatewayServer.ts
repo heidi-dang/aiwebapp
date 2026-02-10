@@ -4,7 +4,6 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
-import axios from 'axios';
 import { Server as HttpServer } from 'http';
 import { WebSocketServer } from 'ws';
 
@@ -327,7 +326,7 @@ export class CopilotGatewayServer {
       }
 
       // Queue the request
-      const result = await this.requestQueue.enqueue(async () => {
+      const result = await this.requestQueue.add(async () => {
         return await this.copilotClient.createChatCompletion(request);
       });
 
@@ -394,12 +393,8 @@ export class CopilotGatewayServer {
         if (authToken) {
           try {
             const user = await this.authService.validateToken(authToken);
-            if (user) {
-              (req as any).userId = user.userId;
-              return { success: true, userId: user.userId };
-            } else {
-              return { success: false, status: 401, error: 'Invalid auth token' };
-            }
+            (req as any).userId = user.user_id;
+            return { success: true, userId: user.user_id };
           } catch (error) {
             return { success: false, status: 401, error: 'Invalid auth token' };
           }
@@ -434,51 +429,41 @@ export class CopilotGatewayServer {
   }
 
   private async handleGetTools(req: express.Request, res: express.Response): Promise<void> {
-    try {
-      const response = await axios.get(`${this.config.backendUrl}/tools`);
-      res.json(response.data);
-    } catch (error) {
-      console.error('Failed to fetch tools:', error);
-      res.status(500).json({ error: 'Failed to fetch tools' });
-    }
+    res.json({ tools: [] }); // Placeholder
   }
 
   private async handleToolCall(req: express.Request, res: express.Response): Promise<void> {
-    try {
-      const response = await axios.post(`${this.config.backendUrl}/tools/call`, req.body);
-      res.json(response.data);
-    } catch (error) {
-      console.error('Failed to call tool:', error);
-      res.status(500).json({ error: 'Failed to call tool' });
-    }
+    res.status(501).json({ error: 'Tool calling not implemented' });
   }
 
   private async handleGetSessions(req: express.Request, res: express.Response): Promise<void> {
     if (!this.sessionManager) {
-      res.status(501).json({ error: 'Session manager not available' });
+      res.status(501).json({ error: 'Session management not available' });
       return;
     }
-    const sessions = this.sessionManager.getAllSessions();
+
+    const sessions = await this.sessionManager.getAllSessions();
     res.json({ sessions });
   }
 
   private async handleCreateSession(req: express.Request, res: express.Response): Promise<void> {
     if (!this.sessionManager) {
-      res.status(501).json({ error: 'Session manager not available' });
+      res.status(501).json({ error: 'Session management not available' });
       return;
     }
-    const sessionId = req.body.sessionId || `session_${Date.now()}`;
-    this.sessionManager.createSession(sessionId, req.body);
-    res.json({ sessionId });
+
+    const sessionId = await this.sessionManager.createSession();
+    res.json({ session_id: sessionId });
   }
 
   private async handleDeleteSession(req: express.Request, res: express.Response): Promise<void> {
     if (!this.sessionManager) {
-      res.status(501).json({ error: 'Session manager not available' });
+      res.status(404).json({ error: 'Session management not available' });
       return;
     }
+
     const { sessionId } = req.params;
-    this.sessionManager.deleteSession(sessionId);
+    await this.sessionManager.deleteSession(sessionId);
     res.json({ success: true });
   }
 
