@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '@/store'
 import { ConfettiBurst } from './ConfettiBurst'
+import { motion } from 'framer-motion'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -26,6 +27,8 @@ function getEndSummary(events: Array<{ type: string; payload?: unknown }>) {
 export function PocRunTimeline({ jobId }: { jobId: string }) {
   const run = useStore((s) => s.runs[jobId])
   const [confettiSeed, setConfettiSeed] = useState<string | null>(null)
+  const [highlightClaimId, setHighlightClaimId] = useState<string | null>(null)
+  const [lastCount, setLastCount] = useState(0)
 
   const { claims, passedWeight, totalWeight, summary } = useMemo(() => {
     const events = run?.events ?? []
@@ -56,6 +59,15 @@ export function PocRunTimeline({ jobId }: { jobId: string }) {
     if (!summary?.proofHash || summary.failed !== 0) return
     setConfettiSeed(`${summary.proofHash}_${run.finishedAt ?? Date.now()}`)
   }, [run, summary])
+
+  useEffect(() => {
+    if (claims.length <= lastCount) return
+    const newest = claims[claims.length - 1]
+    if (newest?.id) setHighlightClaimId(newest.id)
+    setLastCount(claims.length)
+    const t = setTimeout(() => setHighlightClaimId(null), 1400)
+    return () => clearTimeout(t)
+  }, [claims, lastCount])
 
   const pct = totalWeight > 0 ? Math.round((passedWeight / totalWeight) * 100) : 0
 
@@ -90,11 +102,14 @@ export function PocRunTimeline({ jobId }: { jobId: string }) {
           <div className="text-xs text-muted">No claims yet</div>
         )}
         {claims.map((c) => (
-          <div
+          <motion.div
             key={c.id}
+            initial={{ opacity: 0, y: 6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
             className={`rounded-xl border p-2 ${
               c.ok ? 'border-primary/20 bg-accent' : 'border-primary/10 bg-background/60'
-            }`}
+            } ${highlightClaimId === c.id ? 'ring-2 ring-primary/60' : ''}`}
           >
             <div className="flex items-center justify-between gap-2">
               <div className="text-xs font-medium uppercase text-primary">
@@ -105,7 +120,7 @@ export function PocRunTimeline({ jobId }: { jobId: string }) {
             {c.statement && (
               <div className="mt-1 text-[11px] text-secondary/80">{c.statement}</div>
             )}
-          </div>
+          </motion.div>
         ))}
       </div>
     </div>
