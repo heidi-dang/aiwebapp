@@ -15,8 +15,8 @@ await fastify.register(cors, {
 
 fastify.get('/health', async () => {
   const browserOk = await browserManager.healthCheck()
-  return { 
-    status: browserOk ? 'ok' : 'degraded', 
+  return {
+    status: browserOk ? 'ok' : 'degraded',
     service: 'browser-proxy',
     browser: browserOk ? 'connected' : 'disconnected'
   }
