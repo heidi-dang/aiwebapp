@@ -41,6 +41,16 @@ type PocClaim = {
   weight?: number
 }
 
+type PocEvidence = {
+  stdout?: string
+  stderr?: string
+}
+
+type PocClaimEvent = {
+  claim: PocClaim
+  evidence: PocEvidence
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -63,6 +73,20 @@ function getPocClaimFromPayload(payload: unknown): PocClaim | null {
   }
 }
 
+function getPocClaimEventFromPayload(payload: unknown): PocClaimEvent | null {
+  if (!isRecord(payload)) return null
+  if (payload['tool'] !== 'poc_review') return null
+  const claim = getPocClaimFromPayload(payload)
+  if (!claim) return null
+  const evidenceRaw = payload['evidence']
+  const evidence: PocEvidence = {}
+  if (isRecord(evidenceRaw)) {
+    if (typeof evidenceRaw['stdout'] === 'string') evidence.stdout = evidenceRaw['stdout']
+    if (typeof evidenceRaw['stderr'] === 'string') evidence.stderr = evidenceRaw['stderr']
+  }
+  return { claim, evidence }
+}
+
 interface ApprovalState {
   tokenId: string
   description: string
@@ -78,6 +102,7 @@ export default function RunCard({ jobId }: { jobId: string }) {
   const [planMessage, setPlanMessage] = useState<string>('')
   const [pendingApproval, setPendingApproval] = useState<ApprovalState | null>(null)
   const [approving, setApproving] = useState(false)
+  const [expandedClaimId, setExpandedClaimId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!run) return
@@ -232,10 +257,11 @@ export default function RunCard({ jobId }: { jobId: string }) {
   }
 
   const bg = statusClass(run.status)
-  const pocClaims = run.events
+  const pocClaimEvents = run.events
     .filter((e) => e.type === 'tool.output')
-    .map((e) => getPocClaimFromPayload(e.payload))
-    .filter((c): c is PocClaim => !!c)
+    .map((e) => getPocClaimEventFromPayload(e.payload))
+    .filter((c): c is PocClaimEvent => !!c)
+  const pocClaims = pocClaimEvents.map((c) => c.claim)
 
   return (
     <div className="w-full" data-testid="run-thinking">
@@ -331,6 +357,71 @@ export default function RunCard({ jobId }: { jobId: string }) {
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {pocClaimEvents.length > 0 && (
+            <div className="rounded-lg border border-primary/10 bg-accent/30 p-3">
+              <div className="text-xs font-medium uppercase text-primary">PoC Claims</div>
+              <div className="mt-2 space-y-2">
+                {pocClaimEvents.map(({ claim, evidence }, idx) => {
+                  const id = claim.id || `claim_${idx + 1}`
+                  const ok = !!claim.ok
+                  const weight = typeof claim.weight === 'number' ? claim.weight : 1
+                  const deps = Array.isArray(claim.dependencies) ? claim.dependencies.join(', ') : ''
+                  const isOpen = expandedClaimId === id
+                  return (
+                    <div key={id} className="rounded-lg border border-primary/10 bg-accent/40 p-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-primary">
+                            {ok ? '✅' : '❌'} {id} <span className="text-primary/70">w={weight}</span>
+                          </div>
+                          {claim.statement && (
+                            <div className="mt-1 break-words text-xs text-secondary">
+                              {claim.statement}
+                            </div>
+                          )}
+                          {claim.command && (
+                            <div className="mt-1 break-words text-[11px] text-secondary/80">
+                              {claim.command}
+                            </div>
+                          )}
+                          {deps && (
+                            <div className="mt-1 text-[11px] text-secondary/70">
+                              deps: {deps}
+                            </div>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setExpandedClaimId(isOpen ? null : id)}
+                        >
+                          {isOpen ? 'Hide' : 'Evidence'}
+                        </Button>
+                      </div>
+                      {isOpen && (
+                        <div className="mt-2 space-y-2">
+                          {evidence.stdout && (
+                            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-primary/10 bg-primaryAccent p-2 text-[11px] text-primary/90">
+                              {evidence.stdout}
+                            </pre>
+                          )}
+                          {evidence.stderr && (
+                            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-primary/10 bg-primaryAccent p-2 text-[11px] text-red-300/90">
+                              {evidence.stderr}
+                            </pre>
+                          )}
+                          {!evidence.stdout && !evidence.stderr && (
+                            <div className="text-xs text-muted">No evidence captured</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
 

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { TextArea } from '@/components/ui/textarea'
 import { useStore } from '@/store'
 import { createJob, startJob, streamJobEvents } from '@/lib/runner/client'
 
@@ -11,6 +12,8 @@ export function PocReview() {
   const {
     pocReviewBaseDir,
     setPocReviewBaseDir,
+    pocReviewChecksJson,
+    setPocReviewChecksJson,
     runtimeMode,
     cloudFallbackEnabled,
     initRun,
@@ -31,6 +34,12 @@ export function PocReview() {
           placeholder="Folder (optional): /path/to/repo"
           className="h-9 w-full rounded-xl border border-primary/15 bg-accent p-3 text-xs"
         />
+        <TextArea
+          value={pocReviewChecksJson}
+          onChange={(e) => setPocReviewChecksJson(e.target.value)}
+          placeholder={`Optional checks JSON (advanced)\n[\n  {\"id\":\"C1\",\"statement\":\"UI builds\",\"command\":\"cd ui && npm run build\",\"dependencies\":[],\"weight\":3}\n]`}
+          className="h-28 w-full rounded-xl border border-primary/15 bg-accent p-3 text-xs"
+        />
         <Button
           type="button"
           disabled={isRunning}
@@ -38,13 +47,22 @@ export function PocReview() {
           onClick={async () => {
             setIsRunning(true)
             try {
+              let poc_checks: unknown = undefined
+              if (pocReviewChecksJson.trim()) {
+                poc_checks = JSON.parse(pocReviewChecksJson)
+                if (!Array.isArray(poc_checks)) {
+                  throw new Error('Checks JSON must be an array')
+                }
+              }
+              const input: Record<string, unknown> = {
+                provider: 'poc_review',
+                runtime_mode: runtimeMode,
+                cloud_fallback: cloudFallbackEnabled
+              }
+              if (pocReviewBaseDir.trim()) input.base_dir = pocReviewBaseDir.trim()
+              if (poc_checks) input.poc_checks = poc_checks
               const { jobId } = await createJob(
-                {
-                  provider: 'poc_review',
-                  base_dir: pocReviewBaseDir.trim() ? pocReviewBaseDir.trim() : undefined,
-                  runtime_mode: runtimeMode,
-                  cloud_fallback: cloudFallbackEnabled
-                },
+                input,
                 12 * 60 * 1000
               )
 
@@ -89,4 +107,3 @@ export function PocReview() {
     </div>
   )
 }
-
