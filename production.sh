@@ -25,9 +25,9 @@ LOG_DIR="logs"
 mkdir -p "$LOG_DIR"
 
 LANDING_PORT=6868
-UI_PORT=3000
-SERVER_PORT=3001
-RUNNER_PORT=3002
+UI_PORT=4000
+SERVER_PORT=4001
+RUNNER_PORT=4002
 
 cleanup() {
     echo ""
@@ -96,22 +96,31 @@ fi
 
 step "Step 4: Start Services"
 if prompt_user "Start landing + API + runner + UI in production mode?" "y"; then
+    export NODE_ENV=production
+    
+    # Prompt for SERVER_PUBLIC_URL if not set
+    if [ -z "$SERVER_PUBLIC_URL" ]; then
+        echo "SERVER_PUBLIC_URL is not set. This is needed for OAuth redirects."
+        read -r -p "Enter SERVER_PUBLIC_URL (e.g., https://api.yourdomain.com): " SERVER_PUBLIC_URL
+        export SERVER_PUBLIC_URL
+    fi
+    
     export MAX_ITERATIONS=50
     export MAX_TOKENS=5000
     export MAX_TIME_SECONDS=300
     export OLLAMA_BASE_URL=http://localhost:11434
     export OLLAMA_MODEL=llama3.2
 
-    (PORT=$LANDING_PORT node landing/server.mjs) >>"$LOG_DIR/landing-prod.log" 2>&1 &
+    (node landing/server.mjs) >>"$LOG_DIR/landing-prod.log" 2>&1 &
     LANDING_PID=$!
 
-    (cd server && PORT=$SERVER_PORT npm run start) >>"$LOG_DIR/server-prod.log" 2>&1 &
+    (cd server && npm run start) >>"$LOG_DIR/server-prod.log" 2>&1 &
     SERVER_PID=$!
 
-    (cd runner && PORT=$RUNNER_PORT npm run start) >>"$LOG_DIR/runner-prod.log" 2>&1 &
+    (cd runner && npm run start) >>"$LOG_DIR/runner-prod.log" 2>&1 &
     RUNNER_PID=$!
 
-    (cd ui && PORT=$UI_PORT npm run start) >>"$LOG_DIR/ui-prod.log" 2>&1 &
+    (cd ui && npm run start) >>"$LOG_DIR/ui-prod.log" 2>&1 &
     UI_PID=$!
 
     echo ""
