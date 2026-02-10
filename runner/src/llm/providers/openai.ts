@@ -4,10 +4,12 @@ import { ChatMessage, ChatResponse, LLMProvider } from '../types.js'
 export class OpenAIProvider implements LLMProvider {
   private apiKey: string
   private baseUrl: string
+  private defaultHeaders: Record<string, string>
 
-  constructor(apiKey: string, baseUrl?: string) {
+  constructor(apiKey: string, baseUrl?: string, defaultHeaders?: Record<string, string>) {
     this.apiKey = apiKey
     this.baseUrl = baseUrl || process.env.AI_API_URL || 'https://api.openai.com/v1'
+    this.defaultHeaders = defaultHeaders || {}
   }
 
   async chat(model: string, messages: ChatMessage[], tools?: any[]): Promise<ChatResponse> {
@@ -16,7 +18,8 @@ export class OpenAIProvider implements LLMProvider {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.apiKey}`,
-        ...(this.apiKey && { 'X-API-Key': this.apiKey }) // For some proxies
+        ...(this.apiKey && { 'X-API-Key': this.apiKey }), // For some proxies
+        ...this.defaultHeaders
       },
       body: JSON.stringify({
         model,
