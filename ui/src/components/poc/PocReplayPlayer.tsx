@@ -14,20 +14,25 @@ function fmtTs(tsSeconds: number) {
 
 export function PocReplayPlayer({
   artifact,
-  cinematic = false
+  cinematic = false,
+  autoplay = false,
+  initialSpeed = 2
 }: {
   artifact: PocReplayArtifact
   cinematic?: boolean
+  autoplay?: boolean
+  initialSpeed?: 1 | 2 | 4
 }) {
   const claims = useMemo(() => (Array.isArray(artifact.claims) ? artifact.claims : []), [artifact])
   const [count, setCount] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [speed, setSpeed] = useState<1 | 2 | 4>(2)
+  const [speed, setSpeed] = useState<1 | 2 | 4>(initialSpeed)
 
   useEffect(() => {
     setCount(0)
-    setIsPlaying(false)
-  }, [artifact.jobId, artifact.proof_hash])
+    setSpeed(initialSpeed)
+    setIsPlaying(autoplay && claims.length > 0)
+  }, [artifact.jobId, artifact.proof_hash, autoplay, claims.length, initialSpeed])
 
   useEffect(() => {
     if (!isPlaying) return
