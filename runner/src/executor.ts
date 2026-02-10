@@ -1216,6 +1216,14 @@ async function executeWithPocReview(ctx: JobContext): Promise<void> {
     stdout: string
     stderr: string
   }> = []
+  const ledger: Array<{
+    id: string
+    claim_hash: string
+    ok: boolean
+    exit_code: number
+    stdout_hash: string
+    stderr_hash: string
+  }> = []
 
   for (let i = 0; i < checks.length; i++) {
     if (ctx.aborted) break
@@ -1233,6 +1241,14 @@ async function executeWithPocReview(ctx: JobContext): Promise<void> {
       exitCode: res.exitCode,
       stdout: res.stdout,
       stderr: res.stderr
+    })
+    ledger.push({
+      id: check.id,
+      claim_hash: claimHash,
+      ok,
+      exit_code: res.exitCode,
+      stdout_hash: stdoutHash,
+      stderr_hash: stderrHash
     })
 
     const line = `${ok ? '✅' : '❌'} ${check.id} (w=${check.weight}): ${check.statement} (exit ${res.exitCode})`
@@ -1258,6 +1274,7 @@ async function executeWithPocReview(ctx: JobContext): Promise<void> {
     })
   }
 
+  const proofHash = sha256Hex(JSON.stringify(ledger))
   const passed = results.filter(r => r.ok).length
   const failed = results.length - passed
   const totalWeight = results.reduce((sum, r) => {
@@ -1270,6 +1287,7 @@ async function executeWithPocReview(ctx: JobContext): Promise<void> {
   }, 0)
 
   const summaryLines = [
+    `Proof Hash: ${proofHash}`,
     `PoC Review: ${passed} passed, ${failed} failed`,
     `Weight: ${passedWeight}/${totalWeight}`,
     ...results.map(r => {
@@ -1283,7 +1301,16 @@ async function executeWithPocReview(ctx: JobContext): Promise<void> {
     tool: 'poc_review',
     output: '\n' + summaryLines.join('\n') + '\n'
   })
-  await emitEvent(ctx, 'tool.end', { tool: 'poc_review', success: failed === 0 })
+  await emitEvent(ctx, 'tool.end', {
+    tool: 'poc_review',
+    success: failed === 0,
+    proof_hash: proofHash,
+    claims: results.length,
+    passed,
+    failed,
+    weight_passed: passedWeight,
+    weight_total: totalWeight
+  })
 }
 
 async function executeWithOpenRouter(ctx: JobContext): Promise<void> {
