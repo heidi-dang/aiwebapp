@@ -1,0 +1,113 @@
+'use client'
+
+import { useEffect, useMemo, useState } from 'react'
+import { useStore } from '@/store'
+import { ConfettiBurst } from './ConfettiBurst'
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function getEndSummary(events: Array<{ type: string; payload?: unknown }>) {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]
+    if (e.type !== 'tool.end') continue
+    if (!isRecord(e.payload)) continue
+    if (e.payload.tool !== 'poc_review') continue
+    const proofHash = typeof e.payload.proof_hash === 'string' ? e.payload.proof_hash : ''
+    const failed = typeof e.payload.failed === 'number' ? e.payload.failed : undefined
+    const weightPassed = typeof e.payload.weight_passed === 'number' ? e.payload.weight_passed : undefined
+    const weightTotal = typeof e.payload.weight_total === 'number' ? e.payload.weight_total : undefined
+    return { proofHash, failed, weightPassed, weightTotal }
+  }
+  return null
+}
+
+export function PocRunTimeline({ jobId }: { jobId: string }) {
+  const run = useStore((s) => s.runs[jobId])
+  const [confettiSeed, setConfettiSeed] = useState<string | null>(null)
+
+  const { claims, passedWeight, totalWeight, summary } = useMemo(() => {
+    const events = run?.events ?? []
+    const claimPayloads = events
+      .filter((e) => e.type === 'tool.output' && isRecord(e.payload) && e.payload.tool === 'poc_review')
+      .map((e) => e.payload as Record<string, unknown>)
+
+    const claimEvents = claimPayloads
+      .map((p) => (isRecord(p.claim) ? p.claim : null))
+      .filter((c): c is Record<string, unknown> => !!c)
+      .map((c) => {
+        const id = typeof c.id === 'string' ? c.id : 'C'
+        const statement = typeof c.statement === 'string' ? c.statement : ''
+        const ok = c.ok === true
+        const weight = typeof c.weight === 'number' && Number.isFinite(c.weight) ? c.weight : 1
+        return { id, statement, ok, weight }
+      })
+
+    const passedWeight = claimEvents.reduce((sum, c) => sum + (c.ok ? c.weight : 0), 0)
+    const totalWeight = claimEvents.reduce((sum, c) => sum + c.weight, 0)
+    const summary = getEndSummary(events.map((e) => ({ type: e.type, payload: e.payload })))
+
+    return { claims: claimEvents, passedWeight, totalWeight, summary }
+  }, [run?.events])
+
+  useEffect(() => {
+    if (!run || run.status !== 'done') return
+    if (!summary?.proofHash || summary.failed !== 0) return
+    setConfettiSeed(`${summary.proofHash}_${run.finishedAt ?? Date.now()}`)
+  }, [run, summary])
+
+  const pct = totalWeight > 0 ? Math.round((passedWeight / totalWeight) * 100) : 0
+
+  return (
+    <div className="relative rounded-xl border border-primary/15 bg-primaryAccent p-3">
+      {confettiSeed && <ConfettiBurst seed={confettiSeed} />}
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-medium uppercase text-primary">Timeline</div>
+        <div className="text-[11px] text-secondary">
+          {totalWeight > 0 ? `${passedWeight}/${totalWeight} (${pct}%)` : 'Waiting…'}
+        </div>
+      </div>
+
+      <div className="mt-2 h-2 w-full overflow-hidden rounded-full border border-primary/15 bg-background/60">
+        <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+      </div>
+
+      {summary?.proofHash && (
+        <div className="mt-2 break-words font-mono text-[11px] text-secondary/80">
+          proof: {summary.proofHash}
+        </div>
+      )}
+
+      {summary?.failed === 0 && run?.status === 'done' && (
+        <div className="mt-2 rounded-xl border border-primary/20 bg-accent p-2 text-xs font-medium uppercase text-primary">
+          Perfect Run
+        </div>
+      )}
+
+      <div className="mt-3 max-h-56 space-y-2 overflow-auto">
+        {claims.length === 0 && (
+          <div className="text-xs text-muted">No claims yet</div>
+        )}
+        {claims.map((c) => (
+          <div
+            key={c.id}
+            className={`rounded-xl border p-2 ${
+              c.ok ? 'border-primary/20 bg-accent' : 'border-primary/10 bg-background/60'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-medium uppercase text-primary">
+                {c.ok ? 'PASS' : 'FAIL'} · {c.id}
+              </div>
+              <div className="text-[11px] text-secondary/80">w={c.weight}</div>
+            </div>
+            {c.statement && (
+              <div className="mt-1 text-[11px] text-secondary/80">{c.statement}</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}

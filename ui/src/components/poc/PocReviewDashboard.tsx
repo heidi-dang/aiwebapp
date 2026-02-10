@@ -4,6 +4,8 @@ import { useMemo, useState } from 'react'
 import { useStore } from '@/store'
 import { PocReview } from '@/components/chat/Sidebar/PocReview'
 import RunCard from '@/components/chat/ChatArea/Messages/RunCard'
+import { PocGameHud } from '@/components/poc/PocGameHud'
+import { PocRunTimeline } from '@/components/poc/PocRunTimeline'
 
 function formatTs(tsSeconds: number) {
   const d = new Date(tsSeconds * 1000)
@@ -22,13 +24,14 @@ export function PocReviewDashboard() {
 
   return (
     <div className="flex h-full w-full flex-col gap-4 p-4 font-dmmono">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="rounded-xl border border-primary/15 bg-background/60 p-3 lg:col-span-2">
           <div className="text-xs font-medium uppercase text-primary">PoC Review</div>
           <div className="mt-1 text-sm text-secondary">
             Templates · Runs · Shareable Artifacts
           </div>
         </div>
+        <PocGameHud />
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-3">
@@ -80,7 +83,10 @@ export function PocReviewDashboard() {
           <div className="text-xs font-medium uppercase text-primary">Run</div>
           <div className="mt-3">
             {selectedJobId ? (
-              <RunCard jobId={selectedJobId} />
+              <div className="space-y-3">
+                <PocRunTimeline jobId={selectedJobId} />
+                <RunCard jobId={selectedJobId} />
+              </div>
             ) : (
               <div className="text-xs text-muted">Select a run to view</div>
             )}
@@ -90,4 +96,3 @@ export function PocReviewDashboard() {
     </div>
   )
 }
-

@@ -48,6 +48,7 @@ export function PocReview({ emitChatMessage = true }: { emitChatMessage?: boolea
     selectedPocReviewTemplateId,
     setSelectedPocReviewTemplateId,
     addPocReviewHistory,
+    unlockPocBadge,
     runtimeMode,
     cloudFallbackEnabled,
     initRun,
@@ -294,6 +295,7 @@ export function PocReview({ emitChatMessage = true }: { emitChatMessage?: boolea
                 return [{ id, name, checksJson: nextJson }, ...without]
               })
               setSelectedPocReviewTemplateId(id)
+              unlockPocBadge('first_template_created')
               toast.success('Standard template generated')
             }}
           >
@@ -420,6 +422,7 @@ export function PocReview({ emitChatMessage = true }: { emitChatMessage?: boolea
                     return next
                   })
                   setSelectedPocReviewTemplateId(id)
+                  unlockPocBadge('first_template_created')
                   toast.success('Template saved')
                   setIsTemplatesOpen(false)
                 }}
