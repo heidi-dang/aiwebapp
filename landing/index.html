@@ -255,8 +255,8 @@
             <div class="logo">Heidi AI</div>
             <div class="tagline">Revolutionizing AI-Powered Solutions</div>
             <nav class="header-nav">
-                <a href="https://user.heidiai.com.au/login" class="nav-link">Login</a>
-                <a href="https://user.heidiai.com.au/signup" class="nav-link signup-link">Sign Up</a>
+                <a href="{{AUTH_URL}}/login" class="nav-link">Login</a>
+                <a href="{{AUTH_URL}}/signup" class="nav-link signup-link">Sign Up</a>
             </nav>
         </div>
     </header>
@@ -358,14 +358,14 @@
             event.preventDefault();
             
             // Try to access the main app first
-            fetch('https://ai.heidiai.com.au/health', { method: 'HEAD', mode: 'no-cors' })
+            fetch('{{APP_URL}}/health', { method: 'HEAD', mode: 'no-cors' })
                 .then(() => {
                     // If successful, redirect to main app
-                    window.location.href = 'https://ai.heidiai.com.au';
+                    window.location.href = '{{APP_URL}}';
                 })
                 .catch(() => {
                     // If main app is not available, redirect to user registration
-                    window.location.href = 'https://user.heidiai.com.au/signup';
+                    window.location.href = '{{AUTH_URL}}/signup';
                 });
         }
     </script>

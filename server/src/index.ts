@@ -2,10 +2,12 @@ import { tracingService } from './tracing.js';
 tracingService.start();
 
 import dotenv from 'dotenv'
+import dotenvExpand from 'dotenv-expand'
 import path from 'path';
 import { fileURLToPath } from 'url';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
-dotenv.config({ path: path.resolve(__dirname, '../.env') })
+const envConfig = dotenv.config({ path: path.resolve(__dirname, '../../.env') })
+dotenvExpand.expand(envConfig)
 
 import express from 'express';
 import cors from 'cors';
@@ -28,13 +30,8 @@ import { registerEvaluationRoutes } from './routes/evaluation.js';
 import { registerTracingRoutes } from './routes/tracing.js';
 import { registerReasoningRoutes } from './routes/reasoning.js';
 
-const PORT = Number(process.env.PORT ?? 4001)
+const PORT = Number(process.env.SERVER_PORT ?? 4001)
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:4000'
-const EXTRA_ORIGINS = [
-  'https://heidiai.com.au',
-  'https://www.heidiai.com.au',
-  'https://api.heidiai.com.au'
-]
 
 const logFilePath = path.join(__dirname, '../../logs/server.log');
 const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
@@ -44,7 +41,7 @@ const app = express();
 // Middleware
 app.use(
   cors({
-    origin: [CORS_ORIGIN, ...EXTRA_ORIGINS],
+    origin: CORS_ORIGIN,
     credentials: true
   })
 );

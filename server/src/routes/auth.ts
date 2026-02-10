@@ -152,8 +152,7 @@ function renderPopupResultHtml(args: { origin: string; payload: unknown }): stri
 
 function getAllowedUiOrigins(): string[] {
   const base = (process.env.CORS_ORIGIN ?? '').trim()
-  const hardcoded = ['https://heidiai.com.au', 'https://www.heidiai.com.au', 'https://api.heidiai.com.au']
-  return [base, ...hardcoded].filter(Boolean)
+  return [base].filter(Boolean)
 }
 
 function isAllowedUiOrigin(origin: string): boolean {
