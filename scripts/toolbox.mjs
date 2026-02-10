@@ -7,6 +7,12 @@ import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
 import { globSync } from 'glob';
 import path from 'path';
+import dotenv from 'dotenv';
+import dotenvExpand from 'dotenv-expand';
+
+const envConfig = dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+dotenvExpand.expand(envConfig);
+
 const exec = promisify(execCb);
 
 function help() {
@@ -22,6 +28,7 @@ Commands:
   list-dir <path>             List directory contents
   grep-search <query> [--include <glob>]   Search for text across files
   run-command <command>       Run a shell command (safety checks)
+  validate-env                Validate environment variables are set
   smoke                       Run smoke checks to verify tools
   help                        Show this help
 `);
@@ -224,6 +231,65 @@ async function smokeCmd() {
   }
 }
 
+async function validateEnvCmd() {
+  console.log('Validating environment variables...');
+  const required = [
+    'NODE_ENV',
+    'PORT',
+    'SERVER_PORT',
+    'RUNNER_PORT',
+    'AUTH_PORT',
+    'LANDING_PORT',
+    'RUNNER_TOKEN',
+    'CORS_ORIGIN',
+    'NEXT_PUBLIC_API_URL',
+    'NEXT_PUBLIC_RUNNER_BASE_URL',
+    'NEXT_PUBLIC_AI_API_URL',
+    'RUNNER_URL'
+  ];
+
+  const optional = [
+    'SERVER_PUBLIC_URL',
+    'OAUTH_STATE_SECRET',
+    'GITHUB_CLIENT_ID',
+    'GITHUB_CLIENT_SECRET',
+    'GOOGLE_CLIENT_ID',
+    'GOOGLE_CLIENT_SECRET',
+    'MICROSOFT_CLIENT_ID',
+    'MICROSOFT_CLIENT_SECRET',
+    'APPLE_CLIENT_ID',
+    'APPLE_CLIENT_SECRET'
+  ];
+
+  let ok = true;
+  for (const key of required) {
+    const value = process.env[key];
+    if (value === undefined || value === '') {
+      console.error(`Missing required env var: ${key}`);
+      ok = false;
+    } else {
+      console.log(`✓ ${key}=${value}`);
+    }
+  }
+
+  for (const key of optional) {
+    const value = process.env[key];
+    if (value && value !== '') {
+      console.log(`✓ ${key}=${value}`);
+    } else {
+      console.log(`○ ${key}=(not set)`);
+    }
+  }
+
+  if (ok) {
+    console.log('Environment validation: all good');
+    return 0;
+  } else {
+    console.error('Environment validation: missing required variables');
+    return 1;
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const cmd = args[0];
@@ -254,6 +320,8 @@ async function main() {
     if (yes) args.splice(yesIdx, 1);
     const command = args.slice(1).join(' ');
     process.exit(await runCommandCmd(command, { yes }));
+  } else if (cmd === 'validate-env') {
+    process.exit(await validateEnvCmd());
   } else if (cmd === 'smoke') {
     process.exit(await smokeCmd());
   } else {

@@ -186,22 +186,19 @@ if exist "%ENV_FILE%" (
 
 call :get_env_value "%ENV_FILE%" "PORT"
 if "%result%"=="" (
-    call :prompt_value "Enter UI port" "4000"
-    set PORT=%result%
+    set PORT=4000
     call :set_env_value "%ENV_FILE%" "PORT" "%PORT%"
 )
 
 call :get_env_value "%ENV_FILE%" "SERVER_PORT"
 if "%result%"=="" (
-    call :prompt_value "Enter Server port" "4001"
-    set SERVER_PORT=%result%
+    set SERVER_PORT=4001
     call :set_env_value "%ENV_FILE%" "SERVER_PORT" "%SERVER_PORT%"
 )
 
 call :get_env_value "%ENV_FILE%" "RUNNER_PORT"
 if "%result%"=="" (
-    call :prompt_value "Enter Runner port" "4002"
-    set RUNNER_PORT=%result%
+    set RUNNER_PORT=4002
     call :set_env_value "%ENV_FILE%" "RUNNER_PORT" "%RUNNER_PORT%"
 )
 
@@ -217,8 +214,12 @@ if "%result%"=="" (
 
 call :get_env_value "%ENV_FILE%" "NEXT_PUBLIC_AI_API_URL"
 if "%result%"=="" (
-    call :prompt_value "Enter AI API URL" "https://api.heidiai.com.au"
-    set NEXT_PUBLIC_AI_API_URL=%result%
+    call :prompt_value "Enter AI API URL (leave empty for localhost:8080)"
+    if "%result%"=="" (
+        set NEXT_PUBLIC_AI_API_URL=http://localhost:8080
+    ) else (
+        set NEXT_PUBLIC_AI_API_URL=%result%
+    )
     call :set_env_value "%ENV_FILE%" "NEXT_PUBLIC_AI_API_URL" "%NEXT_PUBLIC_AI_API_URL%"
 )
 
@@ -306,7 +307,7 @@ set NEXT_PUBLIC_API_URL=http://localhost:%SERVER_PORT%
 set NEXT_PUBLIC_RUNNER_BASE_URL=http://localhost:%RUNNER_PORT%
 call :get_env_value "%ENV_FILE%" "NEXT_PUBLIC_AI_API_URL"
 if "%result%"=="" (
-    set NEXT_PUBLIC_AI_API_URL=https://api.heidiai.com.au
+    set NEXT_PUBLIC_AI_API_URL=http://localhost:8080
 ) else (
     set NEXT_PUBLIC_AI_API_URL=%result%
 )
@@ -322,6 +323,9 @@ echo ✓ Runner service started
 
 start "UI Service" cmd /k "npm --prefix ui run dev"
 echo ✓ UI service started
+
+start "Auth Service" cmd /k "npm --prefix auth run dev"
+echo ✓ Auth service started
 
 if not "%CLOUDFLARE_TUNNEL_NAME%"=="" (
     call :have_cmd cloudflared

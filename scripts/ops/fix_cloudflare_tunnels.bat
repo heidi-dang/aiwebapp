@@ -58,6 +58,14 @@ if not exist "%USERPROFILE%\.cloudflared\%TUNNEL_ID%.json" (
 REM Create a new configuration file for the heidiai-tunnel1
 set CONFIG_PATH=%USERPROFILE%\.cloudflared\config.yml
 if exist "%CONFIG_PATH%" del "%CONFIG_PATH%"
+
+REM Prompt for domain name
+set /p DOMAIN_NAME="Enter your domain name (e.g., yourdomain.com): "
+if "%DOMAIN_NAME%"=="" (
+    echo ERROR: Domain name is required.
+    pause
+    exit /b 1
+)
 echo tunnel: %TUNNEL_ID% >> "%CONFIG_PATH%"
 echo credentials-file: %USERPROFILE%\.cloudflared\%TUNNEL_ID%.json >> "%CONFIG_PATH%"
 echo. >> "%CONFIG_PATH%"
@@ -66,7 +74,7 @@ echo   - hostname: code.%TUNNEL_ID%.cfargotunnel.com >> "%CONFIG_PATH%"
 echo     service: http://localhost:4000 >> "%CONFIG_PATH%"
 echo   - hostname: copilot.%TUNNEL_ID%.cfargotunnel.com >> "%CONFIG_PATH%"
 echo     service: http://localhost:4001 >> "%CONFIG_PATH%"
-echo   - hostname: heidiai.com.au >> "%CONFIG_PATH%"
+echo   - hostname: %DOMAIN_NAME% >> "%CONFIG_PATH%"
 echo     service: http://localhost:4002 >> "%CONFIG_PATH%"
 echo   - hostname: ollama.%TUNNEL_ID%.cfargotunnel.com >> "%CONFIG_PATH%"
 echo     service: http://localhost:3003 >> "%CONFIG_PATH%"

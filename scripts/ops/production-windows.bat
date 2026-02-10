@@ -192,8 +192,7 @@ if "%result%"=="" (
 
 call :get_env_value "%ENV_FILE%" "PORT"
 if "%result%"=="" (
-    call :prompt_value "Enter production UI port" "4000"
-    set PORT=%result%
+    set PORT=4000
     echo PORT=%PORT% >> "%ENV_FILE%"
 ) else (
     set PORT=%result%
@@ -202,8 +201,7 @@ set "UI_PORT=%PORT%"
 
 call :get_env_value "%ENV_FILE%" "SERVER_PORT"
 if "%result%"=="" (
-    call :prompt_value "Enter production Server port" "4001"
-    set SERVER_PORT=%result%
+    set SERVER_PORT=4001
     echo SERVER_PORT=%SERVER_PORT% >> "%ENV_FILE%"
 ) else (
     set SERVER_PORT=%result%
@@ -211,8 +209,7 @@ if "%result%"=="" (
 
 call :get_env_value "%ENV_FILE%" "RUNNER_PORT"
 if "%result%"=="" (
-    call :prompt_value "Enter production Runner port" "4002"
-    set RUNNER_PORT=%result%
+    set RUNNER_PORT=4002
     echo RUNNER_PORT=%RUNNER_PORT% >> "%ENV_FILE%"
 ) else (
     set RUNNER_PORT=%result%
@@ -259,14 +256,32 @@ if "%result%"=="" (
 
 call :get_env_value "%ENV_FILE%" "NEXT_PUBLIC_AI_API_URL"
 if "%result%"=="" (
-    call :prompt_value "Enter production AI API URL" "https://api.heidiai.com.au"
+    call :prompt_value "Enter production AI API URL"
     set NEXT_PUBLIC_AI_API_URL=%result%
     echo NEXT_PUBLIC_AI_API_URL=%NEXT_PUBLIC_AI_API_URL% >> "%ENV_FILE%"
 ) else (
     set NEXT_PUBLIC_AI_API_URL=%result%
 )
 
-call :get_env_value "%ENV_FILE%" "CLOUDFLARE_TUNNEL_NAME"
+call :get_env_value "%ENV_FILE%" "NEXT_PUBLIC_APP_URL"
+if "%result%"=="" (
+    call :prompt_value "Enter production App URL (your main app domain, e.g., https://app.yourdomain.com)"
+    set NEXT_PUBLIC_APP_URL=%result%
+    echo NEXT_PUBLIC_APP_URL=%NEXT_PUBLIC_APP_URL% >> "%ENV_FILE%"
+) else (
+    set NEXT_PUBLIC_APP_URL=%result%
+)
+
+call :get_env_value "%ENV_FILE%" "SERVER_PUBLIC_URL"
+if "%result%"=="" (
+    call :prompt_value "Enter production Server Public URL (your API domain, e.g., https://api.yourdomain.com)"
+    set SERVER_PUBLIC_URL=%result%
+    echo SERVER_PUBLIC_URL=%SERVER_PUBLIC_URL% >> "%ENV_FILE%"
+) else (
+    set SERVER_PUBLIC_URL=%result%
+)
+
+call :step "Step 4: Production Build"
 if "%result%"=="" (
     call :prompt_user "Would you like to use Cloudflare Tunnel for production"
     if !errorlevel! equ 0 (
@@ -344,6 +359,7 @@ if %errorlevel% equ 0 (
     echo start "Server Service" cmd /k "npm --prefix server start" >> start-production.bat
     echo start "Runner Service" cmd /k "npm --prefix runner start" >> start-production.bat
     echo start "UI Service" cmd /k "npm --prefix ui start" >> start-production.bat
+    echo start "Auth Service" cmd /k "npm --prefix auth start" >> start-production.bat
     echo. >> start-production.bat
     if not "%CLOUDFLARE_TUNNEL_NAME%"=="" (
         echo start "Cloudflare Tunnel" cmd /k "cloudflared tunnel --protocol http2 run %CLOUDFLARE_TUNNEL_NAME%" >> start-production.bat
@@ -424,6 +440,9 @@ if %errorlevel% equ 0 (
     
     start "UI Service" cmd /k "npm --prefix ui start"
     echo ✓ UI service started
+    
+    start "Auth Service" cmd /k "npm --prefix auth start"
+    echo ✓ Auth service started
     
     if not "%CLOUDFLARE_TUNNEL_NAME%"=="" (
         call :have_cmd cloudflared
