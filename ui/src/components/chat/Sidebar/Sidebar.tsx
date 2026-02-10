@@ -17,6 +17,7 @@ import { useQueryState } from 'nuqs'
 import { truncateText } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { BrainBuilder } from './BrainBuilder'
+import { PocReview } from './PocReview'
 
 const ENDPOINT_PLACEHOLDER = 'NO ENDPOINT ADDED'
 const SidebarHeader = () => (
@@ -373,6 +374,7 @@ const Sidebar = ({
                       )}
 
                       <BrainBuilder />
+                      <PocReview />
                     </>
                   )}
                 </motion.div>
