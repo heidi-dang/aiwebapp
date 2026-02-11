@@ -118,6 +118,32 @@ This script will:
 - Server: `http://localhost:3001`
 - Runner: `http://localhost:3002`
 
+### Ollama (Local Models)
+
+This project supports running fully local models via Ollama.
+
+1) Start Ollama and pull a model:
+
+```bash
+ollama serve
+ollama pull qwen2.5-coder:7b
+```
+
+2) Configure the Runner to use Ollama (optional):
+
+- `OLLAMA_API_URL=http://127.0.0.1:11434`
+- `OLLAMA_MODEL=qwen2.5-coder:7b`
+
+3) Configure the UI Ollama proxy (recommended for local dev):
+
+- `OLLAMA_API_URL=http://127.0.0.1:11434`
+
+4) In the UI sidebar:
+
+- Set Provider = `Ollama`
+- Use Refresh to fetch local models
+- Use Pull to download a new model directly from the UI
+
 ### Registration Page
 
 - **Register URL:** `http://localhost:3000/register`

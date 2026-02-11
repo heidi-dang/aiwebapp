@@ -11,38 +11,284 @@ import {
 import { useStore } from '@/store'
 import Icon from '@/components/ui/icon'
 import { getProviderIcon } from '@/lib/modelProvider'
+import { Input } from '@/components/ui/input'
+import { toast } from 'sonner'
 
 export function ProviderSelector() {
-  const { provider, setProvider } = useStore()
+  const provider = useStore((s) => s.provider)
+  const setProvider = useStore((s) => s.setProvider)
+  const setAvailableModels = useStore((s) => s.setAvailableModels)
+  const selectedModel = useStore((s) => s.selectedModel)
+  const setSelectedModel = useStore((s) => s.setSelectedModel)
+  const [ollamaStatus, setOllamaStatus] = React.useState<'unknown' | 'up' | 'down'>('unknown')
+  const [ollamaLatencyMs, setOllamaLatencyMs] = React.useState<number | null>(null)
+  const [pullName, setPullName] = React.useState('')
+  const [pullStatus, setPullStatus] = React.useState<string>('')
+  const [pullProgressPct, setPullProgressPct] = React.useState<number | null>(null)
+  const [pullLog, setPullLog] = React.useState<string[]>([])
+  const [lastPulledName, setLastPulledName] = React.useState<string>('')
+  const [lastPullOk, setLastPullOk] = React.useState(false)
+  const [isPulling, setIsPulling] = React.useState(false)
+  const abortRef = React.useRef<AbortController | null>(null)
+
+  const refreshOllamaModels = React.useCallback(async () => {
+    const started = performance.now()
+    try {
+      const res = await fetch('/api/ollama/api/tags', { cache: 'no-store' })
+      setOllamaStatus(res.ok ? 'up' : 'down')
+      if (!res.ok) {
+        setAvailableModels([])
+        return
+      }
+      const data = await res.json()
+      const models = Array.isArray(data?.models)
+        ? data.models
+            .map((m: { name?: unknown }) =>
+              typeof m?.name === 'string' ? m.name : ''
+            )
+            .filter((x: string) => !!x)
+        : []
+      setAvailableModels(models)
+      if ((selectedModel === 'auto' || !selectedModel) && models.length > 0) {
+        setSelectedModel(models[0])
+      }
+    } catch {
+      setOllamaStatus('down')
+      setAvailableModels([])
+    } finally {
+      setOllamaLatencyMs(Math.round(performance.now() - started))
+    }
+  }, [selectedModel, setAvailableModels, setSelectedModel])
+
+  React.useEffect(() => {
+    if (provider !== 'ollama') return
+    refreshOllamaModels()
+    const t = setInterval(refreshOllamaModels, 8000)
+    return () => clearInterval(t)
+  }, [provider, refreshOllamaModels])
+
+  const startPull = React.useCallback(async () => {
+    const name = pullName.trim()
+    if (!name) return
+    if (isPulling) return
+
+    const controller = new AbortController()
+    abortRef.current = controller
+    setIsPulling(true)
+    setPullStatus('starting')
+    setPullProgressPct(null)
+    setPullLog([])
+    setLastPulledName(name)
+    setLastPullOk(false)
+    try {
+      const res = await fetch('/api/ollama/api/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, stream: true }),
+        signal: controller.signal
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || `pull failed: ${res.status}`)
+      }
+      if (!res.body) {
+        throw new Error('pull response missing body')
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          const s = line.trim()
+          if (!s) continue
+          try {
+            const msg = JSON.parse(s) as {
+              status?: unknown
+              completed?: unknown
+              total?: unknown
+              error?: unknown
+            }
+            if (typeof msg.error === 'string' && msg.error) {
+              throw new Error(msg.error)
+            }
+            if (typeof msg.status === 'string') {
+              setPullStatus(msg.status)
+              setPullLog((prev) =>
+                [...prev, String(msg.status)].slice(-10)
+              )
+            }
+            const completed =
+              typeof msg.completed === 'number' ? msg.completed : null
+            const total = typeof msg.total === 'number' ? msg.total : null
+            if (completed !== null && total !== null && total > 0) {
+              setPullProgressPct(Math.round((completed / total) * 100))
+            }
+          } catch {
+          }
+        }
+      }
+
+      toast.success('Model pulled')
+      await refreshOllamaModels()
+      setLastPullOk(true)
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        toast.message('Pull cancelled')
+      } else {
+        toast.error(err instanceof Error ? err.message : String(err))
+      }
+    } finally {
+      setIsPulling(false)
+      abortRef.current = null
+    }
+  }, [isPulling, pullName, refreshOllamaModels])
+
+  const cancelPull = React.useCallback(() => {
+    abortRef.current?.abort()
+  }, [])
 
   return (
-    <Select
-      value={provider}
-      onValueChange={(value) => setProvider(value as 'bridge' | 'copilotapi' | 'ollama')}
-    >
-      <SelectTrigger className="h-9 w-full rounded-xl border border-primary/15 bg-primaryAccent text-xs font-medium uppercase">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent className="border-none bg-primaryAccent font-dmmono shadow-lg">
-        <SelectItem value="bridge" className="cursor-pointer">
-          <div className="flex items-center gap-3 text-xs font-medium uppercase">
-            <Icon type={getProviderIcon('bridge') ?? 'open-ai'} size="xs" />
-            Bridge
+    <div className="space-y-2">
+      <Select
+        value={provider}
+        onValueChange={(value) => setProvider(value as 'bridge' | 'copilotapi' | 'ollama')}
+      >
+        <SelectTrigger className="h-9 w-full rounded-xl border border-primary/15 bg-primaryAccent text-xs font-medium uppercase">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="border-none bg-primaryAccent font-dmmono shadow-lg">
+          <SelectItem value="bridge" className="cursor-pointer">
+            <div className="flex items-center gap-3 text-xs font-medium uppercase">
+              <Icon type={getProviderIcon('bridge') ?? 'open-ai'} size="xs" />
+              Bridge
+            </div>
+          </SelectItem>
+          <SelectItem value="copilotapi" className="cursor-pointer">
+            <div className="flex items-center gap-3 text-xs font-medium uppercase">
+              <Icon type={getProviderIcon('copilotapi') ?? 'open-ai'} size="xs" />
+              CopilotAPI
+            </div>
+          </SelectItem>
+          <SelectItem value="ollama" className="cursor-pointer">
+            <div className="flex items-center gap-3 text-xs font-medium uppercase">
+              <Icon type={getProviderIcon('ollama') ?? 'open-ai'} size="xs" />
+              Ollama
+            </div>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+
+      {provider === 'ollama' && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between rounded-xl border border-primary/10 bg-primaryAccent px-3 py-2">
+            <div className="flex items-center gap-2 text-[11px] uppercase text-secondary">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  ollamaStatus === 'up'
+                    ? 'bg-green-400'
+                    : ollamaStatus === 'down'
+                      ? 'bg-red-400'
+                      : 'bg-secondary/40'
+                }`}
+              />
+              Ollama {ollamaStatus}
+              {ollamaLatencyMs !== null && (
+                <span className="text-secondary/70">{ollamaLatencyMs}ms</span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={refreshOllamaModels}
+              className="rounded-md border border-primary/10 bg-background/40 px-2 py-1 text-[11px] font-medium uppercase text-secondary"
+            >
+              Refresh
+            </button>
           </div>
-        </SelectItem>
-        <SelectItem value="copilotapi" className="cursor-pointer">
-          <div className="flex items-center gap-3 text-xs font-medium uppercase">
-            <Icon type={getProviderIcon('copilotapi') ?? 'open-ai'} size="xs" />
-            CopilotAPI
+
+          <div className="rounded-xl border border-primary/10 bg-primaryAccent p-2">
+            <div className="flex items-center gap-2">
+              <Input
+                value={pullName}
+                onChange={(e) => setPullName(e.target.value)}
+                placeholder="Pull model (e.g. qwen2.5-coder:7b)…"
+                className="h-9 flex-1 rounded-xl border border-primary/15 bg-background/60 text-xs"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') startPull()
+                }}
+              />
+              {!isPulling ? (
+                <button
+                  type="button"
+                  onClick={startPull}
+                  className="h-9 rounded-xl border border-primary/10 bg-background/40 px-3 text-[11px] font-medium uppercase text-secondary"
+                >
+                  Pull
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={cancelPull}
+                  className="h-9 rounded-xl border border-primary/10 bg-background/40 px-3 text-[11px] font-medium uppercase text-secondary"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+            {(isPulling || pullStatus) && (
+              <div className="mt-2 flex items-center justify-between text-[11px] uppercase text-secondary/80">
+                <div className="truncate">{pullStatus || 'pulling'}</div>
+                {pullProgressPct !== null && (
+                  <div>{pullProgressPct}%</div>
+                )}
+              </div>
+            )}
+            {pullLog.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {pullLog.map((line, idx) => {
+                  const lower = line.toLowerCase()
+                  const tone =
+                    lower.includes('already') || lower.includes('exists')
+                      ? 'text-secondary/70'
+                      : lower.includes('success') || lower.includes('done')
+                        ? 'text-green-400/90'
+                        : lower.includes('error') || lower.includes('fail')
+                          ? 'text-red-400/90'
+                          : 'text-secondary/80'
+                  return (
+                    <div key={`${idx}-${line}`} className={`text-[11px] uppercase ${tone}`}>
+                      {line}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {!isPulling && lastPullOk && lastPulledName && (
+              <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-primary/10 bg-background/40 px-3 py-2">
+                <div className="min-w-0 truncate text-[11px] font-medium uppercase text-secondary/80">
+                  Ready: {lastPulledName}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedModel(lastPulledName)
+                    setPullName(lastPulledName)
+                    toast.success('Selected model')
+                  }}
+                  className="rounded-md border border-primary/10 bg-primaryAccent px-2 py-1 text-[11px] font-medium uppercase text-secondary"
+                >
+                  Use This Model
+                </button>
+              </div>
+            )}
           </div>
-        </SelectItem>
-        <SelectItem value="ollama" className="cursor-pointer">
-          <div className="flex items-center gap-3 text-xs font-medium uppercase">
-            <Icon type={getProviderIcon('ollama') ?? 'open-ai'} size="xs" />
-            Ollama
-          </div>
-        </SelectItem>
-      </SelectContent>
-    </Select>
+        </div>
+      )}
+    </div>
   )
 }
