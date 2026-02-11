@@ -28,6 +28,7 @@ function PocReplayPageInner() {
   const cinematic = (sp.get('cinematic') || '') === '1'
   const autoplay = (sp.get('autoplay') || '') === '1'
   const director = (sp.get('director') || '') === '1'
+  const sound = (sp.get('sound') || '') === '1'
   const filterRaw = sp.get('filter') || ''
   const filter =
     filterRaw === 'pass' || filterRaw === 'fail' || filterRaw === 'all'
@@ -174,6 +175,7 @@ function PocReplayPageInner() {
                   pauseOnFailMs={pauseOnFailMs}
                   pauseOnPassMs={pauseOnPassMs}
                   label={director ? 'Director Cut' : undefined}
+                  soundEnabled={sound || director}
                 />
               ) : (
                 <div className="text-xs text-muted">No artifact loaded</div>
