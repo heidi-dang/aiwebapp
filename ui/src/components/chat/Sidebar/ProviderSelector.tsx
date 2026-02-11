@@ -31,6 +31,11 @@ export function ProviderSelector() {
   const [isPulling, setIsPulling] = React.useState(false)
   const abortRef = React.useRef<AbortController | null>(null)
 
+  const selectedModelRef = React.useRef(selectedModel)
+  React.useEffect(() => {
+    selectedModelRef.current = selectedModel
+  }, [selectedModel])
+
   const refreshOllamaModels = React.useCallback(async () => {
     const started = performance.now()
     try {
@@ -49,7 +54,7 @@ export function ProviderSelector() {
             .filter((x: string) => !!x)
         : []
       setAvailableModels(models)
-      if ((selectedModel === 'auto' || !selectedModel) && models.length > 0) {
+      if ((selectedModelRef.current === 'auto' || !selectedModelRef.current) && models.length > 0) {
         setSelectedModel(models[0])
       }
     } catch {
@@ -58,7 +63,7 @@ export function ProviderSelector() {
     } finally {
       setOllamaLatencyMs(Math.round(performance.now() - started))
     }
-  }, [selectedModel, setAvailableModels, setSelectedModel])
+  }, [setAvailableModels, setSelectedModel])
 
   React.useEffect(() => {
     if (provider !== 'ollama') return

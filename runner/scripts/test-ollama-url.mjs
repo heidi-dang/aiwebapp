@@ -19,5 +19,18 @@ assert.equal(
   'http://localhost:11434'
 )
 
+assert.equal(
+  normalizeOllamaBaseUrl(''),
+  ''
+)
+assert.equal(
+  normalizeOllamaBaseUrl('   '),
+  ''
+)
+assert.equal(
+  normalizeOllamaBaseUrl('http://localhost:11434///'),
+  'http://localhost:11434'
+)
+
 console.log('ollama url normalization: ok')
 

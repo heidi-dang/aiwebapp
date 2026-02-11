@@ -6,9 +6,9 @@ export const dynamic = 'force-dynamic'
 function normalizeOllamaBaseUrl(input: string) {
   let url = input.trim()
   if (!url) return url
-  url = url.replace(/\/$/, '')
+  url = url.replace(/\\/+$/, '')
   if (url.endsWith('/api')) url = url.slice(0, -4)
-  url = url.replace(/\/$/, '')
+  url = url.replace(/\\/+$/, '')
   return url
 }
 
@@ -16,6 +16,24 @@ function getOllamaBaseUrl() {
   const env = process.env.OLLAMA_API_URL?.trim() ?? ''
   const base = env || 'http://127.0.0.1:11434'
   return normalizeOllamaBaseUrl(base)
+}
+
+const HEADERS_TO_STRIP = [
+  'authorization',
+  'cookie',
+  'x-api-key',
+  'x-forwarded-for',
+  'x-real-ip',
+]
+
+function filterRequestHeaders(headers: Headers): Record<string, string> {
+  const filtered: Record<string, string> = {}
+  headers.forEach((value, key) => {
+    if (!HEADERS_TO_STRIP.includes(key.toLowerCase())) {
+      filtered[key] = value
+    }
+  })
+  return filtered
 }
 
 export async function GET(
@@ -81,7 +99,7 @@ async function proxyRequest(request: NextRequest, path: string[]) {
     const response = await fetch(finalUrl, {
       method: request.method,
       headers: {
-        ...Object.fromEntries(request.headers.entries()),
+        ...filterRequestHeaders(request.headers),
         host: targetHost
       },
       body:
@@ -112,7 +130,8 @@ async function proxyRequest(request: NextRequest, path: string[]) {
       statusText: response.statusText,
       headers: responseHeaders
     })
-  } catch {
+  } catch (err) {
+    console.error('[ollama-proxy] Failed to proxy request:', err)
     return NextResponse.json(
       { error: 'Failed to proxy request to Ollama' },
       { status: 502 }

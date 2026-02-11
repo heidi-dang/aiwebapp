@@ -366,7 +366,7 @@ We're adding support for local LLMs via Ollama. This lets you run agents with mo
 
 In `runner/.env`, add:
 ```
-OLLAMA_API_URL=http://localhost:11434/api
+OLLAMA_API_URL=http://localhost:11434
 ```
 
 Agents can now be configured to use 'ollama' as their model instead of Copilot. We'll be expanding this as we implement the full integration.
