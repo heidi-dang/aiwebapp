@@ -11,6 +11,8 @@ import {
 import { useStore } from '@/store'
 import Icon from '@/components/ui/icon'
 import { getProviderIcon } from '@/lib/modelProvider'
+import { Input } from '@/components/ui/input'
+import { toast } from 'sonner'
 
 export function ProviderSelector() {
   const provider = useStore((s) => s.provider)
@@ -20,6 +22,11 @@ export function ProviderSelector() {
   const setSelectedModel = useStore((s) => s.setSelectedModel)
   const [ollamaStatus, setOllamaStatus] = React.useState<'unknown' | 'up' | 'down'>('unknown')
   const [ollamaLatencyMs, setOllamaLatencyMs] = React.useState<number | null>(null)
+  const [pullName, setPullName] = React.useState('')
+  const [pullStatus, setPullStatus] = React.useState<string>('')
+  const [pullProgressPct, setPullProgressPct] = React.useState<number | null>(null)
+  const [isPulling, setIsPulling] = React.useState(false)
+  const abortRef = React.useRef<AbortController | null>(null)
 
   const refreshOllamaModels = React.useCallback(async () => {
     const started = performance.now()
@@ -57,6 +64,83 @@ export function ProviderSelector() {
     return () => clearInterval(t)
   }, [provider, refreshOllamaModels])
 
+  const startPull = React.useCallback(async () => {
+    const name = pullName.trim()
+    if (!name) return
+    if (isPulling) return
+
+    const controller = new AbortController()
+    abortRef.current = controller
+    setIsPulling(true)
+    setPullStatus('starting')
+    setPullProgressPct(null)
+    try {
+      const res = await fetch('/api/ollama/api/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, stream: true }),
+        signal: controller.signal
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || `pull failed: ${res.status}`)
+      }
+      if (!res.body) {
+        throw new Error('pull response missing body')
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          const s = line.trim()
+          if (!s) continue
+          try {
+            const msg = JSON.parse(s) as {
+              status?: unknown
+              completed?: unknown
+              total?: unknown
+              error?: unknown
+            }
+            if (typeof msg.error === 'string' && msg.error) {
+              throw new Error(msg.error)
+            }
+            if (typeof msg.status === 'string') setPullStatus(msg.status)
+            const completed =
+              typeof msg.completed === 'number' ? msg.completed : null
+            const total = typeof msg.total === 'number' ? msg.total : null
+            if (completed !== null && total !== null && total > 0) {
+              setPullProgressPct(Math.round((completed / total) * 100))
+            }
+          } catch {
+          }
+        }
+      }
+
+      toast.success('Model pulled')
+      await refreshOllamaModels()
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        toast.message('Pull cancelled')
+      } else {
+        toast.error(err instanceof Error ? err.message : String(err))
+      }
+    } finally {
+      setIsPulling(false)
+      abortRef.current = null
+    }
+  }, [isPulling, pullName, refreshOllamaModels])
+
+  const cancelPull = React.useCallback(() => {
+    abortRef.current?.abort()
+  }, [])
+
   return (
     <div className="space-y-2">
       <Select
@@ -89,29 +173,70 @@ export function ProviderSelector() {
       </Select>
 
       {provider === 'ollama' && (
-        <div className="flex items-center justify-between rounded-xl border border-primary/10 bg-primaryAccent px-3 py-2">
-          <div className="flex items-center gap-2 text-[11px] uppercase text-secondary">
-            <span
-              className={`h-2 w-2 rounded-full ${
-                ollamaStatus === 'up'
-                  ? 'bg-green-400'
-                  : ollamaStatus === 'down'
-                    ? 'bg-red-400'
-                    : 'bg-secondary/40'
-              }`}
-            />
-            Ollama {ollamaStatus}
-            {ollamaLatencyMs !== null && (
-              <span className="text-secondary/70">{ollamaLatencyMs}ms</span>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between rounded-xl border border-primary/10 bg-primaryAccent px-3 py-2">
+            <div className="flex items-center gap-2 text-[11px] uppercase text-secondary">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  ollamaStatus === 'up'
+                    ? 'bg-green-400'
+                    : ollamaStatus === 'down'
+                      ? 'bg-red-400'
+                      : 'bg-secondary/40'
+                }`}
+              />
+              Ollama {ollamaStatus}
+              {ollamaLatencyMs !== null && (
+                <span className="text-secondary/70">{ollamaLatencyMs}ms</span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={refreshOllamaModels}
+              className="rounded-md border border-primary/10 bg-background/40 px-2 py-1 text-[11px] font-medium uppercase text-secondary"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-primary/10 bg-primaryAccent p-2">
+            <div className="flex items-center gap-2">
+              <Input
+                value={pullName}
+                onChange={(e) => setPullName(e.target.value)}
+                placeholder="Pull model (e.g. qwen2.5-coder:7b)…"
+                className="h-9 flex-1 rounded-xl border border-primary/15 bg-background/60 text-xs"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') startPull()
+                }}
+              />
+              {!isPulling ? (
+                <button
+                  type="button"
+                  onClick={startPull}
+                  className="h-9 rounded-xl border border-primary/10 bg-background/40 px-3 text-[11px] font-medium uppercase text-secondary"
+                >
+                  Pull
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={cancelPull}
+                  className="h-9 rounded-xl border border-primary/10 bg-background/40 px-3 text-[11px] font-medium uppercase text-secondary"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+            {(isPulling || pullStatus) && (
+              <div className="mt-2 flex items-center justify-between text-[11px] uppercase text-secondary/80">
+                <div className="truncate">{pullStatus || 'pulling'}</div>
+                {pullProgressPct !== null && (
+                  <div>{pullProgressPct}%</div>
+                )}
+              </div>
             )}
           </div>
-          <button
-            type="button"
-            onClick={refreshOllamaModels}
-            className="rounded-md border border-primary/10 bg-background/40 px-2 py-1 text-[11px] font-medium uppercase text-secondary"
-          >
-            Refresh
-          </button>
         </div>
       )}
     </div>
