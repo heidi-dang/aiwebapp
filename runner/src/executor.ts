@@ -92,6 +92,41 @@ function sendSse(reply: FastifyReply, event: RunnerEvent) {
 }
 
 async function emitEvent(ctx: JobContext, type: RunnerEventType, data?: unknown): Promise<RunnerEvent> {
+  if (
+    type === 'tool.output' &&
+    data &&
+    typeof data === 'object' &&
+    'output' in data &&
+    typeof (data as any).output === 'string'
+  ) {
+    const output = (data as any).output as string
+    const chunkSize = 4000
+    if (output.length > chunkSize) {
+      const baseId = randomId('evt')
+      const total = Math.ceil(output.length / chunkSize)
+      let lastEvent: RunnerEvent | null = null
+
+      for (let i = 0; i < total; i++) {
+        const chunk = output.slice(i * chunkSize, (i + 1) * chunkSize)
+        const event: RunnerEvent = {
+          id: `${baseId}_${i + 1}of${total}`,
+          type,
+          ts: nowIso(),
+          job_id: ctx.jobId,
+          data: { ...(data as any), output: chunk }
+        }
+
+        await ctx.store.addEvent(event)
+        for (const sub of ctx.subscribers) {
+          sendSse(sub, event)
+        }
+        lastEvent = event
+      }
+
+      return lastEvent as RunnerEvent
+    }
+  }
+
   const event: RunnerEvent = {
     id: randomId('evt'),
     type,
