@@ -1,11 +1,24 @@
 
 import { ChatMessage, ChatResponse, LLMProvider } from '../types.js'
 
+export function normalizeOllamaBaseUrl(input: string) {
+  let url = input.trim()
+  if (!url) return url
+  url = url.replace(/\/+$/, '')
+  if (url.endsWith('/api')) {
+    url = url.slice(0, -4)
+    url = url.replace(/\/+$/, '')
+  }
+  return url
+}
+
 export class OllamaProvider implements LLMProvider {
   private baseUrl: string
 
   constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl || process.env.OLLAMA_API_URL || 'http://127.0.0.1:11434'
+    const raw =
+      baseUrl || process.env.OLLAMA_API_URL || 'http://127.0.0.1:11434'
+    this.baseUrl = normalizeOllamaBaseUrl(raw)
   }
 
   async chat(model: string, messages: ChatMessage[], tools?: any[]): Promise<ChatResponse> {
