@@ -26,6 +26,8 @@ export function ProviderSelector() {
   const [pullStatus, setPullStatus] = React.useState<string>('')
   const [pullProgressPct, setPullProgressPct] = React.useState<number | null>(null)
   const [pullLog, setPullLog] = React.useState<string[]>([])
+  const [lastPulledName, setLastPulledName] = React.useState<string>('')
+  const [lastPullOk, setLastPullOk] = React.useState(false)
   const [isPulling, setIsPulling] = React.useState(false)
   const abortRef = React.useRef<AbortController | null>(null)
 
@@ -76,6 +78,8 @@ export function ProviderSelector() {
     setPullStatus('starting')
     setPullProgressPct(null)
     setPullLog([])
+    setLastPulledName(name)
+    setLastPullOk(false)
     try {
       const res = await fetch('/api/ollama/api/pull', {
         method: 'POST',
@@ -132,6 +136,7 @@ export function ProviderSelector() {
 
       toast.success('Model pulled')
       await refreshOllamaModels()
+      setLastPullOk(true)
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         toast.message('Pull cancelled')
@@ -261,6 +266,24 @@ export function ProviderSelector() {
                     </div>
                   )
                 })}
+              </div>
+            )}
+            {!isPulling && lastPullOk && lastPulledName && (
+              <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-primary/10 bg-background/40 px-3 py-2">
+                <div className="min-w-0 truncate text-[11px] font-medium uppercase text-secondary/80">
+                  Ready: {lastPulledName}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedModel(lastPulledName)
+                    setPullName(lastPulledName)
+                    toast.success('Selected model')
+                  }}
+                  className="rounded-md border border-primary/10 bg-primaryAccent px-2 py-1 text-[11px] font-medium uppercase text-secondary"
+                >
+                  Use This Model
+                </button>
               </div>
             )}
           </div>
