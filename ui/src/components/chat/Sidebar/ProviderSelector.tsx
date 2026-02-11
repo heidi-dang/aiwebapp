@@ -25,6 +25,7 @@ export function ProviderSelector() {
   const [pullName, setPullName] = React.useState('')
   const [pullStatus, setPullStatus] = React.useState<string>('')
   const [pullProgressPct, setPullProgressPct] = React.useState<number | null>(null)
+  const [pullLog, setPullLog] = React.useState<string[]>([])
   const [isPulling, setIsPulling] = React.useState(false)
   const abortRef = React.useRef<AbortController | null>(null)
 
@@ -74,6 +75,7 @@ export function ProviderSelector() {
     setIsPulling(true)
     setPullStatus('starting')
     setPullProgressPct(null)
+    setPullLog([])
     try {
       const res = await fetch('/api/ollama/api/pull', {
         method: 'POST',
@@ -111,7 +113,12 @@ export function ProviderSelector() {
             if (typeof msg.error === 'string' && msg.error) {
               throw new Error(msg.error)
             }
-            if (typeof msg.status === 'string') setPullStatus(msg.status)
+            if (typeof msg.status === 'string') {
+              setPullStatus(msg.status)
+              setPullLog((prev) =>
+                [...prev, String(msg.status)].slice(-10)
+              )
+            }
             const completed =
               typeof msg.completed === 'number' ? msg.completed : null
             const total = typeof msg.total === 'number' ? msg.total : null
@@ -234,6 +241,26 @@ export function ProviderSelector() {
                 {pullProgressPct !== null && (
                   <div>{pullProgressPct}%</div>
                 )}
+              </div>
+            )}
+            {pullLog.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {pullLog.map((line, idx) => {
+                  const lower = line.toLowerCase()
+                  const tone =
+                    lower.includes('already') || lower.includes('exists')
+                      ? 'text-secondary/70'
+                      : lower.includes('success') || lower.includes('done')
+                        ? 'text-green-400/90'
+                        : lower.includes('error') || lower.includes('fail')
+                          ? 'text-red-400/90'
+                          : 'text-secondary/80'
+                  return (
+                    <div key={`${idx}-${line}`} className={`text-[11px] uppercase ${tone}`}>
+                      {line}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
