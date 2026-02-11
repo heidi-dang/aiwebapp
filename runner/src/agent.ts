@@ -5,19 +5,32 @@
 
 import type { JobContext, JobInput } from './executor.js'
 import type { RunnerEventType } from './db.js'
+import fs from 'node:fs/promises'
+import path from 'node:path'
 import { GitService } from './services/git.js'
 import { RepoMapper } from './services/repo-map.js'
 import { WebService } from './services/web.js'
 import { MemoryService } from './services/memory.js'
 import { ContextManager } from './services/context.js'
 import { approvalService } from './services/approval.js'
+import { loadHeidiGuidelines } from './services/heidi-guidelines.js'
 import { llmService } from './llm/index.js'
 import type { ChatMessage } from './llm/types.js'
+import { McpRegistry } from './mcp/registry.js'
 
 import { tracingService } from './tracing.js'
 import { SpanStatusCode } from '@opentelemetry/api'
 
 export type AgentState = 'planning' | 'code_generation' | 'code_execution' | 'review' | 'iterate' | 'finish'
+
+type PlanTaskStatus = 'pending' | 'in_progress' | 'done' | 'blocked'
+
+type PlanTask = {
+  id: string
+  title: string
+  verification?: string
+  status: PlanTaskStatus
+}
 
 export interface AgentMemory {
   conversation: Array<{
@@ -39,6 +52,7 @@ export class CoderAgent {
     conversation: [],
     taskHistory: []
   }
+  private loadedConversation: AgentMemory['conversation'] = []
   private maxIterations = 5
   private currentIteration = 0
   private messages: ChatMessage[] = []
@@ -47,16 +61,21 @@ export class CoderAgent {
   private webService: WebService
   private memoryService: MemoryService
   private contextManager: ContextManager
+  private baseDir: string
+  private planTasks: PlanTask[] = []
+  private planMarkdown: string | null = null
+  private autoRepairActive = false
+  private mcp: McpRegistry
 
   constructor(private ctx: JobContext) {
-    const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
-    this.gitService = new GitService(baseDir)
-    this.repoMapper = new RepoMapper(baseDir)
+    this.baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
+    this.gitService = new GitService(this.baseDir)
+    this.repoMapper = new RepoMapper(this.baseDir)
     this.webService = new WebService()
-    this.memoryService = new MemoryService(baseDir)
+    this.memoryService = new MemoryService(this.baseDir)
     this.contextManager = new ContextManager(llmService)
+    this.mcp = new McpRegistry(this.baseDir)
     this.initializeMessages()
-    this.loadMemory()
   }
 
   private async loadMemory(): Promise<void> {
@@ -78,7 +97,7 @@ export class CoderAgent {
           if (event.data && typeof event.data === 'object') {
             const data = event.data as any
             if (data.role && data.content) {
-              this.memory.conversation.push({
+              this.loadedConversation.push({
                 role: data.role,
                 content: data.content,
                 timestamp: event.ts
@@ -88,16 +107,46 @@ export class CoderAgent {
         }
 
         // Limit memory to last 20 messages to avoid context overflow
-        if (this.memory.conversation.length >= 20) break
+        if (this.loadedConversation.length >= 20) break
       }
 
       // Sort by timestamp
-      this.memory.conversation.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      this.loadedConversation.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
 
     } catch (err) {
       console.log('Failed to load memory:', err)
       // Continue without memory if loading fails
     }
+  }
+
+  private pushMessage(msg: ChatMessage): void {
+    this.messages.push(msg)
+
+    if ((msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system') && typeof msg.content === 'string') {
+      this.memory.conversation.push({
+        role: msg.role,
+        content: msg.content,
+        timestamp: new Date().toISOString()
+      })
+    }
+  }
+
+  private applyLoadedMemoryToMessages(): void {
+    if (this.loadedConversation.length === 0) return
+
+    const system = this.messages.find(m => m.role === 'system')
+    const lastUser = [...this.messages].reverse().find(m => m.role === 'user')
+
+    const history: ChatMessage[] = this.loadedConversation
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({ role: m.role, content: m.content }))
+
+    const next: ChatMessage[] = []
+    if (system) next.push(system)
+    next.push(...history)
+    if (lastUser) next.push(lastUser)
+
+    this.messages = next
   }
 
   private async saveMemory(): Promise<void> {
@@ -128,10 +177,16 @@ export class CoderAgent {
   }
 
   private initializeMessages(): void {
-    this.messages = [
-      {
-        role: 'system',
-        content: `You are a coding assistant that follows a structured workflow:
+    const userSystemPrompt = this.ctx.input.system_prompt?.trim()
+    const userSystemPromptBlock = userSystemPrompt
+      ? `\n\nUser System Prompt (must follow):\n${userSystemPrompt}`
+      : ''
+
+    this.messages = []
+
+    this.pushMessage({
+      role: 'system',
+      content: `You are a coding assistant that follows a structured workflow:
 1. PLAN: Analyze the request and create a detailed plan
 2. CODE: Generate or modify code based on the plan
 3. EXECUTE: Run and test the code
@@ -147,13 +202,13 @@ For multi-file projects:
 - Ensure proper imports and dependencies between files
 - Test the complete system, not just individual files
 
-Be thorough and systematic in your approach.`
-      },
-      {
-        role: 'user',
-        content: this.ctx.input.message || this.ctx.input.instruction || ''
-      }
-    ]
+Be thorough and systematic in your approach.${userSystemPromptBlock}`
+    })
+
+    this.pushMessage({
+      role: 'user',
+      content: this.ctx.input.message || this.ctx.input.instruction || ''
+    })
   }
 
   async run(): Promise<void> {
@@ -162,6 +217,19 @@ Be thorough and systematic in your approach.`
       span.setAttribute('job_id', this.ctx.jobId)
 
       try {
+        const heidiGuidelines = await loadHeidiGuidelines(this.baseDir)
+        if (heidiGuidelines && this.messages.length > 0 && this.messages[0].role === 'system') {
+          this.messages[0].content += `\n\nTeam Guidelines (must follow):\n${heidiGuidelines}`
+        }
+
+        await this.loadMemory()
+        this.applyLoadedMemoryToMessages()
+
+        try {
+          await this.mcp.load()
+        } catch {
+        }
+
         // Inject repo map into system prompt
         const mapSpan = tracer.startSpan('generate_repo_map')
         try {
@@ -175,6 +243,10 @@ Be thorough and systematic in your approach.`
           mapSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(err) })
         } finally {
           mapSpan.end()
+        }
+
+        if (this.ctx.input.resume_from_tasks) {
+          await this.tryResumeFromFiles()
         }
 
         while (this.state !== 'finish' && this.currentIteration < this.maxIterations) {
@@ -208,6 +280,7 @@ Be thorough and systematic in your approach.`
         span.setStatus({ code: SpanStatusCode.ERROR })
         throw err
       } finally {
+        await this.mcp.closeAll().catch(() => {})
         span.end()
       }
     })
@@ -234,29 +307,52 @@ Be thorough and systematic in your approach.`
   }
 
   private async handlePlanning(): Promise<void> {
-    await this.emitEvent('plan', {
-      state: 'planning',
-      description: 'Analyzing the request and creating a plan'
-    })
+    const planPrompt = `Before executing any edits:
+1) Explore the repository (use list_dir / list_files / read_file as needed).
+2) Produce a strategy document and a verifiable task checklist.
 
-    const planPrompt = `Analyze this coding request and create a detailed plan. Focus on:
+Return EXACTLY two sections in this format:
 
-User request: "${this.ctx.input.message || this.ctx.input.instruction}"
+<plan_md>
+...markdown for plan.md...
+</plan_md>
 
-Planning steps:
-1. **Understand the scope**: Is this a single file, multi-file project, or modification to existing code?
-2. **Explore codebase**: Use list_dir and read_file to understand the current structure
-3. **Identify components**: What files need to be created/modified?
-4. **Plan dependencies**: What libraries/frameworks are needed?
-5. **Design architecture**: How should files be organized?
-6. **Testing strategy**: How will you verify the code works?
+<tasks_json>
+[{"id":"T1","title":"...","verification":"(optional) command or check"}]
+</tasks_json>
 
-Create a comprehensive plan that covers all aspects of the implementation.`
+Rules:
+- Tasks MUST be actionable and verifiable.
+- Keep tasks small and sequential.
 
-    this.messages.push({ role: 'user', content: planPrompt })
+User request: "${this.ctx.input.message || this.ctx.input.instruction}"`
+
+    this.pushMessage({ role: 'user', content: planPrompt })
 
     const response = await this.callLLMWithTools()
-    this.messages.push(response)
+
+    const { planMarkdown, tasks } = this.extractPlanAndTasks(response.content || '')
+    this.planMarkdown = planMarkdown
+    this.planTasks = tasks
+
+    if (this.planMarkdown) {
+      await this.writePlanFile(this.planMarkdown)
+    }
+    if (this.planTasks.length > 0) {
+      await this.writeTasksFile()
+    }
+
+    if (this.planTasks.length > 0) {
+      await this.emitEvent('plan', {
+        message: 'Plan created. Executing tasks…',
+        steps: this.planTasks.map(t => ({ tool: t.id, description: t.title }))
+      })
+    } else {
+      await this.emitEvent('plan', {
+        message: 'Planning complete.',
+        steps: [{ tool: 'planning', description: 'No structured tasks were generated' }]
+      })
+    }
 
     // Transition to code generation
     this.state = 'code_generation'
@@ -276,13 +372,89 @@ User request: "${this.ctx.input.message || this.ctx.input.instruction}"
 
 Generate the code now.`
 
-    this.messages.push({ role: 'user', content: codePrompt })
+    if (this.planTasks.length > 0) {
+      for (const task of this.planTasks) {
+        if (this.ctx.aborted) return
+        if (task.status === 'done') continue
 
-    const response = await this.callLLMWithTools()
-    this.messages.push(response)
+        task.status = 'in_progress'
+        await this.writeTasksFile()
+        await this.emitEvent('plan.update', { task })
+
+        const taskPrompt = `Execute this task now.
+
+Task: ${task.id} - ${task.title}
+Verification: ${task.verification || '(none provided)'}
+
+Rules:
+- Use tools to make real edits.
+- Keep changes focused to this task.
+- When you believe the task is complete, respond with TASK DONE.`
+
+        this.pushMessage({ role: 'user', content: taskPrompt })
+        await this.callLLMWithTools()
+
+        task.status = 'done'
+        await this.writeTasksFile()
+        await this.emitEvent('plan.update', { task })
+      }
+    } else {
+      this.pushMessage({ role: 'user', content: codePrompt })
+      await this.callLLMWithTools()
+    }
 
     await this.emitEvent('tool.end', { tool: 'code_generation', success: true })
     this.state = 'code_execution'
+  }
+
+  private async tryResumeFromFiles(): Promise<boolean> {
+    const planPath = path.join(this.baseDir, 'plan.md')
+    const tasksPath = path.join(this.baseDir, 'tasks.md')
+
+    let tasksText = ''
+    try {
+      tasksText = await fs.readFile(tasksPath, 'utf8')
+    } catch {
+      return false
+    }
+
+    const parsedTasks = this.parseTasksMarkdown(tasksText)
+    if (parsedTasks.length === 0) return false
+
+    this.planTasks = parsedTasks
+
+    try {
+      const planText = await fs.readFile(planPath, 'utf8')
+      const trimmed = planText.trim()
+      this.planMarkdown = trimmed ? trimmed : null
+    } catch {
+    }
+
+    await this.emitEvent('plan', {
+      message: 'Resumed from existing tasks.md',
+      steps: this.planTasks.map(t => ({ tool: t.id, description: t.title }))
+    })
+
+    this.state = 'code_generation'
+    return true
+  }
+
+  private parseTasksMarkdown(text: string): PlanTask[] {
+    const lines = text.split('\n')
+    const tasks: PlanTask[] = []
+
+    for (const line of lines) {
+      const m = line.match(/^\s*-\s*\[( |x|X)\]\s+([^:]+):\s*(.*?)(?:\s+\(verify:\s+`([^`]+)`\))?\s*$/)
+      if (!m) continue
+      const status: PlanTaskStatus = m[1].toLowerCase() === 'x' ? 'done' : 'pending'
+      const id = m[2].trim()
+      const title = m[3].trim()
+      const verification = m[4]?.trim() || undefined
+      if (!id || !title) continue
+      tasks.push({ id, title, verification, status })
+    }
+
+    return tasks
   }
 
   private async handleCodeExecution(): Promise<void> {
@@ -299,10 +471,8 @@ User request: "${this.ctx.input.message || this.ctx.input.instruction}"
 
 Execute the code and report the results. If tests fail, try to fix the code.`
 
-    this.messages.push({ role: 'user', content: execPrompt })
-
-    const response = await this.callLLMWithTools()
-    this.messages.push(response)
+    this.pushMessage({ role: 'user', content: execPrompt })
+    await this.callLLMWithTools()
 
     await this.emitEvent('tool.end', { tool: 'code_execution', success: true })
     this.state = 'review'
@@ -319,10 +489,8 @@ Execute the code and report the results. If tests fail, try to fix the code.`
 
 If everything is good, respond with "TASK COMPLETE". Otherwise, explain what needs to be fixed.`
 
-    this.messages.push({ role: 'user', content: reviewPrompt })
-
+    this.pushMessage({ role: 'user', content: reviewPrompt })
     const response = await this.callLLMWithTools()
-    this.messages.push(response)
 
     const content = response.content || ''
     if (content.toLowerCase().includes('task complete') || content.toLowerCase().includes('complete')) {
@@ -332,6 +500,126 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     }
 
     await this.emitEvent('tool.end', { tool: 'review', success: true })
+  }
+
+  private extractPlanAndTasks(raw: string): { planMarkdown: string | null; tasks: PlanTask[] } {
+    const planMatch = raw.match(/<plan_md>\s*([\s\S]*?)\s*<\/plan_md>/i)
+    const tasksMatch = raw.match(/<tasks_json>\s*([\s\S]*?)\s*<\/tasks_json>/i)
+
+    const planMarkdown = planMatch?.[1]?.trim() || null
+    const tasksRaw = tasksMatch?.[1]?.trim()
+
+    if (!tasksRaw) return { planMarkdown, tasks: [] }
+
+    try {
+      const parsed = JSON.parse(tasksRaw)
+      if (!Array.isArray(parsed)) return { planMarkdown, tasks: [] }
+
+      const tasks: PlanTask[] = parsed
+        .map((t: any, idx: number) => {
+          const id = typeof t?.id === 'string' && t.id.trim() ? t.id.trim() : `T${idx + 1}`
+          const title = typeof t?.title === 'string' && t.title.trim() ? t.title.trim() : `Task ${idx + 1}`
+          const verification = typeof t?.verification === 'string' && t.verification.trim() ? t.verification.trim() : undefined
+          return { id, title, verification, status: 'pending' as const }
+        })
+        .filter(t => t.title)
+
+      return { planMarkdown, tasks }
+    } catch {
+      return { planMarkdown, tasks: [] }
+    }
+  }
+
+  private async writePlanFile(content: string): Promise<void> {
+    const filePath = path.join(this.baseDir, 'plan.md')
+    await fs.writeFile(filePath, content + (content.endsWith('\n') ? '' : '\n'), 'utf8')
+  }
+
+  private renderTasksMarkdown(): string {
+    const lines: string[] = ['# Tasks', '']
+
+    for (const t of this.planTasks) {
+      const box = t.status === 'done' ? 'x' : ' '
+      const verify = t.verification ? ` (verify: \`${t.verification}\`)` : ''
+      lines.push(`- [${box}] ${t.id}: ${t.title}${verify}`)
+    }
+
+    lines.push('')
+    return lines.join('\n')
+  }
+
+  private async writeTasksFile(): Promise<void> {
+    const filePath = path.join(this.baseDir, 'tasks.md')
+    await fs.writeFile(filePath, this.renderTasksMarkdown(), 'utf8')
+  }
+
+  private isAutoRepairEnabled(): boolean {
+    if (this.ctx.input.auto_repair === false) return false
+    if (process.env.RUNNER_AUTO_REPAIR === '0') return false
+    return true
+  }
+
+  private formatCommandResult(result: any): string {
+    const stdout = typeof result?.stdout === 'string' ? result.stdout : ''
+    const stderr = typeof result?.stderr === 'string' ? result.stderr : ''
+    const error = typeof result?.error === 'string' ? result.error : ''
+
+    const parts = [
+      stdout.trim() ? `STDOUT:\n${stdout.trim()}` : '',
+      stderr.trim() ? `STDERR:\n${stderr.trim()}` : '',
+      error.trim() ? `ERROR:\n${error.trim()}` : ''
+    ].filter(Boolean)
+
+    return parts.join('\n\n') || '(no output)'
+  }
+
+  private stringifyForEvent(value: unknown, maxChars: number = 4000): string {
+    let s = ''
+    if (typeof value === 'string') s = value
+    else {
+      try {
+        s = JSON.stringify(value)
+      } catch {
+        s = String(value)
+      }
+    }
+
+    if (s.length <= maxChars) return s
+    return s.slice(0, maxChars) + `…(truncated, ${s.length} chars)`
+  }
+
+  private async maybeAutoRepair(triggerTool: string): Promise<void> {
+    if (!this.isAutoRepairEnabled()) return
+    if (this.autoRepairActive) return
+
+    this.autoRepairActive = true
+    try {
+      await this.emitEvent('tool.start', { tool: 'auto_repair', input: { triggerTool } })
+
+      let testResult = await this.handleRunTest()
+      if (!testResult?.error) {
+        await this.emitEvent('tool.end', { tool: 'auto_repair', success: true })
+        return
+      }
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const failureText = this.formatCommandResult(testResult)
+        const repairPrompt = `The previous change caused this failure:\n\n${failureText}\n\nPlease fix the code. After fixing, ensure tests pass.`
+        this.pushMessage({ role: 'user', content: repairPrompt })
+
+        await this.callLLMWithTools()
+        testResult = await this.handleRunTest()
+
+        if (!testResult?.error) {
+          await this.emitEvent('tool.end', { tool: 'auto_repair', success: true, attempt })
+          return
+        }
+      }
+
+      await this.emitEvent('tool.end', { tool: 'auto_repair', success: false, error: 'Auto-repair failed to make tests pass' })
+    } finally {
+      this.autoRepairActive = false
+    }
   }
 
   private async handleIterate(): Promise<void> {
@@ -349,7 +637,24 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
 
     // Use bridge if available (preferred for Copilot access)
     if (this.ctx.bridge && provider === 'bridge') {
-      return this.callLLMWithBridge()
+      const message = await this.callLLMWithBridge()
+      this.pushMessage(message)
+
+      if (message.tool_calls && message.tool_calls.length > 0) {
+        for (const call of message.tool_calls) {
+          const result = await this.executeTool(call)
+          this.pushMessage({
+            role: 'tool',
+            tool_call_id: call.id,
+            name: call.function?.name,
+            content: JSON.stringify(result)
+          })
+        }
+
+        return await this.callLLMWithTools()
+      }
+
+      return message
     }
 
     // Determine model based on state (Architect/Editor pattern)
@@ -402,13 +707,13 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
           tool_calls: response.tool_calls
         }
 
-        this.messages.push(message)
+        this.pushMessage(message)
 
         // Handle tool calls
         if (message.tool_calls && message.tool_calls.length > 0) {
           for (const call of message.tool_calls) {
             const result = await this.executeTool(call)
-            this.messages.push({
+            this.pushMessage({
               role: 'tool',
               tool_call_id: call.id,
               name: call.function?.name,
@@ -522,7 +827,7 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   }
 
   private getAvailableTools() {
-    return [
+    const tools = [
       {
         type: 'function',
         function: {
@@ -609,6 +914,23 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
           }
         }
       },
+
+      ...(this.isBraveModeEnabled() ? [
+        {
+          type: 'function',
+          function: {
+            name: 'shell_execute',
+            description: 'Run a terminal command in brave mode (still safety-checked)',
+            parameters: {
+              type: 'object',
+              properties: {
+                command: { type: 'string', description: 'Shell command to execute' }
+              },
+              required: ['command']
+            }
+          }
+        }
+      ] : []),
       {
         type: 'function',
         function: {
@@ -822,8 +1144,65 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
             required: ['method', 'url']
           }
         }
-      }
+      },
+
+      ...(this.mcp.hasServers() ? [
+        {
+          type: 'function',
+          function: {
+            name: 'mcp_list_servers',
+            description: 'List configured MCP servers',
+            parameters: { type: 'object', properties: {} }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'mcp_initialize',
+            description: 'Initialize an MCP server connection',
+            parameters: {
+              type: 'object',
+              properties: {
+                server_id: { type: 'string', description: 'MCP server id' }
+              },
+              required: ['server_id']
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'mcp_list_tools',
+            description: 'List tools exposed by an MCP server',
+            parameters: {
+              type: 'object',
+              properties: {
+                server_id: { type: 'string', description: 'MCP server id' }
+              },
+              required: ['server_id']
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'mcp_call_tool',
+            description: 'Call a tool on an MCP server',
+            parameters: {
+              type: 'object',
+              properties: {
+                server_id: { type: 'string', description: 'MCP server id' },
+                tool: { type: 'string', description: 'Tool name' },
+                arguments: { type: 'object', description: 'Tool arguments' }
+              },
+              required: ['server_id', 'tool']
+            }
+          }
+        }
+      ] : [])
     ]
+
+    return tools
   }
 
   private async executeTool(call: NonNullable<ChatMessage['tool_calls']>[0]): Promise<any> {
@@ -831,7 +1210,9 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     const { name, arguments: args } = call.function!
     const params = args ? JSON.parse(args) : {}
 
-    await this.emitEvent('tool.start', { tool: name, input: params })
+    const toolCallId = call.id
+
+    await this.emitEvent('tool.start', { id: toolCallId, tool: name, input: params })
 
     let result: any
 
@@ -842,6 +1223,7 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
           break
         case 'write_file':
           result = await this.handleWriteFile(params.path, params.content)
+          await this.maybeAutoRepair('write_file')
           break
         case 'list_files':
           result = await this.handleListFiles(params.glob)
@@ -853,10 +1235,14 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
           result = await this.handleGrepSearch(params.query, params.include_pattern)
           break
         case 'run_command':
-          result = await this.handleRunCommand(params.command)
+          result = await this.handleRunCommand(params.command, toolCallId)
+          break
+        case 'shell_execute':
+          result = await this.handleRunCommand(params.command, toolCallId)
           break
         case 'apply_edit':
           result = await this.handleApplyEdit(params.path, params.range, params.text)
+          await this.maybeAutoRepair('apply_edit')
           break
         case 'git_commit':
           result = await this.handleGitCommit(params.message)
@@ -897,15 +1283,34 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
         case 'call_api':
           result = await this.handleCallApi(params.method, params.url, params.headers, params.body)
           break
+        case 'mcp_list_servers':
+          result = { servers: this.mcp.listServers() }
+          break
+        case 'mcp_initialize':
+          result = await this.mcp.initialize(params.server_id)
+          break
+        case 'mcp_list_tools':
+          result = await this.mcp.listTools(params.server_id)
+          break
+        case 'mcp_call_tool':
+          result = await this.mcp.callTool(params.server_id, params.tool, params.arguments)
+          break
         default:
           throw new Error(`Unknown tool: ${name}`)
       }
 
-      await this.emitEvent('tool.end', { tool: name, success: true })
+      await this.emitEvent('tool.output', {
+        id: toolCallId,
+        tool: name,
+        output: this.stringifyForEvent(result)
+      })
+
+      await this.emitEvent('tool.end', { id: toolCallId, tool: name, success: true })
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err)
       result = { error }
-      await this.emitEvent('tool.end', { tool: name, success: false, error })
+      await this.emitEvent('tool.output', { id: toolCallId, tool: name, output: this.stringifyForEvent(result) })
+      await this.emitEvent('tool.end', { id: toolCallId, tool: name, success: false, error })
     }
 
     return result
@@ -1018,11 +1423,19 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     })
   }
 
-  private async handleRunCommand(command: string) {
+  private async handleRunCommand(command: string, toolCallId?: string) {
     if (this.ctx.aborted) return { error: 'Job cancelled' }
 
+    if (this.isForbiddenCommand(command)) {
+      const reason = 'Refused to run: command matches disallowed or unsafe patterns.'
+      await this.emitEvent('tool.refused', { id: toolCallId, tool: 'run_command', command, reason })
+      return { error: reason }
+    }
+
+    const braveMode = this.isBraveModeEnabled()
+
     // Check for sensitive commands requiring approval
-    if (this.isSensitiveCommand(command)) {
+    if (!braveMode && this.isSensitiveCommand(command)) {
       const { tokenId, wait } = approvalService.createRequest(this.ctx.jobId)
 
       await this.emitEvent('approval.request', {
@@ -1040,7 +1453,9 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
       })
 
       if (!approved) {
-        return { error: 'Command execution denied by user or timed out' }
+        const reason = 'Command execution denied by user or timed out'
+        await this.emitEvent('tool.refused', { id: toolCallId, tool: 'run_command', command, reason })
+        return { error: reason }
       }
     }
 
@@ -1048,11 +1463,20 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     const { promisify } = await import('util')
     const execAsync = promisify(exec)
     try {
-      const result = await execAsync(command, { timeout: 15000 })
+      const result = await execAsync(command, { timeout: 15000, cwd: this.baseDir })
       return { stdout: result.stdout, stderr: result.stderr }
     } catch (err: any) {
       return { stdout: err.stdout || '', stderr: err.stderr || err.message, error: err.message }
     }
+  }
+
+  private isBraveModeEnabled(): boolean {
+    return Boolean(this.ctx.input.brave_mode) || process.env.RUNNER_BRAVE_MODE === '1'
+  }
+
+  private isForbiddenCommand(command: string): boolean {
+    const lowered = command.toLowerCase()
+    return /(^|\s)(rm\s+-rf|sudo\b|shutdown\b|reboot\b|mkfs\b|dd\s+if=|:\(\)\s*{\s*:|:;};:|:\s*>\s*\/|>\s*\/)/.test(lowered)
   }
 
   private isSensitiveCommand(command: string): boolean {

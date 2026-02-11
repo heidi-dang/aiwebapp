@@ -18,6 +18,8 @@ import { runCoderAgent } from './agent.js'
 import { createOllamaClientFromEnv } from './llm/providers/ollama.js'
 import { llmService } from './llm/index.js'
 import { sandboxService } from './services/sandbox.js'
+import { loadHeidiGuidelines } from './services/heidi-guidelines.js'
+import { RepoMapper } from './services/repo-map.js'
 import { registerJobProcess } from './process-registry.js'
 import type { FastifyReply } from 'fastify'
 
@@ -32,6 +34,7 @@ function randomId(prefix: string) {
 export interface JobInput {
   message?: string
   instruction?: string
+  system_prompt?: string
   files?: string[]
   tools?: string[]
   provider?: string
@@ -43,6 +46,9 @@ export interface JobInput {
   base_dir?: string
   runtime_mode?: 'local' | 'sandbox'
   cloud_fallback?: boolean
+  brave_mode?: boolean
+  auto_repair?: boolean
+  resume_from_tasks?: boolean
   sleep_ms?: number
   poc_commands?: string[]
   poc_checks?: Array<{
@@ -630,11 +636,29 @@ function looksLikeActionRequest(text: string): boolean {
 async function executeWithCopilotApi(ctx: JobContext): Promise<void> {
   const message = ctx.input.message ?? ctx.input.instruction ?? 'Hello'
   const model = ctx.input.model || 'auto'
+  const braveMode = Boolean(ctx.input.brave_mode) || process.env.RUNNER_BRAVE_MODE === '1'
 
   // Check if this looks like an action request
   const isActionRequest = looksLikeActionRequest(message)
 
-  const systemPrompt = isActionRequest ? `
+  const heidiGuidelines = await loadHeidiGuidelines(ctx.baseDirResolved)
+  const guidelinesBlock = heidiGuidelines
+    ? `\n\nTeam Guidelines (must follow):\n${heidiGuidelines}\n`
+    : ''
+
+  let repoMapBlock = ''
+  if (isActionRequest) {
+    try {
+      const mapper = new RepoMapper(ctx.baseDirResolved)
+      const map = await mapper.generateMap()
+      if (map.trim()) {
+        repoMapBlock = `\n\nCurrent Repository Map:\n${map}\n`
+      }
+    } catch {
+    }
+  }
+
+  const systemPrompt = ((isActionRequest ? `
 You are an autonomous coding agent with full execution capabilities.
 
 IMPORTANT: You are NOT GitHub Copilot Chat. You are NOT limited to suggestions or explanations.
@@ -660,7 +684,7 @@ You are a helpful coding assistant.
 
 You can answer questions about code, provide explanations, and give advice.
 For specific actions like running commands or modifying files, ask the user to clarify.
-`
+`) + guidelinesBlock + repoMapBlock)
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
@@ -778,7 +802,24 @@ For specific actions like running commands or modifying files, ask the user to c
           required: ['command']
         }
       }
-    }
+    },
+    ...(braveMode ? [{
+      type: 'function',
+      function: {
+        name: 'shell_execute',
+        description: 'Run a terminal command in brave mode (still safety-checked)',
+        parameters: {
+          type: 'object',
+          properties: {
+            command: {
+              type: 'string',
+              description: 'Shell command to execute'
+            }
+          },
+          required: ['command']
+        }
+      }
+    }] : [])
   ] : []
 
   // Only emit plan for action requests
@@ -919,7 +960,7 @@ For specific actions like running commands or modifying files, ask the user to c
         const query = typeof args.query === 'string' ? args.query : ''
         const includePattern = typeof args.include_pattern === 'string' ? args.include_pattern : undefined
         result = query ? await handleGrepSearchTool(ctx, query, includePattern) : { error: 'Missing query' }
-      } else if (call.function?.name === 'run_command') {
+      } else if (call.function?.name === 'run_command' || call.function?.name === 'shell_execute') {
         const command = typeof args.command === 'string' ? args.command : ''
         if (!command) {
           result = { error: 'Missing command' }
@@ -950,7 +991,7 @@ For specific actions like running commands or modifying files, ask the user to c
           }
 
           const allowed = await loadAllowlist()
-          if (!matchesAllowlist(command, allowed)) {
+          if (!braveMode && !matchesAllowlist(command, allowed)) {
             const message = 'Refused to run: command not on the allowlist.'
             console.warn(`[Runner] Refused run_command: ${command}`)
             // Emit structured refusal event containing the attempted command for UI affordances
@@ -1458,6 +1499,9 @@ export async function executeJob(
       await executeWithSleep(ctx)
     } else if (input.provider === 'poc_review') {
       await executeWithPocReview(ctx)
+    } else if (input.provider === 'agent') {
+      console.log(`[Runner] Using CoderAgent for job ${jobId}`)
+      await runCoderAgent(ctx)
     } else if (input.provider === 'copilotapi') {
       console.log(`[Runner] Using Copilot API for job ${jobId}`);
       await executeWithCopilotApi(ctx);

@@ -129,7 +129,7 @@ export default function RunCard({ jobId }: { jobId: string }) {
   useEffect(() => {
     if (!run) return
     const newToolExecutions: ToolExecution[] = []
-    const activeTools = new Map<string, number>() // name -> index
+    const activeTools = new Map<string, number>() // toolKey -> index
     const newPlanSteps: Array<{ tool: string; description: string }> = []
     let newPlanMessage = ''
     let currentApproval: ApprovalState | null = null
@@ -154,6 +154,8 @@ export default function RunCard({ jobId }: { jobId: string }) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const name = (payload as any).tool
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const toolKey = (payload as any).id || name
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const args = (payload as any).input || (payload as any).args
         
         const tool: ToolExecution = {
@@ -167,12 +169,13 @@ export default function RunCard({ jobId }: { jobId: string }) {
         }
         
         const idx = newToolExecutions.push(tool) - 1
-        activeTools.set(name, idx)
+        activeTools.set(toolKey, idx)
       }
 
       if (type === 'tool.output' && isRecord(payload) && typeof payload['tool'] === 'string') {
         const name = payload['tool']
-        const idx = activeTools.get(name)
+        const toolKey = typeof payload['id'] === 'string' ? payload['id'] : name
+        const idx = activeTools.get(toolKey)
         if (idx !== undefined) {
           const output =
             typeof payload['output'] === 'string'
@@ -188,7 +191,9 @@ export default function RunCard({ jobId }: { jobId: string }) {
       if (type === 'tool.end' && payload && typeof payload === 'object' && payload !== null && 'tool' in payload && typeof (payload as any).tool === 'string') {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const name = (payload as any).tool
-        const idx = activeTools.get(name)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const toolKey = (payload as any).id || name
+        const idx = activeTools.get(toolKey)
         if (idx !== undefined) {
           const tool = newToolExecutions[idx]
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -199,7 +204,7 @@ export default function RunCard({ jobId }: { jobId: string }) {
              tool.output = (tool.output || '') + '\nError: ' + (payload as any).error
           }
           tool.duration = ts - tool.timestamp
-          activeTools.delete(name)
+          activeTools.delete(toolKey)
         }
       }
 
@@ -208,7 +213,9 @@ export default function RunCard({ jobId }: { jobId: string }) {
          // Treated as a tool failure that starts and fails immediately if not already started
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const name = (payload as any).tool
-        let idx = activeTools.get(name)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const toolKey = (payload as any).id || name
+        let idx = activeTools.get(toolKey)
         
         if (idx === undefined) {
              const tool: ToolExecution = {
@@ -231,7 +238,7 @@ export default function RunCard({ jobId }: { jobId: string }) {
              // eslint-disable-next-line @typescript-eslint/no-explicit-any
              tool.output += `\nCommand: ${(payload as any).command}`
         }
-        activeTools.delete(name)
+        activeTools.delete(toolKey)
       }
 
       // Handle approvals
