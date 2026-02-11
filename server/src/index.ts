@@ -27,6 +27,7 @@ import { registerSkillsRoutes } from './routes/skills.js';
 import { registerEvaluationRoutes } from './routes/evaluation.js';
 import { registerTracingRoutes } from './routes/tracing.js';
 import { registerReasoningRoutes } from './routes/reasoning.js';
+import createOpenAIRoutes from './routes/openai.js';
 
 const PORT = Number(process.env.PORT ?? 3001)
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000'
@@ -76,6 +77,8 @@ async function main() {
   registerEvaluationRoutes(app, store);
   registerTracingRoutes(app, store);
   registerReasoningRoutes(app, store);
+
+  app.use('/v1', createOpenAIRoutes(store));
 
   // Register toolbox routes for UI-driven tools (internal)
   const { registerToolboxRoutes } = await import('./routes/toolbox.js')

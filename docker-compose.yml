@@ -37,20 +37,16 @@ services:
     environment:
       - IS_PERSISTENT=TRUE
 
-  ui:
-    image: heididang/aiwebapp-ui:latest
-    build:
-      context: ./ui
-      args:
-        NEXT_PUBLIC_API_URL: http://localhost:3001
+  lobe-chat:
+    image: lobehub/lobe-chat:latest
     ports:
-      - "3000:3000"
+      - "3000:3333"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:3001
-      - RUNNER_URL=http://runner:3002
+      - OPENAI_API_KEY=your-api-key
+      - OPENAI_API_BASE_URL=http://server:3001/v1
+      - ACCESS_CODE=your-access-code
     depends_on:
       - server
-      - runner
 
 volumes:
   server_data:
