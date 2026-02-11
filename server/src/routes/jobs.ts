@@ -88,8 +88,48 @@ export async function registerJobRoutes(app: any, store: Store) {
     }
   })
 
-  // Remove separate reject endpoint as approval endpoint handles both
-  // app.post('/jobs/:id/reject', ...) - removed
+  app.post('/jobs/:id/reject', async (req: any, res: any) => {
+    requireOptionalBearerAuth(req, res)
+    if (res.headersSent) return
+
+    const jobId = req.params.id
+    const rejectSchema = z.object({
+      tokenId: z.string()
+    })
+
+    const parsed = rejectSchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid reject request', details: parsed.error.errors })
+      return
+    }
+
+    try {
+      const response = await fetch(`${RUNNER_URL}/api/jobs/${encodeURIComponent(jobId)}/approval`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${RUNNER_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ tokenId: parsed.data.tokenId, approved: false })
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        res.status(response.status).json({
+          error: 'Failed to submit rejection',
+          details: errorText
+        })
+        return
+      }
+
+      res.json({ success: true, message: 'Rejection submitted' })
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to submit rejection',
+        details: error instanceof Error ? error.message : String(error)
+      })
+    }
+  })
 
 
   app.get('/jobs/:id/status', async (req: any, res: any) => {

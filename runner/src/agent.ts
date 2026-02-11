@@ -573,7 +573,7 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
     return parts.join('\n\n') || '(no output)'
   }
 
-  private stringifyForEvent(value: unknown, maxChars: number = 4000): string {
+  private stringifyForEvent(value: unknown, maxChars: number = 200000): string {
     let s = ''
     if (typeof value === 'string') s = value
     else {
@@ -1681,6 +1681,40 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   }
 
   private async emitEvent(type: RunnerEventType, data?: unknown): Promise<void> {
+    if (
+      type === 'tool.output' &&
+      data &&
+      typeof data === 'object' &&
+      'output' in data &&
+      typeof (data as any).output === 'string'
+    ) {
+      const output = (data as any).output as string
+      const chunkSize = 4000
+      if (output.length > chunkSize) {
+        const baseId = `evt_${Date.now()}_${Math.random().toString(16).slice(2)}`
+        const total = Math.ceil(output.length / chunkSize)
+
+        for (let i = 0; i < total; i++) {
+          const chunk = output.slice(i * chunkSize, (i + 1) * chunkSize)
+          const event = {
+            id: `${baseId}_${i + 1}of${total}`,
+            type,
+            ts: new Date().toISOString(),
+            job_id: this.ctx.jobId,
+            data: { ...(data as any), output: chunk }
+          }
+
+          await this.ctx.store.addEvent(event)
+          for (const sub of this.ctx.subscribers) {
+            sub.raw.write(`event: ${type}\n`)
+            sub.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+          }
+        }
+
+        return
+      }
+    }
+
     const event = {
       id: `evt_${Date.now()}_${Math.random().toString(16).slice(2)}`,
       type,
