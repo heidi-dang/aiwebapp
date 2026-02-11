@@ -117,16 +117,24 @@ class CopilotClient {
         while (attempts <= this.config.retryAttempts) {
             try {
                 // Make the request to Copilot using the correct API
-                const response = await model.sendRequest(messages, options, new vscode.CancellationTokenSource().token);
-                // Convert response back to OpenAI format
-                const completion = await this.processCopilotResponse(response, request);
-                // Add usage information (estimated)
-                const usage = this.estimateTokenUsage(request.messages, completion.choices[0].message.content);
-                return {
-                    ...completion,
-                    usage,
-                    session_id: request.session_id
-                };
+                const cts = new vscode.CancellationTokenSource();
+                const timeoutHandle = setTimeout(() => cts.cancel(), this.config.timeout);
+                try {
+                    const response = await model.sendRequest(messages, options, cts.token);
+                    // Convert response back to OpenAI format
+                    const completion = await this.processCopilotResponse(response, request);
+                    // Add usage information (estimated)
+                    const usage = this.estimateTokenUsage(request.messages, completion.choices[0].message.content || '');
+                    return {
+                        ...completion,
+                        usage,
+                        session_id: request.session_id
+                    };
+                }
+                finally {
+                    clearTimeout(timeoutHandle);
+                    cts.dispose();
+                }
             }
             catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error));
@@ -179,16 +187,16 @@ class CopilotClient {
         return openaiMessages.map(msg => {
             switch (msg.role) {
                 case 'system':
-                    return vscode.LanguageModelChatMessage.User(msg.content);
+                    return vscode.LanguageModelChatMessage.User(msg.content || '');
                 case 'user':
-                    return vscode.LanguageModelChatMessage.User(msg.content);
+                    return vscode.LanguageModelChatMessage.User(msg.content || '');
                 case 'assistant':
-                    return vscode.LanguageModelChatMessage.Assistant(msg.content);
+                    return vscode.LanguageModelChatMessage.Assistant(msg.content || '');
                 case 'tool':
                     // Handle tool messages as user messages for now
-                    return vscode.LanguageModelChatMessage.User(`Tool result: ${msg.content}`);
+                    return vscode.LanguageModelChatMessage.User(`Tool result: ${msg.content || ''}`);
                 default:
-                    return vscode.LanguageModelChatMessage.User(msg.content);
+                    return vscode.LanguageModelChatMessage.User(msg.content || '');
             }
         });
     }
@@ -234,26 +242,58 @@ class CopilotClient {
             total_tokens: promptTokens + completionTokens
         };
     }
-    // Streaming support (placeholder for future implementation)
+    // Streaming support
     async *createStreamingChatCompletion(request) {
-        // This would implement streaming responses
-        // For now, just yield the complete response
-        const response = await this.createChatCompletion(request);
-        yield {
-            id: response.id,
-            object: 'chat.completion.chunk',
-            created: response.created,
-            model: response.model,
-            choices: [{
-                    index: 0,
-                    delta: {
-                        content: response.choices[0].message.content
-                    },
-                    finish_reason: 'stop'
-                }],
-            usage: response.usage,
-            session_id: request.session_id
-        };
+        const model = await this.selectModel(request.model);
+        if (!model) {
+            throw new Error(`Model not found: ${request.model}`);
+        }
+        const messages = this.convertMessages(request.messages);
+        const cts = new vscode.CancellationTokenSource();
+        const timeoutHandle = setTimeout(() => cts.cancel(), this.config.timeout);
+        try {
+            const response = await model.sendRequest(messages, {}, cts.token);
+            const responseId = `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+            let responseText = '';
+            for await (const part of response.stream) {
+                const p = part;
+                if (p?.type === 'text' && typeof p.text === 'string') {
+                    responseText += p.text;
+                    yield {
+                        id: responseId,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: request.model,
+                        choices: [{
+                                index: 0,
+                                delta: {
+                                    content: p.text
+                                },
+                                finish_reason: null
+                            }],
+                        session_id: request.session_id
+                    };
+                }
+            }
+            const usage = this.estimateTokenUsage(request.messages, responseText);
+            yield {
+                id: responseId,
+                object: 'chat.completion.chunk',
+                created: Math.floor(Date.now() / 1000),
+                model: request.model,
+                choices: [{
+                        index: 0,
+                        delta: {},
+                        finish_reason: 'stop'
+                    }],
+                usage,
+                session_id: request.session_id
+            };
+        }
+        finally {
+            clearTimeout(timeoutHandle);
+            cts.dispose();
+        }
     }
 }
 exports.CopilotClient = CopilotClient;

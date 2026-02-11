@@ -46,7 +46,7 @@ let dashboard;
 let authService;
 let sessionManager;
 let metricsService;
-function activate(context) {
+async function activate(context) {
     console.log('AIWebApp Copilot Gateway extension is now active!');
     // Initialize services
     initializeServices(context);
@@ -55,7 +55,7 @@ function activate(context) {
     // Auto-start server if configured
     const autoStart = vscode.workspace.getConfiguration('aiwebapp-copilot-gateway.server').get('autoStart', true);
     if (autoStart) {
-        startServer();
+        await startServer();
     }
     // Update status bar
     updateStatusBar();
@@ -134,6 +134,9 @@ async function startServer() {
             sessionManager,
             metricsService
         });
+        if (dashboard) {
+            dashboard.setServer(server);
+        }
         await server.start();
         vscode.window.showInformationMessage(`Copilot Gateway Server started on port ${server.getPort()}`);
         // Update context for view visibility

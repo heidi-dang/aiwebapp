@@ -112,19 +112,29 @@ export class CopilotClient {
     while (attempts <= this.config.retryAttempts) {
       try {
         // Make the request to Copilot using the correct API
-        const response = await model.sendRequest(messages, options, new vscode.CancellationTokenSource().token);
+        const cts = new vscode.CancellationTokenSource();
+        const timeoutHandle = setTimeout(() => cts.cancel(), this.config.timeout);
+        try {
+          const response = await model.sendRequest(messages, options, cts.token);
 
-        // Convert response back to OpenAI format
-        const completion = await this.processCopilotResponse(response, request);
+          // Convert response back to OpenAI format
+          const completion = await this.processCopilotResponse(response, request);
 
-        // Add usage information (estimated)
-        const usage = this.estimateTokenUsage(request.messages, completion.choices[0].message.content);
+          // Add usage information (estimated)
+          const usage = this.estimateTokenUsage(
+            request.messages,
+            completion.choices[0].message.content || ''
+          );
 
-        return {
-          ...completion,
-          usage,
-          session_id: request.session_id
-        };
+          return {
+            ...completion,
+            usage,
+            session_id: request.session_id
+          };
+        } finally {
+          clearTimeout(timeoutHandle);
+          cts.dispose();
+        }
 
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
@@ -254,45 +264,52 @@ export class CopilotClient {
     }
 
     const messages = this.convertMessages(request.messages);
-    const response = await model.sendRequest(messages, {}, new vscode.CancellationTokenSource().token);
+    const cts = new vscode.CancellationTokenSource();
+    const timeoutHandle = setTimeout(() => cts.cancel(), this.config.timeout);
+    try {
+      const response = await model.sendRequest(messages, {}, cts.token);
 
-    const responseId = `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`;
-    let responseText = '';
+      const responseId = `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+      let responseText = '';
 
-    for await (const part of response.stream) {
-      if (part.type === 'text') {
-        responseText += part.text;
-        yield {
-          id: responseId,
-          object: 'chat.completion.chunk',
-          created: Math.floor(Date.now() / 1000),
-          model: request.model,
-          choices: [{
-            index: 0,
-            delta: {
-              content: part.text
-            },
-            finish_reason: null
-          }],
-          session_id: request.session_id
-        };
+      for await (const part of response.stream) {
+        const p = part as any;
+        if (p?.type === 'text' && typeof p.text === 'string') {
+          responseText += p.text;
+          yield {
+            id: responseId,
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: request.model,
+            choices: [{
+              index: 0,
+              delta: {
+                content: p.text
+              },
+              finish_reason: null
+            }],
+            session_id: request.session_id
+          };
+        }
       }
-    }
 
-    // Yield final chunk
-    const usage = this.estimateTokenUsage(request.messages, responseText);
-    yield {
-      id: responseId,
-      object: 'chat.completion.chunk',
-      created: Math.floor(Date.now() / 1000),
-      model: request.model,
-      choices: [{
-        index: 0,
-        delta: {},
-        finish_reason: 'stop'
-      }],
-      usage,
-      session_id: request.session_id
-    };
+      const usage = this.estimateTokenUsage(request.messages, responseText);
+      yield {
+        id: responseId,
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: request.model,
+        choices: [{
+          index: 0,
+          delta: {},
+          finish_reason: 'stop'
+        }],
+        usage,
+        session_id: request.session_id
+      };
+    } finally {
+      clearTimeout(timeoutHandle);
+      cts.dispose();
+    }
   }
 }

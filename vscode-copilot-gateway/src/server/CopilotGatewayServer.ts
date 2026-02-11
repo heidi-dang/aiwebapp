@@ -353,7 +353,8 @@ export class CopilotGatewayServer {
           }
         } catch (streamError) {
           console.error('Error in stream:', streamError);
-          res.write(`data: ${JSON.stringify({ error: 'Stream error' })}\n\n`);
+          const message = streamError instanceof Error ? streamError.message : 'Stream error';
+          res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
           res.end();
         }
         return;
@@ -386,6 +387,7 @@ export class CopilotGatewayServer {
 
     } catch (error) {
       console.error('Error in chat completions:', error);
+      const message = error instanceof Error ? error.message : 'Internal server error';
 
       // Record error metrics
       if (this.metricsService) {
@@ -401,7 +403,7 @@ export class CopilotGatewayServer {
         });
       }
 
-      res.status(500).json({ error: 'Internal server error' });
+      res.status(500).json({ error: message });
     }
   }
 

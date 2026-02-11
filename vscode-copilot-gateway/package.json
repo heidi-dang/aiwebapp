@@ -2,7 +2,7 @@
   "name": "heidi-ai-copilot-dashboard",
   "displayName": "Heidi AI Copilot Dashboard",
   "description": "Heidi AI WebApp Copilot Dashboard - OpenAI-compatible API gateway with authentication, session memory, tool orchestration, and usage insights for your Heidi AI workflows",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "engines": {
     "vscode": "^1.85.0",
     "node": ">=18.0.0"
