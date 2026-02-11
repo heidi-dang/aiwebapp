@@ -93,6 +93,22 @@ function getPocClaimEventFromPayload(payload: unknown): PocClaimEvent | null {
   return { claim, evidence }
 }
 
+function getPocProofHashFromPayload(payload: unknown): string | null {
+  if (!isRecord(payload)) return null
+  if (payload['tool'] !== 'poc_review') return null
+  const proofHash = payload['proof_hash']
+  return typeof proofHash === 'string' && proofHash.trim() ? proofHash : null
+}
+
+async function sha256Hex(text: string) {
+  const data = new TextEncoder().encode(text)
+  const digest = await crypto.subtle.digest('SHA-256', data)
+  const bytes = new Uint8Array(digest)
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
 interface ApprovalState {
   tokenId: string
   description: string
@@ -268,6 +284,11 @@ export default function RunCard({ jobId }: { jobId: string }) {
     .map((e) => getPocClaimEventFromPayload(e.payload))
     .filter((c): c is PocClaimEvent => !!c)
   const pocClaims = pocClaimEvents.map((c) => c.claim)
+  const pocProofHash =
+    run.events
+      .filter((e) => e.type === 'tool.end')
+      .map((e) => getPocProofHashFromPayload(e.payload))
+      .find((h): h is string => !!h) ?? null
 
   return (
     <div className="w-full" data-testid="run-thinking">
@@ -289,16 +310,64 @@ export default function RunCard({ jobId }: { jobId: string }) {
               Cancel
             </Button>
           )}
-          {pocClaims.length > 0 && (
+          {pocProofHash && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(pocProofHash)
+                } catch {
+                }
+              }}
+            >
+              Copy Proof Hash
+            </Button>
+          )}
+          {pocClaimEvents.length > 0 && (
             <Button
               size="sm"
               variant="outline"
               onClick={() => {
+                const artifact = {
+                  jobId: run.jobId,
+                  status: run.status,
+                  proof_hash: pocProofHash,
+                  claims: pocClaimEvents.map((c) => ({
+                    claim: c.claim,
+                    evidence: {
+                      stdout_hash: c.evidence.stdout_hash,
+                      stderr_hash: c.evidence.stderr_hash
+                    }
+                  }))
+                }
+                const blob = new Blob([JSON.stringify(artifact, null, 2) + '\n'], {
+                  type: 'application/json'
+                })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `poc-artifact-${run.jobId}.json`
+                document.body.appendChild(a)
+                a.click()
+                a.remove()
+                URL.revokeObjectURL(url)
+              }}
+            >
+              Export Artifact
+            </Button>
+          )}
+          {pocClaims.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
                 const lines = [
                   `# PoC Review Report`,
                   ``,
                   `Job: ${run.jobId}`,
                   `Status: ${run.status}`,
+                  ...(pocProofHash ? [`Proof Hash: ${pocProofHash}`] : []),
                   ``,
                   `## Claims`,
                   ...pocClaims.map((c) => {
@@ -311,7 +380,10 @@ export default function RunCard({ jobId }: { jobId: string }) {
                     return `- ${ok ? '✅' : '❌'} ${c.id ?? ''} (w=${weight}) deps=[${deps}]\n  - ${statement}\n  - \`${cmd}\`\n  - hash: ${hash}`
                   })
                 ]
-                const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/markdown' })
+                const reportBody = lines.join('\n') + '\n'
+                const reportHash = await sha256Hex(reportBody)
+                const fullReport = [`Report Hash: ${reportHash}`, ``, reportBody].join('\n')
+                const blob = new Blob([fullReport], { type: 'text/markdown' })
                 const url = URL.createObjectURL(blob)
                 const a = document.createElement('a')
                 a.href = url
@@ -369,7 +441,14 @@ export default function RunCard({ jobId }: { jobId: string }) {
 
           {pocClaimEvents.length > 0 && (
             <div className="rounded-lg border border-primary/10 bg-accent/30 p-3">
-              <div className="text-xs font-medium uppercase text-primary">PoC Claims</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-medium uppercase text-primary">PoC Claims</div>
+                {pocProofHash && (
+                  <div className="break-words font-mono text-[11px] text-secondary/80">
+                    proof: {pocProofHash}
+                  </div>
+                )}
+              </div>
               <div className="mt-2 space-y-2">
                 {pocClaimEvents.map(({ claim, evidence }, idx) => {
                   const id = claim.id || `claim_${idx + 1}`

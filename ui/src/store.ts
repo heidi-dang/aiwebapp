@@ -70,6 +70,27 @@ interface Store {
   ) => void
   selectedPocReviewTemplateId: string
   setSelectedPocReviewTemplateId: (id: string) => void
+  pocReviewHistory: Array<{
+    jobId: string
+    createdAt: number
+    templateId?: string
+    templateName?: string
+  }>
+  addPocReviewHistory: (entry: {
+    jobId: string
+    createdAt: number
+    templateId?: string
+    templateName?: string
+  }) => void
+  pocXpTotal: number
+  pocStreak: number
+  pocLongestStreak: number
+  pocBadges: Record<string, { unlockedAt: number }>
+  pocAwardedJobIds: string[]
+  pocLastXpGain: number
+  unlockPocBadge: (badgeId: string) => void
+  pocBadgeFeed: Array<{ badgeId: string; unlockedAt: number }>
+  clearPocBadgeFeed: () => void
   // System prompt for agents
   systemPromptMode: 'default' | 'strict' | 'custom'
   setSystemPromptMode: (mode: 'default' | 'strict' | 'custom') => void
@@ -156,6 +177,36 @@ export const useStore = create<Store>()(
       selectedPocReviewTemplateId: '',
       setSelectedPocReviewTemplateId: (selectedPocReviewTemplateId) =>
         set(() => ({ selectedPocReviewTemplateId })),
+      pocReviewHistory: [],
+      addPocReviewHistory: (entry) =>
+        set((state) => ({
+          pocReviewHistory: [
+            entry,
+            ...state.pocReviewHistory.filter((e) => e.jobId !== entry.jobId)
+          ].slice(0, 50)
+        })),
+      pocXpTotal: 0,
+      pocStreak: 0,
+      pocLongestStreak: 0,
+      pocBadges: {},
+      pocAwardedJobIds: [],
+      pocLastXpGain: 0,
+      unlockPocBadge: (badgeId) =>
+        set((state) => {
+          if (state.pocBadges[badgeId]) return state
+          const unlockedAt = Math.floor(Date.now() / 1000)
+          return {
+            pocBadges: {
+              ...state.pocBadges,
+              [badgeId]: { unlockedAt }
+            },
+            pocBadgeFeed: [...state.pocBadgeFeed, { badgeId, unlockedAt }].slice(
+              -10
+            )
+          }
+        }),
+      pocBadgeFeed: [],
+      clearPocBadgeFeed: () => set(() => ({ pocBadgeFeed: [] })),
       // System prompt defaults (agent mode only)
       systemPromptMode: 'default',
       setSystemPromptMode: (systemPromptMode) =>
@@ -194,6 +245,9 @@ export const useStore = create<Store>()(
         })),
       applyRunnerEvent: (event) =>
         set((state) => {
+          const isRecord = (value: unknown): value is Record<string, unknown> =>
+            typeof value === 'object' && value !== null
+
           const jobId = event.job_id
           const prev = state.runs[jobId] ?? {
             jobId,
@@ -220,6 +274,20 @@ export const useStore = create<Store>()(
           let status: RunStatus = prev.status
           let startedAt = prev.startedAt
           let finishedAt = prev.finishedAt
+          let pocXpTotal = state.pocXpTotal
+          let pocStreak = state.pocStreak
+          let pocLongestStreak = state.pocLongestStreak
+          let pocBadges = state.pocBadges
+          let pocAwardedJobIds = state.pocAwardedJobIds
+          let pocLastXpGain = state.pocLastXpGain
+          let pocBadgeFeed = state.pocBadgeFeed
+
+          const unlock = (badgeId: string) => {
+            if (pocBadges[badgeId]) return
+            const unlockedAt = Math.floor(Date.now() / 1000)
+            pocBadges = { ...pocBadges, [badgeId]: { unlockedAt } }
+            pocBadgeFeed = [...pocBadgeFeed, { badgeId, unlockedAt }].slice(-10)
+          }
 
           if (event.type === 'job.started') {
             status = 'running'
@@ -230,6 +298,61 @@ export const useStore = create<Store>()(
             status = 'timeout'
           } else if (event.type === 'error') {
             status = 'error'
+          } else if (event.type === 'tool.end' && isRecord(event.data) && event.data.tool === 'poc_review') {
+            const success = event.data.success === true
+            const proofHash = typeof event.data.proof_hash === 'string' ? event.data.proof_hash : ''
+            const weightPassed =
+              typeof event.data.weight_passed === 'number' && Number.isFinite(event.data.weight_passed)
+                ? event.data.weight_passed
+                : 0
+            const failed =
+              typeof event.data.failed === 'number' && Number.isFinite(event.data.failed)
+                ? event.data.failed
+                : undefined
+
+            if (proofHash && !pocAwardedJobIds.includes(jobId)) {
+              const xpGain = Math.max(0, Math.floor(weightPassed))
+              pocXpTotal = pocXpTotal + xpGain
+              pocLastXpGain = xpGain
+
+              if (success && failed === 0) {
+                pocStreak = pocStreak + 1
+                if (pocStreak > pocLongestStreak) pocLongestStreak = pocStreak
+                unlock('all_claims_verified')
+                if (pocStreak >= 5) unlock('streak_5')
+              } else {
+                pocStreak = 0
+              }
+
+              const claimPayloads = nextEvents
+                .filter((e) => e.type === 'tool.output' && isRecord(e.payload) && e.payload.tool === 'poc_review')
+                .map((e) => e.payload as Record<string, unknown>)
+              const claims = claimPayloads
+                .map((p) => (isRecord(p.claim) ? p.claim : null))
+                .filter((c): c is Record<string, unknown> => !!c)
+              const evidence = claimPayloads
+                .map((p) => (isRecord(p.evidence) ? p.evidence : null))
+                .filter((ev): ev is Record<string, unknown> => !!ev)
+
+              const buildClaims = claims.filter((c) => {
+                const cmd = typeof c.command === 'string' ? c.command : ''
+                const stmt = typeof c.statement === 'string' ? c.statement : ''
+                return cmd.includes('npm run build') || /build/i.test(stmt)
+              })
+              if (buildClaims.length > 0) {
+                const allBuildOk = buildClaims.every((c) => c.ok === true)
+                if (allBuildOk) unlock('clean_build')
+              }
+
+              const hasWarnings = evidence.some((ev) => {
+                const out = typeof ev.stdout === 'string' ? ev.stdout : ''
+                const err = typeof ev.stderr === 'string' ? ev.stderr : ''
+                return /warning/i.test(out) || /warning/i.test(err)
+              })
+              if (success && failed === 0 && !hasWarnings) unlock('zero_warnings')
+
+              pocAwardedJobIds = [jobId, ...pocAwardedJobIds].slice(0, 200)
+            }
           } else if (event.type === 'done') {
             finishedAt = finishedAt ?? (Number.isFinite(ts) ? ts : Date.now())
             if (
@@ -255,7 +378,14 @@ export const useStore = create<Store>()(
             runUi: {
               ...state.runUi,
               [jobId]: state.runUi[jobId] ?? { collapsed: false }
-            }
+            },
+            pocXpTotal,
+            pocStreak,
+            pocLongestStreak,
+            pocBadges,
+            pocAwardedJobIds,
+            pocLastXpGain,
+            pocBadgeFeed
           }
         }),
       setRunCollapsed: (jobId, collapsed) =>
@@ -285,7 +415,13 @@ export const useStore = create<Store>()(
       partialize: (state) => ({
         selectedEndpoint: state.selectedEndpoint,
         pocReviewTemplates: state.pocReviewTemplates,
-        selectedPocReviewTemplateId: state.selectedPocReviewTemplateId
+        selectedPocReviewTemplateId: state.selectedPocReviewTemplateId,
+        pocReviewHistory: state.pocReviewHistory,
+        pocXpTotal: state.pocXpTotal,
+        pocStreak: state.pocStreak,
+        pocLongestStreak: state.pocLongestStreak,
+        pocBadges: state.pocBadges,
+        pocAwardedJobIds: state.pocAwardedJobIds
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHydrated?.()
