@@ -5,9 +5,25 @@ export interface ServerConfig {
   maxConcurrentRequests: number;
   requestTimeout: number;
   retryAttempts: number;
-  authService?: any;
-  sessionManager?: any;
-  metricsService?: any;
+  authService?: IAuthService;
+  sessionManager?: ISessionManager;
+  metricsService?: IMetricsService;
+}
+
+export interface IAuthService {
+  validateToken(token: string): Promise<AuthToken>;
+}
+
+export interface ISessionManager {
+  getAllSessions(): Promise<SessionData[]>;
+  createSession(): Promise<string>;
+  deleteSession(sessionId: string): Promise<void>;
+  updateSession(sessionId: string, messages: ChatMessage[]): Promise<void>;
+}
+
+export interface IMetricsService {
+  getMetrics(): Promise<{ totalTokens: number; [key: string]: any; }>;
+  recordRequest(data: MetricsData): Promise<void>;
 }
 
 export interface ChatCompletionRequest {
@@ -104,7 +120,7 @@ export interface SessionData {
   messages: ChatMessage[];
   created_at: number;
   updated_at: number;
-  metadata?: Record<string, any>;
+  metadata?: unknown;
 }
 
 export interface MetricsData {
@@ -114,13 +130,14 @@ export interface MetricsData {
   model: string;
   tokens_used: number;
   request_duration: number;
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'cancelled';
   error_type?: string;
 }
 
 export interface QueueItem {
   id: string;
-  request: ChatCompletionRequest;
+  task: () => Promise<any>;
+  request?: ChatCompletionRequest;
   responsePromise: {
     resolve: (value: any) => void;
     reject: (error: any) => void;
@@ -136,4 +153,6 @@ export interface ServerStats {
   queueLength: number;
   averageResponseTime: number;
   errorRate: number;
+  totalTokens?: number;
+  redactions?: number;
 }

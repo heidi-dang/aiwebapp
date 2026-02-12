@@ -21,7 +21,7 @@ function deriveSubdomainUrl(subdomain: string, hostHeader: string | null) {
   if (!hostHeader) return null
   const hostname = stripWww(stripPort(hostHeader))
   if (!hostname || isLocalHostname(hostname)) {
-    if (subdomain === 'copilot') return 'http://localhost:8080'
+    if (subdomain === 'copilot') return 'http://localhost:3030'
     return null
   }
   return `https://${subdomain}.${hostname}`
@@ -35,12 +35,12 @@ async function getCopilotBaseUrl() {
     hostHeader?.includes('localhost') || hostHeader?.includes('127.0.0.1')
 
   const derivedAiApiUrl = isLocal
-    ? 'http://localhost:8080'
+    ? 'http://localhost:3030'
     : deriveSubdomainUrl('copilot', hostHeader)
 
-  const envAiApi = process.env.NEXT_PUBLIC_AI_API_URL?.trim() ?? ''
+  const envCopilotApi = process.env.NEXT_PUBLIC_COPILOT_API_URL?.trim() ?? ''
 
-  return envAiApi || derivedAiApiUrl || null
+  return envCopilotApi || derivedAiApiUrl || null
 }
 
 export async function GET(
@@ -105,22 +105,43 @@ async function proxyRequest(request: NextRequest, path: string[]) {
       )
     }
 
+    const requestContentLength = Number(request.headers.get('content-length') ?? '0')
+    const requestHasBody = Number.isFinite(requestContentLength) && requestContentLength > 0
+
+    const forwardHeaders = new Headers()
+    const excludeHeaders = [
+      'host',
+      'connection',
+      'transfer-encoding',
+      'content-length',
+      'content-encoding',
+      'accept-encoding'
+    ]
+    request.headers.forEach((value, key) => {
+      if (!excludeHeaders.includes(key.toLowerCase())) {
+        forwardHeaders.set(key, value)
+      }
+    })
+
+    forwardHeaders.set('host', copilotHost)
+    if (!requestHasBody) forwardHeaders.delete('content-type')
+
     const response = await fetch(finalUrl, {
       method: request.method,
-      headers: {
-        ...Object.fromEntries(request.headers.entries()),
-        host: copilotHost
-      },
+      headers: forwardHeaders,
       body:
-        request.method !== 'GET' && request.method !== 'HEAD'
+        request.method !== 'GET' && request.method !== 'HEAD' && requestHasBody
           ? await request.arrayBuffer()
-          : undefined
+          : undefined,
+      cache: 'no-store'
     })
 
     const responseHeaders = new Headers()
     response.headers.forEach((value, key) => {
       if (
         ![
+          'content-encoding',
+          'content-length',
           'transfer-encoding',
           'connection',
           'keep-alive',
@@ -133,6 +154,13 @@ async function proxyRequest(request: NextRequest, path: string[]) {
         responseHeaders.set(key, value)
       }
     })
+
+    if (response.headers.get('content-type')?.includes('text/event-stream')) {
+      responseHeaders.set('Content-Type', 'text/event-stream')
+      responseHeaders.set('Cache-Control', 'no-cache, no-transform')
+      responseHeaders.set('X-Accel-Buffering', 'no')
+      responseHeaders.set('Connection', 'keep-alive')
+    }
 
     return new NextResponse(response.body, {
       status: response.status,

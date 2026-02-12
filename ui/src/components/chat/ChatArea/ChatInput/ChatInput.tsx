@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { TextArea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { useStore } from '@/store'
-import { cancelJob, createJob, startJob, streamJobEvents } from '@/lib/runner/client'
+import { cancelJob, createJob, startJob, streamJobEvents, createAgentRun } from '@/lib/runner/client'
 import { useQueryState } from 'nuqs'
 import Icon from '@/components/ui/icon'
 import Tooltip from '@/components/ui/tooltip'
@@ -59,6 +59,7 @@ const ChatInput = () => {
   } = useStore()
   const [selectedAgent] = useQueryState('agent')
   const [teamId] = useQueryState('team')
+  const [sessionId, setSessionId] = useQueryState('session')
   const [inputMessage, setInputMessage] = useState('')
   const [copilotStatus, setCopilotStatus] = useState<'unknown' | 'up' | 'down'>(
     'unknown'
@@ -376,15 +377,33 @@ const ChatInput = () => {
         }
       ])
 
-      const { jobId } = await createJob({
-        message: currentMessage,
-        provider: 'agent',
-        model: selectedModel,
-        system_prompt:
-          systemPromptMode === 'custom' ? systemPromptCustom : systemPromptMode,
-        runtime_mode: runtimeMode,
-        cloud_fallback: cloudFallbackEnabled
-      })
+      let jobId: string
+      let useServerProxy = false
+
+      if (selectedAgent) {
+        // Use Server API for Agent runs
+        const res = await createAgentRun(selectedAgent, currentMessage, sessionId || undefined)
+        jobId = res.jobId
+        
+        // Update session ID if new
+        if (res.sessionId && res.sessionId !== sessionId) {
+           setSessionId(res.sessionId)
+        }
+        
+        useServerProxy = true
+      } else {
+        const { jobId: jid } = await createJob({
+          message: currentMessage,
+          provider: 'agent',
+          model: selectedModel,
+          system_prompt:
+            systemPromptMode === 'custom' ? systemPromptCustom : systemPromptMode,
+          runtime_mode: runtimeMode,
+          cloud_fallback: cloudFallbackEnabled
+        })
+        jobId = jid
+        await startJob(jobId)
+      }
 
       initRun(jobId)
       setMessages((prev) => [
@@ -412,10 +431,9 @@ const ChatInput = () => {
             `Runner stream error: ${err instanceof Error ? err.message : String(err)}`
           )
         }
-      })
+      }, useServerProxy)
 
       setRunUnsubscribe(jobId, unsubscribe)
-      await startJob(jobId)
     } catch (error) {
       toast.error(
         `Runner error: ${error instanceof Error ? error.message : String(error)}`
@@ -431,7 +449,10 @@ const ChatInput = () => {
     runtimeMode,
     cloudFallbackEnabled,
     systemPromptCustom,
-    systemPromptMode
+    systemPromptMode,
+    selectedAgent,
+    sessionId,
+    setSessionId
   ])
 
   const handleStartRunnerJob = useCallback(async () => {
@@ -451,18 +472,36 @@ const ChatInput = () => {
         }
       ])
 
-      const system_prompt =
-        systemPromptMode === 'custom' ? systemPromptCustom : systemPromptMode
-      const { jobId } = await createJob({
-        message: currentMessage,
-        provider,
-        model: selectedModel,
-        system_prompt,
-        runtime_mode: runtimeMode,
-        cloud_fallback: cloudFallbackEnabled
-      })
+      let jobId: string
+      let useServerProxy = false
+
+      if (selectedAgent) {
+         // Use Server API for Agent runs
+         const res = await createAgentRun(selectedAgent, currentMessage, sessionId || undefined)
+         jobId = res.jobId
+         
+         if (res.sessionId && res.sessionId !== sessionId) {
+            setSessionId(res.sessionId)
+         }
+         
+         useServerProxy = true
+      } else {
+        const system_prompt =
+          systemPromptMode === 'custom' ? systemPromptCustom : systemPromptMode
+        const { jobId: jid } = await createJob({
+          message: currentMessage,
+          provider,
+          model: selectedModel,
+          system_prompt,
+          runtime_mode: runtimeMode,
+          cloud_fallback: cloudFallbackEnabled
+        })
+        jobId = jid
+        await startJob(jobId)
+      }
 
       initRun(jobId)
+
       setMessages((prev) => [
         ...prev,
         {
@@ -488,10 +527,9 @@ const ChatInput = () => {
             `Runner stream error: ${err instanceof Error ? err.message : String(err)}`
           )
         }
-      })
+      }, useServerProxy)
 
       setRunUnsubscribe(jobId, unsubscribe)
-      await startJob(jobId)
     } catch (error) {
       toast.error(
         `Runner error: ${error instanceof Error ? error.message : String(error)}`
@@ -508,7 +546,10 @@ const ChatInput = () => {
     runtimeMode,
     cloudFallbackEnabled,
     systemPromptCustom,
-    systemPromptMode
+    systemPromptMode,
+    selectedAgent,
+    sessionId,
+    setSessionId
   ])
 
   const handleSubmit = async () => {
@@ -576,7 +617,7 @@ const ChatInput = () => {
   }
 
   return (
-    <div className="relative mx-auto mb-1 flex w-full max-w-2xl items-end justify-center gap-x-2 font-geist">
+    <div className="relative mx-auto mb-1 flex w-full max-w-2xl flex-col items-center justify-center gap-y-2 font-geist">
       <Dialog open={isAgentDialogOpen} onOpenChange={setIsAgentDialogOpen}>
         <DialogContent className="max-w-[520px]">
           <DialogHeader>
@@ -598,11 +639,43 @@ const ChatInput = () => {
       <Dialog open={isCopilotDialogOpen} onOpenChange={setIsCopilotDialogOpen}>
         <DialogContent className="max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>Copilot</DialogTitle>
-            <DialogDescription>Health and connection status.</DialogDescription>
+            <DialogTitle>Heidi Gateway</DialogTitle>
+            <DialogDescription>Infrastructure and connection routing.</DialogDescription>
           </DialogHeader>
 
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-4">
+            {/* Connection Path Visualization */}
+            <div className="flex items-center justify-between px-2 py-4">
+               {/* UI */}
+               <div className="flex flex-col items-center gap-1 group">
+                  <div className="h-2 w-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
+                  <span className="text-[10px] uppercase font-dmmono opacity-40 group-hover:opacity-100 transition-opacity">UI</span>
+               </div>
+               
+               <div className="h-px flex-1 bg-gradient-to-r from-green-500/50 to-green-500/20 mx-2" />
+               
+               {/* Server */}
+               <div className="flex flex-col items-center gap-1 group">
+                  <div className={`h-2 w-2 rounded-full ${copilotStatus === 'up' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-red-500/50'}`} />
+                  <span className="text-[10px] uppercase font-dmmono opacity-40 group-hover:opacity-100 transition-opacity">Server</span>
+               </div>
+
+               <div className={`h-px flex-1 mx-2 ${copilotStatus === 'up' ? 'bg-gradient-to-r from-green-500/20 to-green-500/20' : 'bg-white/5'}`} />
+
+               {/* Runner */}
+               <div className="flex flex-col items-center gap-1 group">
+                  <div className={`h-2 w-2 rounded-full ${copilotStatus === 'up' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-red-500/50'}`} />
+                  <span className="text-[10px] uppercase font-dmmono opacity-40 group-hover:opacity-100 transition-opacity">Runner</span>
+               </div>
+
+               <div className={`h-px flex-1 mx-2 ${copilotStatus === 'up' ? 'bg-gradient-to-r from-green-500/20 to-green-500/20' : 'bg-white/5'}`} />
+
+               {/* Gateway */}
+               <div className="flex flex-col items-center gap-1 group">
+                  <div className={`h-2 w-2 rounded-full ${copilotStatus === 'up' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-red-500'}`} />
+                  <span className="text-[10px] uppercase font-dmmono opacity-40 group-hover:opacity-100 transition-opacity">Gateway</span>
+               </div>
+            </div>
             <div className="flex items-center justify-between rounded-xl border border-primary/15 bg-accent p-3">
               <div className="flex items-center gap-3">
                 <div
@@ -894,8 +967,30 @@ const ChatInput = () => {
         </DialogContent>
       </Dialog>
 
-      <div className="relative w-full">
-        <div className="pointer-events-auto absolute bottom-2 left-2 z-10 flex items-center gap-x-1">
+      <div className="relative w-full rounded-2xl border border-primary/20 bg-accent/50 p-2 shadow-sm transition-all focus-within:border-primary/40 focus-within:shadow-md">
+        <TokenBudgetBar />
+        <TextArea
+          placeholder={'Ask anything'}
+          value={inputMessage}
+          onChange={(e) => setInputMessage(e.target.value)}
+          onKeyDown={(e) => {
+            if (
+              e.key === 'Enter' &&
+              !e.nativeEvent.isComposing &&
+              !e.shiftKey &&
+              !isStreaming
+            ) {
+              e.preventDefault()
+              handleSubmit()
+            }
+          }}
+          className="w-full border-none bg-transparent px-4 pb-12 text-[15px] text-primary focus:ring-0 focus:outline-none placeholder:text-muted/50 transition-all"
+          disabled={!(selectedAgent || teamId)}
+          ref={chatInputRef}
+          rows={3}
+        />
+
+        <div className="pointer-events-auto absolute bottom-3 left-3 z-10 flex items-center gap-x-1">
           {mode === 'agent' && (
             <>
               {runningJobIds.length > 0 && (
@@ -922,34 +1017,6 @@ const ChatInput = () => {
                   </Button>
                 </Tooltip>
               )}
-              <Tooltip content="Test Agent (Run Coder)" side="top" delayDuration={300}>
-                <Button
-                  type="button"
-                  aria-label="Test Agent"
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-lg text-purple-400"
-                  onClick={handleTestAgent}
-                  disabled={!inputMessage.trim() || isStreaming}
-                >
-                  <Icon type="play" size="xs" />
-                </Button>
-              </Tooltip>
-
-              <Tooltip content="Run as job" side="top" delayDuration={300}>
-                <Button
-                  type="button"
-                  aria-label="Run message as job"
-                  title="Run message as job"
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-lg"
-                  onClick={handleStartRunnerJob}
-                  disabled={!inputMessage.trim() || isStreaming}
-                >
-                  <Icon type="play" size="xs" />
-                </Button>
-              </Tooltip>
 
               <Button
                 type="button"
@@ -983,8 +1050,8 @@ const ChatInput = () => {
 
           <Button
             type="button"
-            aria-label="Copilot status and controls"
-            title="Copilot status and controls"
+            aria-label="Heidi Gateway status and controls"
+            title="Heidi Gateway status and controls"
             variant="ghost"
             size="icon"
             className="relative h-8 w-8 rounded-lg"
@@ -1015,39 +1082,20 @@ const ChatInput = () => {
           )}
         </div>
 
-        <TokenBudgetBar />
-        <TextArea
-          placeholder={'Ask anything'}
-          value={inputMessage}
-          onChange={(e) => setInputMessage(e.target.value)}
-          onKeyDown={(e) => {
-            if (
-              e.key === 'Enter' &&
-              !e.nativeEvent.isComposing &&
-              !e.shiftKey &&
-              !isStreaming
-            ) {
-              e.preventDefault()
-              handleSubmit()
+        <div className="absolute bottom-3 right-3 z-10">
+          <Button
+            data-testid="send-inside-composer"
+            onClick={handleSubmit}
+            disabled={
+              !(selectedAgent || teamId) || !inputMessage.trim() || isStreaming
             }
-          }}
-          className="w-full border border-accent bg-primaryAccent px-4 pl-12 text-sm text-primary focus:border-accent"
-          disabled={!(selectedAgent || teamId)}
-          ref={chatInputRef}
-          rows={4}
-        />
+            size="icon"
+            className="h-10 w-10 rounded-xl transition-all duration-300 bg-primary text-primaryAccent hover:scale-105 active:scale-95 shadow-[0_0_15px_rgba(250,250,250,0.1)] hover:shadow-[0_0_20px_rgba(250,250,250,0.2)] disabled:opacity-30 disabled:hover:scale-100"
+          >
+            <Icon type="send" color="primaryAccent" size="xs" />
+          </Button>
+        </div>
       </div>
-      <Button
-        data-testid="send-inside-composer"
-        onClick={handleSubmit}
-        disabled={
-          !(selectedAgent || teamId) || !inputMessage.trim() || isStreaming
-        }
-        size="icon"
-        className="rounded-xl bg-primary p-5 text-primaryAccent"
-      >
-        <Icon type="send" color="primaryAccent" />
-      </Button>
     </div>
   )
 }

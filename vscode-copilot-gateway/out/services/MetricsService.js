@@ -43,7 +43,7 @@ class MetricsService {
     constructor() {
         this.metrics = [];
         this.maxMetrics = 1000;
-        const config = vscode.workspace.getConfiguration('aiwebapp-copilot-gateway.usage');
+        const config = vscode.workspace.getConfiguration('heidi-gateway-proxy.usage');
         this.metricsEndpoint = config.get('metricsEndpoint', 'http://localhost:4001/api/metrics');
     }
     async recordRequest(data) {
@@ -110,7 +110,7 @@ class MetricsService {
         return await this.getMetrics({ start: startTime, end: endTime });
     }
     isMetricsEnabled() {
-        const config = vscode.workspace.getConfiguration('aiwebapp-copilot-gateway.usage');
+        const config = vscode.workspace.getConfiguration('heidi-gateway-proxy.usage');
         return config.get('trackingEnabled', true);
     }
     dispose() {

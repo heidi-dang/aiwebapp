@@ -24,8 +24,8 @@ const MessageArea = () => {
         <div
           className={
             isMobile
-              ? 'mx-auto w-full max-w-2xl space-y-6 px-3 pb-3'
-              : 'mx-auto w-full max-w-2xl space-y-9 px-4 pb-4'
+              ? 'mx-auto w-full max-w-2xl space-y-8 px-3 pb-6 pt-4'
+              : 'mx-auto w-full max-w-2xl space-y-10 px-4 pb-8 pt-6'
           }
         >
           <Messages messages={messages} />

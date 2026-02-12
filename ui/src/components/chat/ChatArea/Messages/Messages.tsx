@@ -10,6 +10,9 @@ import React, { type FC } from 'react'
 
 import Icon from '@/components/ui/icon'
 import ChatBlankState from './ChatBlankState'
+import { motion, AnimatePresence } from 'framer-motion'
+import { useStore } from '@/store'
+
 
 interface MessageListProps {
   messages: ChatMessage[]
@@ -55,9 +58,13 @@ const References: FC<ReferenceProps> = ({ references }) => (
   </div>
 )
 
-const AgentMessageWrapper = ({ message }: MessageWrapperProps) => {
+const AgentMessageWrapper = ({ message, isLastMessage }: MessageWrapperProps & { isLastMessage?: boolean }) => {
+  const { isStreaming } = useStore()
+  const isThinking = isStreaming && isLastMessage
+
   return (
-    <div className="flex flex-col gap-y-9">
+    <div className={`flex flex-col gap-y-9 transition-all duration-500 ${isThinking ? 'opacity-90' : 'opacity-100'}`}>
+
       {Array.isArray(message.extra_data?.reasoning_steps) &&
         message.extra_data.reasoning_steps.length > 0 && (
           <div className="flex items-start gap-4">
@@ -111,8 +118,10 @@ const AgentMessageWrapper = ({ message }: MessageWrapperProps) => {
                 toolCall.id ||
                 `${toolCall.tool_name || toolCall.function?.name || 'tool'}-${index}`
               const name = toolCall.tool_name || toolCall.function?.name || 'tool'
-              return <ToolComponent key={key} name={name} />
+              const isExecuting = isThinking && index === (message.tool_calls?.length ?? 0) - 1
+              return <ToolComponent key={key} name={name} status={isExecuting ? 'executing' : 'done'} />
             })}
+
           </div>
         </div>
       )}
@@ -140,9 +149,13 @@ const Reasonings: FC<ReasoningProps> = ({ reasoning }) => (
   </div>
 )
 
-const ToolComponent = memo(({ name }: { name: string }) => (
-  <div className="cursor-default rounded-full bg-accent px-2 py-1.5 text-xs">
-    <p className="font-dmmono uppercase text-primary/80">{name}</p>
+const ToolComponent = memo(({ name, status = 'done' }: { name: string; status?: 'executing' | 'done' }) => (
+  <div className={`cursor-default rounded-full px-2 py-1.5 text-xs transition-all duration-300 ${
+    status === 'executing' 
+      ? 'bg-purple-500/20 text-purple-300 animate-pulse border border-purple-500/30 shadow-[0_0_10px_rgba(168,85,247,0.2)]' 
+      : 'bg-accent text-primary/80'
+  }`}>
+    <p className="font-dmmono uppercase">{name}</p>
   </div>
 ))
 ToolComponent.displayName = 'ToolComponent'
@@ -152,23 +165,32 @@ const Messages = memo(({ messages }: MessageListProps) => {
   }
 
   return (
-    <>
-      {messages.map((message, index) => {
-        const key = `${message.role}-${message.created_at}-${index}`
-        const isLastMessage = index === messages.length - 1
+    <div className="flex flex-col gap-6">
+      <AnimatePresence initial={false}>
+        {messages.map((message, index) => {
+          const key = `${message.role}-${message.created_at}-${index}`
+          const isLastMessage = index === messages.length - 1
 
-        if (message.role === 'agent') {
           return (
-            <AgentMessageWrapper
+            <motion.div
               key={key}
-              message={message}
-              isLastMessage={isLastMessage}
-            />
+              initial={{ opacity: 0, y: 10, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
+            >
+              {message.role === 'agent' ? (
+                <AgentMessageWrapper
+                  message={message}
+                  isLastMessage={isLastMessage}
+                />
+              ) : (
+                <UserMessage message={message} />
+              )}
+            </motion.div>
           )
-        }
-        return <UserMessage key={key} message={message} />
-      })}
-    </>
+        })}
+      </AnimatePresence>
+    </div>
   )
 })
 

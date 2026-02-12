@@ -9,8 +9,8 @@ const ChatArea = () => {
     <main
       className={
         isMobile
-          ? 'relative flex flex-grow flex-col bg-background'
-          : 'relative m-1.5 flex flex-grow flex-col rounded-xl bg-background'
+          ? 'relative flex flex-grow flex-col bg-background/40 backdrop-blur-sm'
+          : 'relative m-2 flex flex-grow flex-col rounded-2xl glass-dark shadow-2xl border-white/5'
       }
     >
       <MessageArea />

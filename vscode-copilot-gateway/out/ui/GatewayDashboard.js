@@ -39,14 +39,21 @@ class GatewayDashboard {
     constructor(context) {
         this.context = context;
     }
+    getPanel() {
+        return this.panel;
+    }
+    setServer(server) {
+        this.server = server;
+    }
     show() {
         if (this.panel) {
             this.panel.reveal(vscode.ViewColumn.One);
             return;
         }
-        this.panel = vscode.window.createWebviewPanel('aiwebapp-copilot-gateway-dashboard', 'AIWebApp Copilot Gateway Dashboard', vscode.ViewColumn.One, {
+        this.panel = vscode.window.createWebviewPanel('heidi-gateway-dashboard', 'heidi-gateway-dashboard', vscode.ViewColumn.One, {
             enableScripts: true,
-            localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')]
+            localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')],
+            retainContextWhenHidden: true
         });
         this.panel.webview.html = this.getWebviewContent();
         this.panel.onDidDispose(() => {
@@ -60,13 +67,16 @@ class GatewayDashboard {
         this.startDashboardUpdates();
     }
     getWebviewContent() {
+        const activeAgent = this.context.globalState.get('activeAgent') || 'copilot';
+        const config = vscode.workspace.getConfiguration('heidi-gateway-proxy');
+        const proxyClient = String(config.get('proxy.clientProfile', 'copilot'));
         return `
       <!DOCTYPE html>
       <html lang="en">
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>AIWebApp Copilot Gateway Dashboard</title>
+        <title>heidi-gateway-dashboard</title>
         <style>
           body {
             font-family: var(--vscode-font-family);
@@ -105,21 +115,26 @@ class GatewayDashboard {
           .controls {
             display: flex;
             gap: 10px;
+            align-items: center;
           }
-          button {
+          button, select {
             background-color: var(--vscode-button-background);
             color: var(--vscode-button-foreground);
             border: 1px solid var(--vscode-button-border);
             padding: 8px 16px;
             border-radius: 3px;
             cursor: pointer;
+            font-family: inherit;
           }
-          button:hover {
+          button:hover, select:hover {
             background-color: var(--vscode-button-hoverBackground);
+          }
+          select {
+            padding-right: 32px;
           }
           .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
             margin-bottom: 30px;
           }
@@ -137,7 +152,7 @@ class GatewayDashboard {
             letter-spacing: 0.5px;
           }
           .stat-value {
-            font-size: 32px;
+            font-size: 28px;
             font-weight: bold;
             color: var(--vscode-editor-foreground);
           }
@@ -154,41 +169,106 @@ class GatewayDashboard {
             padding: 20px;
             height: 300px;
           }
-          .recent-requests {
+          .section {
             background-color: var(--vscode-editorWidget-background);
             border: 1px solid var(--vscode-panel-border);
             border-radius: 6px;
             padding: 20px;
+            margin-bottom: 20px;
           }
-          .request-item {
+          .session-list {
+            max-height: 300px;
+            overflow-y: auto;
+          }
+          .session-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 10px 0;
+            padding: 10px;
             border-bottom: 1px solid var(--vscode-list-inactiveSelectionBackground);
           }
-          .request-item:last-child {
+          .session-item:last-child {
             border-bottom: none;
           }
-          .request-method {
-            font-weight: bold;
-            color: var(--vscode-charts-blue);
+          .session-id {
+            font-family: monospace;
+            color: var(--vscode-textPreformat-foreground);
           }
-          .request-time {
+          .transcript-container {
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 6px;
+            background-color: var(--vscode-editor-background);
+            height: 500px;
+            overflow-y: auto;
+            padding: 20px;
+            margin-top: 20px;
+            display: none; /* Hidden by default */
+          }
+          .transcript-container.visible {
+            display: block;
+          }
+          .message {
+            margin-bottom: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+          }
+          .message.user {
+            align-items: flex-end;
+          }
+          .message.assistant {
+            align-items: flex-start;
+          }
+          .bubble {
+            padding: 8px 12px;
+            border-radius: 6px;
+            max-width: 80%;
+            word-wrap: break-word;
+          }
+          .message.user .bubble {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+          }
+          .message.assistant .bubble {
+            background-color: var(--vscode-editor-inactiveSelectionBackground);
+            color: var(--vscode-editor-foreground);
+            border: 1px solid var(--vscode-widget-border);
+          }
+          .role-label {
+            font-size: 11px;
             color: var(--vscode-descriptionForeground);
-            font-size: 12px;
+            margin-bottom: 2px;
           }
         </style>
       </head>
       <body>
         <div class="container">
           <div class="header">
-            <h1>AIWebApp Copilot Gateway Dashboard</h1>
-            <div class="status">
-              <div class="status-indicator" id="statusIndicator"></div>
-              <span id="statusText">Server Stopped</span>
+            <div>
+              <h1>heidi-gateway-proxy</h1>
+              <div class="status">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <span id="statusText">Server Stopped</span>
+              </div>
             </div>
             <div class="controls">
+              <select id="proxyClientSelector" title="Controls context injection behavior for different clients">
+                <option value="copilot" ${proxyClient === 'copilot' ? 'selected' : ''}>Proxy To: Copilot (Default)</option>
+                <option value="codex" ${proxyClient === 'codex' ? 'selected' : ''}>Proxy To: Codex</option>
+                <option value="gemini" ${proxyClient === 'gemini' ? 'selected' : ''}>Proxy To: Gemini</option>
+                <option value="trae" ${proxyClient === 'trae' ? 'selected' : ''}>Proxy To: Trae</option>
+                <option value="windsurf" ${proxyClient === 'windsurf' ? 'selected' : ''}>Proxy To: Windsurf</option>
+                <option value="cursor" ${proxyClient === 'cursor' ? 'selected' : ''}>Proxy To: Cursor</option>
+                <option value="opencode" ${proxyClient === 'opencode' ? 'selected' : ''}>Proxy To: OpenCode</option>
+                <option value="continue" ${proxyClient === 'continue' ? 'selected' : ''}>Proxy To: Continue.dev</option>
+                <option value="roo-code" ${proxyClient === 'roo-code' ? 'selected' : ''}>Proxy To: Roo Code (Cline)</option>
+                <option value="auto" ${proxyClient === 'auto' ? 'selected' : ''}>Proxy To: Auto (Detect)</option>
+              </select>
+              <select id="agentSelector">
+                <option value="copilot" ${activeAgent === 'copilot' ? 'selected' : ''}>GitHub Copilot (Default)</option>
+                <option value="ollama" ${activeAgent === 'ollama' ? 'selected' : ''}>Ollama (Local)</option>
+                <option value="runner" ${activeAgent === 'runner' ? 'selected' : ''}>Heidi Runner (Local)</option>
+              </select>
               <button id="startBtn">Start Server</button>
               <button id="stopBtn">Stop Server</button>
               <button id="settingsBtn">Settings</button>
@@ -201,73 +281,88 @@ class GatewayDashboard {
               <div class="stat-value" id="totalRequests">0</div>
             </div>
             <div class="stat-card">
-              <div class="stat-title">Active Requests</div>
-              <div class="stat-value" id="activeRequests">0</div>
+              <div class="stat-title">Token Usage</div>
+              <div class="stat-value" id="totalTokens">0</div>
             </div>
             <div class="stat-card">
               <div class="stat-title">Queue Length</div>
               <div class="stat-value" id="queueLength">0</div>
             </div>
             <div class="stat-card">
-              <div class="stat-title">Avg Response Time</div>
+              <div class="stat-title">Avg Latency</div>
               <div class="stat-value" id="avgResponseTime">0ms</div>
             </div>
           </div>
 
-          <div class="charts">
-            <div class="chart">
-              <h3>Requests Over Time</h3>
-              <canvas id="requestsChart" width="400" height="250"></canvas>
+          <div class="section">
+            <div class="header" style="justify-content: flex-start; gap: 10px; margin-bottom: 10px; border: none; padding: 0;">
+              <h3>Recent Sessions</h3>
+              <button id="refreshSessionsBtn" style="padding: 4px 8px; font-size: 12px;">Refresh</button>
             </div>
-            <div class="chart">
-              <h3>Error Rate</h3>
-              <canvas id="errorChart" width="400" height="250"></canvas>
+            <div id="sessionList" class="session-list">
+              <p>Loading sessions...</p>
             </div>
+          </div>
+          
+          <div id="transcriptView" class="transcript-container">
+            <div class="header" style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--vscode-widget-border);">
+              <h3 id="transcriptTitle" style="margin: 0;">Session Transcript</h3>
+              <button onclick="closeTranscript()" style="padding: 4px 8px; font-size: 12px;">Close</button>
+            </div>
+            <div id="transcriptContent"></div>
           </div>
 
-          <div class="recent-requests">
-            <h3>Recent Requests</h3>
-            <div id="recentRequests">
-              <p>No recent requests</p>
-            </div>
-          </div>
+          <!-- Charts placeholder (requires Chart.js or similar, simplistic for now) -->
         </div>
 
         <script>
           const vscode = acquireVsCodeApi();
 
-          // DOM elements
+          // Elements
           const statusIndicator = document.getElementById('statusIndicator');
           const statusText = document.getElementById('statusText');
           const startBtn = document.getElementById('startBtn');
           const stopBtn = document.getElementById('stopBtn');
           const settingsBtn = document.getElementById('settingsBtn');
+          const agentSelector = document.getElementById('agentSelector');
+          const proxyClientSelector = document.getElementById('proxyClientSelector');
+          
+          // Stats
           const totalRequests = document.getElementById('totalRequests');
-          const activeRequests = document.getElementById('activeRequests');
+          const totalTokens = document.getElementById('totalTokens');
           const queueLength = document.getElementById('queueLength');
           const avgResponseTime = document.getElementById('avgResponseTime');
-          const recentRequests = document.getElementById('recentRequests');
+          const sessionList = document.getElementById('sessionList');
+          const refreshSessionsBtn = document.getElementById('refreshSessionsBtn');
 
-          // Event listeners
-          startBtn.addEventListener('click', () => {
-            vscode.postMessage({ command: 'startServer' });
+          // Bindings
+          startBtn.addEventListener('click', () => vscode.postMessage({ command: 'startServer' }));
+          stopBtn.addEventListener('click', () => vscode.postMessage({ command: 'stopServer' }));
+          settingsBtn.addEventListener('click', () => vscode.postMessage({ command: 'openSettings' }));
+          
+          agentSelector.addEventListener('change', (e) => {
+            vscode.postMessage({ command: 'switchAgent', agent: e.target.value });
           });
 
-          stopBtn.addEventListener('click', () => {
-            vscode.postMessage({ command: 'stopServer' });
+          proxyClientSelector.addEventListener('change', (e) => {
+            vscode.postMessage({ command: 'setProxyClient', client: e.target.value });
+          });
+          
+          refreshSessionsBtn.addEventListener('click', () => {
+             vscode.postMessage({ command: 'fetchSessions' });
           });
 
-          settingsBtn.addEventListener('click', () => {
-            vscode.postMessage({ command: 'openSettings' });
-          });
+          // Load sessions initially
+          setTimeout(() => vscode.postMessage({ command: 'fetchSessions' }), 1000);
 
-          // Handle messages from extension
           window.addEventListener('message', event => {
             const message = event.data;
-
             switch (message.type) {
               case 'updateStats':
                 updateStats(message.stats);
+                break;
+              case 'updateSessions':
+                updateSessions(message.sessions);
                 break;
               case 'serverStarted':
                 updateServerStatus(true);
@@ -275,14 +370,69 @@ class GatewayDashboard {
               case 'serverStopped':
                 updateServerStatus(false);
                 break;
+              case 'showSessionTranscript':
+                renderTranscript(message.session);
+                break;
             }
           });
 
           function updateStats(stats) {
             totalRequests.textContent = stats.totalRequests || 0;
-            activeRequests.textContent = stats.activeRequests || 0;
+            totalTokens.textContent = stats.totalTokens ? stats.totalTokens.toLocaleString() : 0;
             queueLength.textContent = stats.queueLength || 0;
             avgResponseTime.textContent = Math.round(stats.averageResponseTime || 0) + 'ms';
+          }
+
+          function updateSessions(sessions) {
+            if (!sessions || sessions.length === 0) {
+              sessionList.innerHTML = '<p>No active sessions</p>';
+              return;
+            }
+            
+            sessionList.innerHTML = sessions.slice(0, 10).map(s => \`
+              <div class="session-item" onclick="loadSession('\${s.id}')" style="cursor: pointer;">
+                <div>
+                  <div class="session-id">\${s.session_name || s.id}</div>
+                  <div style="font-size: 11px; color: var(--vscode-descriptionForeground);">\${new Date(s.updated_at).toLocaleString()}</div>
+                </div>
+                <div style="font-size: 12px;">\${s.messages ? s.messages.length : 0} msgs</div>
+              </div>
+            \`).join('');
+          }
+          
+          window.loadSession = (sessionId) => {
+             vscode.postMessage({ command: 'loadSession', sessionId });
+          };
+          
+          window.closeTranscript = () => {
+             document.getElementById('transcriptView').classList.remove('visible');
+          };
+
+          function renderTranscript(session) {
+            const container = document.getElementById('transcriptView');
+            const content = document.getElementById('transcriptContent');
+            const title = document.getElementById('transcriptTitle');
+            
+            title.textContent = \`Session: \${session.id}\`;
+            container.classList.add('visible');
+            
+            if (!session.messages || session.messages.length === 0) {
+              content.innerHTML = '<p>No messages in this session.</p>';
+              return;
+            }
+
+            content.innerHTML = session.messages.map(msg => \`
+              <div class="message \${msg.role}">
+                <div class="role-label">\${msg.role}</div>
+                <div class="bubble">\${escapeHtml(msg.content)}</div>
+              </div>
+            \`).join('');
+          }
+
+          function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML.replace(/\\n/g, '<br/>');
           }
 
           function updateServerStatus(running) {
@@ -298,8 +448,8 @@ class GatewayDashboard {
               stopBtn.disabled = true;
             }
           }
-
-          // Initialize
+          
+          // Initial state
           updateServerStatus(false);
         </script>
       </body>
@@ -309,34 +459,91 @@ class GatewayDashboard {
     async handleWebviewMessage(message) {
         switch (message.command) {
             case 'startServer':
-                vscode.commands.executeCommand('aiwebapp-copilot-gateway.startServer');
+                vscode.commands.executeCommand('heidi-gateway-dashboard.startServer');
                 break;
             case 'stopServer':
-                vscode.commands.executeCommand('aiwebapp-copilot-gateway.stopServer');
+                vscode.commands.executeCommand('heidi-gateway-dashboard.stopServer');
                 break;
             case 'openSettings':
-                vscode.commands.executeCommand('aiwebapp-copilot-gateway.openSettings');
+                vscode.commands.executeCommand('heidi-gateway-dashboard.openSettings');
+                break;
+            case 'switchAgent':
+                await this.context.globalState.update('activeAgent', message.agent);
+                vscode.window.showInformationMessage(`Active agent switched to ${message.agent}`);
+                // Optionally update VS Code config 'heidi-gateway-proxy.model.default' or similar
+                // if the server reads it dynamically.
+                break;
+            case 'setProxyClient': {
+                const value = String(message.client || 'copilot');
+                const config = vscode.workspace.getConfiguration('heidi-gateway-proxy');
+                await config.update('proxy.clientProfile', value, vscode.ConfigurationTarget.Global);
+                vscode.window.showInformationMessage(`Proxy client profile set to ${value}`);
+                break;
+            }
+            case 'fetchSessions':
+                if (this.server && this.server.getSessionManager()) {
+                    const sessions = await this.server.getSessionManager().getAllSessions();
+                    // Sort by updated_at desc
+                    sessions.sort((a, b) => b.updated_at - a.updated_at);
+                    this.panel?.webview.postMessage({ type: 'updateSessions', sessions });
+                }
+                break;
+            case 'loadSession':
+                if (this.server && this.server.getSessionManager()) {
+                    const session = await this.server.getSessionManager().getSession(message.sessionId);
+                    if (session) {
+                        this.panel?.webview.postMessage({ type: 'showSessionTranscript', session });
+                    }
+                    else {
+                        vscode.window.showErrorMessage(`Session ${message.sessionId} not found.`);
+                    }
+                }
                 break;
         }
     }
     startDashboardUpdates() {
-        // Update dashboard every 2 seconds
-        const updateInterval = setInterval(() => {
-            if (this.panel && this.server) {
-                const stats = this.server.getStats();
-                this.panel.webview.postMessage({
-                    type: 'updateStats',
-                    stats
-                });
+        const updateInterval = setInterval(async () => {
+            if (this.panel && this.panel.visible) {
+                await this.updateServerHealth();
+                if (this.server && this.server.isRunning()) {
+                    const stats = await this.server.getStats();
+                    this.panel.webview.postMessage({
+                        type: 'updateStats',
+                        stats
+                    });
+                    // Also fetch sessions occasionally? Or adds overhead.
+                    // Let's do it if sessionManager is available.
+                    // We need a way to get sessions from server.
+                    // Assuming server has public accessor (I didn't add it yet, but API has handleGetSessions)
+                    // I'll skip fetching sessions for now to avoid breaking build if method missing.
+                    // But I can use the API endpoint!
+                    // Actually, I can add a method to server to get session manager.
+                    // Or just leave it as is for now.
+                }
             }
         }, 2000);
-        // Clean up interval when panel is disposed
         this.panel?.onDidDispose(() => {
             clearInterval(updateInterval);
         });
     }
-    setServer(server) {
-        this.server = server;
+    async updateServerHealth() {
+        // ... logic matches previous ...
+        if (!this.panel || !this.server) {
+            this.panel?.webview.postMessage({ type: 'serverStopped' });
+            return;
+        }
+        // Quick check without full HTTP request if possible, but HTTP is safer for 'health'
+        try {
+            if (this.server.isRunning()) {
+                this.panel.webview.postMessage({ type: 'serverStarted' });
+            }
+            else {
+                this.panel.webview.postMessage({ type: 'serverStopped' });
+            }
+        }
+        catch {
+            this.panel.webview.postMessage({ type: 'serverStopped' });
+        }
     }
     dispose() {
         if (this.panel) {

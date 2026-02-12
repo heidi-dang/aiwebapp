@@ -1,4 +1,4 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
 import dotenvExpand from 'dotenv-expand'
 dotenvExpand.expand(dotenv.config({ path: '../.env' }))
 
@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname)
+console.log(`Landing rootDir: ${rootDir}`)
 const port = Number(process.env.LANDING_PORT ?? 6868)
 
 const contentTypes = new Map([
@@ -43,6 +44,7 @@ const server = http.createServer(async (req, res) => {
   const requested = req.url ?? '/'
   const requestedPath = requested === '/' ? '/index.html' : requested
   const fullPath = safeJoin(rootDir, requestedPath)
+  console.log(`[${method}] ${requested} -> ${fullPath}`)
   if (!fullPath) {
     res.statusCode = 400
     res.setHeader('Content-Type', 'text/plain; charset=utf-8')
@@ -55,6 +57,7 @@ const server = http.createServer(async (req, res) => {
     if (!stat.isFile()) throw new Error('not a file')
     const ext = path.extname(fullPath).toLowerCase()
     res.statusCode = 200
+    console.log(`[${method}] ${requested} -> 200 OK`)
     res.setHeader('Content-Type', contentTypes.get(ext) ?? 'application/octet-stream')
     if (method === 'HEAD') {
       res.end()
@@ -83,8 +86,10 @@ const server = http.createServer(async (req, res) => {
       return
     }
     res.end(await fs.readFile(fullPath))
-  } catch {
+  } catch (err) {
+    console.error(`Error serving ${requestedPath}:`, err)
     res.statusCode = 404
+    console.log(`[${method}] ${requested} -> 404 Not Found`)
     res.setHeader('Content-Type', 'text/plain; charset=utf-8')
     res.end('Not Found')
   }

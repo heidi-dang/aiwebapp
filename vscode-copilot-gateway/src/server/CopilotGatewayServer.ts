@@ -6,7 +6,13 @@ import compression from 'compression';
 import morgan from 'morgan';
 import * as crypto from 'crypto';
 import { Server as HttpServer } from 'http';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
+import axios from 'axios';
+import { Readable } from 'stream';
+
+interface AuthenticatedRequest extends express.Request {
+  userId?: string;
+}
 
 import {
   ServerConfig,
@@ -19,6 +25,11 @@ import { SessionManager } from '../services/SessionManager';
 import { MetricsService } from '../services/MetricsService';
 import { RequestQueue } from '../utils/RequestQueue';
 import { CopilotClient } from '../utils/CopilotClient';
+import { ContextService } from '../services/ContextService';
+import { ToolService } from '../services/ToolService';
+import { ContextGatherer } from '../utils/ContextGatherer';
+import { redactMessages } from '../utils/SecretRedactor';
+import { WorkspaceRag } from '../utils/WorkspaceRag';
 
 export class CopilotGatewayServer {
   private app: express.Application;
@@ -27,23 +38,30 @@ export class CopilotGatewayServer {
   private config: ServerConfig;
   private isRunningFlag = false;
   private startTime = 0;
+  private redactionCount = 0;
 
   private authService?: AuthService;
   private sessionManager?: SessionManager;
   private metricsService?: MetricsService;
   private requestQueue: RequestQueue;
   private copilotClient: CopilotClient;
+  private contextService?: ContextService;
+  private toolService?: ToolService;
 
   constructor(
     config: ServerConfig,
     authService?: AuthService,
     sessionManager?: SessionManager,
-    metricsService?: MetricsService
+    metricsService?: MetricsService,
+    contextService?: ContextService,
+    toolService?: ToolService
   ) {
     this.config = config;
     this.authService = authService;
     this.sessionManager = sessionManager;
     this.metricsService = metricsService;
+    this.contextService = contextService;
+    this.toolService = toolService;
 
     this.app = express();
     this.requestQueue = new RequestQueue(config.maxConcurrentRequests);
@@ -62,7 +80,7 @@ export class CopilotGatewayServer {
         this.server = this.app.listen(this.config.port, this.config.host, () => {
           this.isRunningFlag = true;
           this.startTime = Date.now();
-          console.log(`AIWebApp Copilot Gateway Server listening on ${this.config.host}:${this.config.port}`);
+          console.log(`heidi-gateway-proxy listening on ${this.config.host}:${this.config.port}`);
 
           // Setup WebSocket server for real-time updates
           if (this.server) {
@@ -95,13 +113,17 @@ export class CopilotGatewayServer {
             this.wss.close();
             this.wss = null;
           }
-          console.log('AIWebApp Copilot Gateway Server stopped');
+          console.log('heidi-gateway-proxy stopped');
           resolve();
         });
       } else {
         resolve();
       }
     });
+  }
+
+  public getSessionManager(): SessionManager | undefined {
+    return this.sessionManager;
   }
 
   isRunning(): boolean {
@@ -112,14 +134,30 @@ export class CopilotGatewayServer {
     return this.config.port;
   }
 
-  getStats(): ServerStats {
+  getHost(): string {
+    return this.config.host;
+  }
+
+  getApiKey(): string | undefined {
+    return this.config.apiKey;
+  }
+
+  async getStats(): Promise<ServerStats> {
+    let totalTokens = 0;
+    if (this.metricsService) {
+      const metrics = await this.metricsService.getMetrics();
+      totalTokens = metrics.totalTokens;
+    }
+
     return {
       uptime: this.startTime > 0 ? Date.now() - this.startTime : 0,
       totalRequests: this.requestQueue.getTotalProcessed(),
       activeRequests: this.requestQueue.getActiveCount(),
       queueLength: this.requestQueue.getQueueLength(),
       averageResponseTime: this.requestQueue.getAverageResponseTime(),
-      errorRate: this.requestQueue.getErrorRate()
+      errorRate: this.requestQueue.getErrorRate(),
+      totalTokens,
+      redactions: this.redactionCount
     };
   }
 
@@ -158,6 +196,34 @@ export class CopilotGatewayServer {
   private setupRoutes(): void {
     // Health check
     this.app.get('/health', this.handleHealthCheck.bind(this));
+
+    // Sessions API
+    this.app.get('/sessions', async (req, res) => {
+      try {
+        if (!this.sessionManager) {
+          return res.status(503).json({ error: 'SessionManager not initialized' });
+        }
+        const sessions = await this.sessionManager.getAllSessions();
+        res.json({ sessions });
+      } catch (_error) {
+        res.status(500).json({ error: 'Failed to fetch sessions' });
+      }
+    });
+
+    this.app.get('/sessions/:sessionId', async (req, res) => {
+      try {
+        if (!this.sessionManager) {
+          return res.status(503).json({ error: 'SessionManager not initialized' });
+        }
+        const session = await this.sessionManager.getSession(req.params.sessionId);
+        if (!session) {
+          return res.status(404).json({ error: 'Session not found' });
+        }
+        res.json({ session });
+      } catch (_error) {
+        res.status(500).json({ error: 'Failed to fetch session' });
+      }
+    });
 
     // Models endpoint
     this.app.get('/v1/models', this.handleGetModels.bind(this));
@@ -215,16 +281,18 @@ export class CopilotGatewayServer {
       });
 
       // Send initial stats
-      ws.send(JSON.stringify({
-        type: 'stats',
-        data: this.getStats()
-      }));
+      this.getStats().then(stats => {
+        ws.send(JSON.stringify({
+          type: 'stats',
+          data: stats
+        }));
+      });
     });
 
     // Broadcast stats every 5 seconds
-    setInterval(() => {
+    setInterval(async () => {
       if (this.wss) {
-        const stats = this.getStats();
+        const stats = await this.getStats();
         this.wss.clients.forEach(client => {
           if (client.readyState === 1) { // OPEN
             client.send(JSON.stringify({
@@ -237,7 +305,7 @@ export class CopilotGatewayServer {
     }, 5000);
   }
 
-  private handleWebSocketMessage(ws: any, data: any): void {
+  private handleWebSocketMessage(ws: WebSocket, data: any): void {
     // Handle WebSocket messages for real-time features
     switch (data.type) {
       case 'subscribe':
@@ -267,7 +335,7 @@ export class CopilotGatewayServer {
   }
 
   private async handleHealthCheck(req: express.Request, res: express.Response): Promise<void> {
-    const stats = this.getStats();
+    const stats = await this.getStats();
     res.json({
       status: 'healthy',
       timestamp: new Date().toISOString(),
@@ -278,13 +346,38 @@ export class CopilotGatewayServer {
 
   private async handleGetModels(req: express.Request, res: express.Response): Promise<void> {
     try {
-      // Check authentication if required
-      if (this.config.apiKey) {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ') || authHeader.substring(7) !== this.config.apiKey) {
-          res.status(401).json({ error: 'Unauthorized' });
+      // Authenticate request
+      const authResult = await this.authenticateRequest(req);
+      if (!authResult.success) {
+        res.status(authResult.status || 401).json({ error: authResult.error });
+        return;
+      }
+
+      const config = vscode.workspace.getConfiguration('heidi-gateway-proxy');
+      const routerMode = String(config.get('router.mode', 'copilot'));
+      const upstreamBaseUrl = String(config.get('router.upstreamBaseUrl', '')).trim();
+      const upstreamApiKey = String(config.get('router.upstreamApiKey', '')).trim();
+
+      if (routerMode === 'upstream') {
+        if (!upstreamBaseUrl) {
+          res.status(500).json({ error: 'Upstream base URL is not configured' });
           return;
         }
+        const base = upstreamBaseUrl.replace(/\/+$/, '');
+        const target = base.endsWith('/v1') ? `${base}/models` : `${base}/v1/models`;
+
+        const upstream = await fetch(target, {
+          method: 'GET',
+          headers: {
+            ...(upstreamApiKey ? { Authorization: `Bearer ${upstreamApiKey}` } : {})
+          }
+        });
+
+        const body = await upstream.text();
+        res.status(upstream.status);
+        res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/json');
+        res.send(body);
+        return;
       }
 
       // Get available models from Copilot
@@ -304,6 +397,12 @@ export class CopilotGatewayServer {
 
   private async handleChatCompletions(req: express.Request, res: express.Response): Promise<void> {
     const startTime = Date.now();
+    const abortController = new AbortController();
+
+    // Handle client disconnect
+    req.on('close', () => {
+      abortController.abort();
+    });
 
     try {
       // Authenticate request
@@ -314,16 +413,122 @@ export class CopilotGatewayServer {
       }
 
       const request: ChatCompletionRequest = req.body;
+      console.log(`[Gateway] Handling chat completions for model: ${request.model}`);
 
       // Validate request
       if (!this.validateChatCompletionRequest(request)) {
+        console.warn('[Gateway] Invalid request format');
         res.status(400).json({ error: 'Invalid request format' });
         return;
+      }
+
+      const config = vscode.workspace.getConfiguration('heidi-gateway-proxy');
+      console.log('[Gateway] Config read');
+      const routerMode = String(config.get('router.mode', 'copilot'));
+      const upstreamBaseUrl = String(config.get('router.upstreamBaseUrl', '')).trim();
+      const upstreamApiKey = String(config.get('router.upstreamApiKey', '')).trim();
+
+      const userAgent = String(req.headers['user-agent'] || '');
+      const contextOverride = String(req.headers['x-heidi-context'] || '').toLowerCase().trim();
+      const contextMode = String(config.get('context.mode', 'auto'));
+      const proxyClientProfile = String(config.get('proxy.clientProfile', 'copilot')).toLowerCase().trim()
+
+      const isSmartClient = /(trae|windsurf|continue|roo|roo-code|cline)/i.test(userAgent);
+      const smartProfiles = new Set([
+        'trae',
+        'windsurf',
+        'cursor',
+        'opencode',
+        'continue',
+        'roo',
+        'roo-code',
+        'cline',
+        'codex',
+        'gemini'
+      ])
+      const effectiveIsSmartClient =
+        proxyClientProfile === 'auto'
+          ? isSmartClient
+          : smartProfiles.has(proxyClientProfile)
+      const shouldInjectContext =
+        contextOverride === 'inject' ||
+        (contextOverride !== 'none' &&
+          (contextMode === 'always' || (contextMode === 'auto' && !effectiveIsSmartClient)));
+
+      // TEMPORARILY DISABLE COMPLEX INJECTION FOR DEBUGGING
+      console.log('[Gateway] Skipping complex injection');
+      /*
+      if (shouldInjectContext) {
+        // ...
+      }
+      */
+
+      const redactionEnabled = config.get('redaction.enabled', true);
+      if (redactionEnabled) {
+        try {
+          const redactionRes = redactMessages(request.messages as any[]);
+          if (redactionRes.redactions > 0) this.redactionCount += redactionRes.redactions;
+          request.messages = redactionRes.value;
+        } catch (e) {
+          console.error('[Gateway] Redaction failed:', e);
+        }
       }
 
       // Handle session management
       if (this.sessionManager && request.session_id) {
         await this.sessionManager.updateSession(request.session_id, request.messages);
+      }
+
+      if (routerMode === 'upstream') {
+        if (!upstreamBaseUrl) {
+          res.status(500).json({ error: 'Upstream base URL is not configured' });
+          return;
+        }
+
+        const base = upstreamBaseUrl.replace(/\/+$/, '');
+        const target = base.endsWith('/v1') ? `${base}/chat/completions` : `${base}/v1/chat/completions`;
+
+        const upstream = await fetch(target, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(upstreamApiKey ? { Authorization: `Bearer ${upstreamApiKey}` } : {})
+          },
+          body: JSON.stringify(request),
+          signal: abortController.signal
+        });
+
+        res.status(upstream.status);
+        upstream.headers.forEach((value, key) => {
+          if (
+            ![
+              'transfer-encoding',
+              'connection',
+              'content-encoding',
+              'content-length'
+            ].includes(key.toLowerCase())
+          ) {
+            res.setHeader(key, value);
+          }
+        });
+
+        if (upstream.body) {
+          Readable.fromWeb(upstream.body as any).pipe(res);
+        } else {
+          res.end();
+        }
+        return;
+      }
+
+      // Routing Logic
+      if (request.model.startsWith('ollama') || request.model.startsWith('llama') || request.model.startsWith('mistral')) {
+        await this.handleOllamaRequest(req, res, abortController.signal);
+        return;
+      }
+
+      if (request.model === 'runner' || request.model === 'agent' || request.model.startsWith('heidi')) {
+        await this.handleRunnerRequest(req, res, abortController.signal);
+        return;
       }
 
       // Handle streaming request
@@ -333,10 +538,13 @@ export class CopilotGatewayServer {
         res.setHeader('Connection', 'keep-alive');
 
         try {
-          for await (const chunk of this.copilotClient.createStreamingChatCompletion(request)) {
+          for await (const chunk of this.copilotClient.createStreamingChatCompletion(request, { signal: abortController.signal })) {
+            if (abortController.signal.aborted) break;
             res.write(`data: ${JSON.stringify(chunk)}\n\n`);
           }
-          res.write('data: [DONE]\n\n');
+          if (!abortController.signal.aborted) {
+            res.write('data: [DONE]\n\n');
+          }
           res.end();
 
           // Record metrics for successful stream (simplified)
@@ -348,10 +556,14 @@ export class CopilotGatewayServer {
               model: request.model,
               tokens_used: 0, // In streaming we'd need to extract this from the last chunk
               request_duration: Date.now() - startTime,
-              status: 'success'
+              status: abortController.signal.aborted ? 'cancelled' : 'success'
             });
           }
         } catch (streamError) {
+          if (abortController.signal.aborted) {
+            console.log('Stream aborted by client');
+            return;
+          }
           console.error('Error in stream:', streamError);
           const message = streamError instanceof Error ? streamError.message : 'Stream error';
           res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
@@ -362,7 +574,7 @@ export class CopilotGatewayServer {
 
       // Queue the non-streaming request
       const result = await this.requestQueue.add(async () => {
-        return await this.copilotClient.createChatCompletion(request);
+        return await this.copilotClient.createChatCompletion(request, { signal: abortController.signal });
       });
 
       // Record metrics
@@ -386,14 +598,17 @@ export class CopilotGatewayServer {
       res.json(result);
 
     } catch (error) {
-      console.error('Error in chat completions:', error);
-      const message = error instanceof Error ? error.message : 'Internal server error';
+      console.error('[Gateway] CRITICAL ERROR in chat completions:', error);
+      const message = error instanceof Error ? `${error.name}: ${error.message}` : 'Internal server error';
+      if (error instanceof Error && error.stack) {
+        console.error('[Gateway] Stack trace:', error.stack);
+      }
 
       // Record error metrics
       if (this.metricsService) {
         await this.metricsService.recordRequest({
           timestamp: startTime,
-          user_id: (req as any).userId,
+          user_id: (req as AuthenticatedRequest).userId,
           session_id: req.body?.session_id,
           model: req.body?.model || 'unknown',
           tokens_used: 0,
@@ -425,23 +640,23 @@ export class CopilotGatewayServer {
         if (!crypto.timingSafeEqual(Buffer.from(providedKey), Buffer.from(this.config.apiKey))) {
           return { success: false, status: 401, error: 'Unauthorized' };
         }
-      } catch (e) {
+      } catch {
         // Handle cases where Buffer lengths differ
         return { success: false, status: 401, error: 'Unauthorized' };
       }
     }
 
-    // Check AIWebApp authentication if enabled
+    // Check upstream authentication if enabled
     if (this.authService) {
-      const config = vscode.workspace.getConfiguration('aiwebapp-copilot-gateway.auth');
+      const config = vscode.workspace.getConfiguration('heidi-gateway-proxy.auth');
       if (config.get('integrationEnabled', true)) {
         const authToken = req.headers['x-auth-token'] as string;
         if (authToken) {
           try {
             const user = await this.authService.validateToken(authToken);
-            (req as any).userId = user.user_id;
+            (req as AuthenticatedRequest).userId = user.user_id;
             return { success: true, userId: user.user_id };
-          } catch (error) {
+          } catch {
             return { success: false, status: 401, error: 'Invalid auth token' };
           }
         }
@@ -484,11 +699,57 @@ export class CopilotGatewayServer {
   }
 
   private async handleGetTools(req: express.Request, res: express.Response): Promise<void> {
-    res.json({ tools: [] }); // Placeholder
+    if (!this.toolService) {
+      res.json({ tools: [] });
+      return;
+    }
+    const tools = this.toolService.getToolsDefinition();
+    res.json({ tools });
   }
 
   private async handleToolCall(req: express.Request, res: express.Response): Promise<void> {
-    res.status(501).json({ error: 'Tool calling not implemented' });
+    if (!this.toolService) {
+      res.status(501).json({ error: 'Tool execution not available' });
+      return;
+    }
+
+    try {
+      // Authenticate request
+      const authResult = await this.authenticateRequest(req);
+      if (!authResult.success) {
+        res.status(authResult.status || 401).json({ error: authResult.error });
+        return;
+      }
+
+      const { name, arguments: args } = req.body;
+
+      if (!name || !args) {
+        res.status(400).json({ error: 'Missing tool name or arguments' });
+        return;
+      }
+
+      let result;
+      switch (name) {
+        case 'edit_file':
+          result = await this.toolService.applyWorkspaceEdit(args.filePath, args.content);
+          break;
+        case 'apply_file_operations':
+          result = await this.toolService.applyFileOperations(args.operations);
+          break;
+        case 'run_command':
+          result = await this.toolService.runTerminalCommand(args.command);
+          break;
+        default:
+          res.status(404).json({ error: `Tool ${name} not found` });
+          return;
+      }
+
+      res.json(result);
+
+    } catch (error) {
+      console.error('Error executing tool:', error);
+      res.status(500).json({ error: 'Failed to execute tool' });
+    }
   }
 
   private async handleGetSessions(req: express.Request, res: express.Response): Promise<void> {
@@ -530,6 +791,265 @@ export class CopilotGatewayServer {
 
     const metrics = await this.metricsService.getMetrics();
     res.json(metrics);
+  }
+
+  private async handleOllamaRequest(req: express.Request, res: express.Response, signal: AbortSignal): Promise<void> {
+    const request: ChatCompletionRequest = req.body;
+    const ollamaUrl = process.env.OLLAMA_URL || vscode.workspace.getConfiguration('heidi-gateway-proxy').get('ollama.url', 'http://localhost:11434');
+    
+    try {
+      // Map request to Ollama format
+      const ollamaRequest = {
+        model: request.model.replace('ollama/', ''), // Remove prefix if present
+        messages: request.messages,
+        stream: request.stream,
+        options: {
+          temperature: request.temperature,
+          // ... map other options
+        }
+      };
+
+      if (request.stream) {
+        const response = await axios.post(`${ollamaUrl}/api/chat`, ollamaRequest, {
+          responseType: 'stream',
+          signal
+        });
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        response.data.pipe(res);
+      } else {
+        const response = await axios.post(`${ollamaUrl}/api/chat`, ollamaRequest, { signal });
+        
+        // Map response back to OpenAI format
+        const responseData = {
+            id: 'ollama-' + Date.now(),
+            object: 'chat.completion',
+            created: Date.now(),
+            model: request.model,
+            choices: [
+                {
+                    index: 0,
+                    message: response.data.message,
+                    finish_reason: response.data.done ? 'stop' : null
+                }
+            ],
+            usage: {
+                prompt_tokens: response.data.prompt_eval_count || 0,
+                completion_tokens: response.data.eval_count || 0,
+                total_tokens: (response.data.prompt_eval_count || 0) + (response.data.eval_count || 0)
+            }
+        };
+        
+        res.json(responseData);
+      }
+    } catch (error) {
+       console.error('Ollama request failed:', error);
+       res.status(502).json({ error: 'Failed to connect to Ollama' });
+    }
+  }
+
+  private async handleRunnerRequest(req: express.Request, res: express.Response, signal: AbortSignal): Promise<void> {
+     try {
+       const runnerUrl = vscode.workspace.getConfiguration('heidi-gateway-proxy').get('runner.url', 'http://localhost:4001');
+       
+       // 1. Get Agent
+       // For now, just generic fetch or config. 
+       // Ideal: allow model='runner:agent-id'
+       let agentId = '';
+       if (req.body.model.includes(':')) {
+         agentId = req.body.model.split(':')[1];
+       } else {
+         const agentsRes = await axios.get(`${runnerUrl}/agents`);
+         if (agentsRes.data && agentsRes.data.length > 0) {
+           agentId = agentsRes.data[0].id;
+         }
+       }
+
+       if (!agentId) {
+         res.status(404).json({ error: 'No runner agent found' });
+         return;
+       }
+
+       // 2. Build prompt from full conversation context
+       const messages = Array.isArray(req.body.messages) ? req.body.messages : [];
+       const prompt = messages
+         .map((m: any) => {
+           const role = String(m?.role || '').trim() || 'unknown';
+           const content = typeof m?.content === 'string' ? m.content : '';
+           const toolCalls =
+             Array.isArray(m?.tool_calls) && m.tool_calls.length > 0
+               ? `\n[tool_calls]\n${JSON.stringify(m.tool_calls)}`
+               : '';
+           return `[${role}]\n${content}${toolCalls}`.trim();
+         })
+         .filter(Boolean)
+         .join('\n\n');
+
+       if (!prompt.trim()) {
+         res.status(400).json({ error: 'No prompt found' });
+         return;
+       }
+
+       // 3. Start Run
+       const runRes = await axios.post(`${runnerUrl}/agents/${agentId}/runs`, {
+         message: prompt
+       }, { signal });
+
+       const { jobId } = runRes.data;
+
+       if (!jobId) {
+         res.status(500).json({ error: 'Failed to start run' });
+         return;
+       }
+
+       // 4. Stream Events
+       res.setHeader('Content-Type', 'text/event-stream');
+       res.setHeader('Cache-Control', 'no-cache');
+       res.setHeader('Connection', 'keep-alive');
+
+       const response = await axios.get(`${runnerUrl}/api/runs/${jobId}/events`, {
+         responseType: 'stream',
+         signal
+       });
+
+       let assistantText = ''
+       let finalized = false
+       let toolExtractionAttempted = false
+
+       const tryExtractOperations = (value: any): any[] | null => {
+         if (Array.isArray(value)) {
+           const looksLikeOps = value.every(
+             (op) => op && typeof op === 'object' && typeof op.action === 'string' && typeof op.filePath === 'string'
+           )
+           return looksLikeOps ? value : null
+         }
+         if (!value || typeof value !== 'object') return null
+
+         if (Array.isArray((value as any).operations)) return (value as any).operations
+
+         const toolName = String((value as any).tool || (value as any).name || '').trim()
+         if (
+           toolName === 'apply_file_operations' &&
+           (value as any).arguments &&
+           Array.isArray((value as any).arguments.operations)
+         ) {
+           return (value as any).arguments.operations
+         }
+
+         return null
+       }
+
+       const extractJsonCandidates = (text: string): string[] => {
+         const candidates: string[] = []
+
+         const fenceRe = /```(?:json)?\s*([\s\S]*?)```/gi
+         for (const match of text.matchAll(fenceRe)) {
+           const raw = String(match[1] || '').trim()
+           if (raw) candidates.push(raw)
+         }
+
+         const lastArrayStart = text.lastIndexOf('[')
+         const lastArrayEnd = text.lastIndexOf(']')
+         if (lastArrayStart !== -1 && lastArrayEnd > lastArrayStart) {
+           candidates.push(text.slice(lastArrayStart, lastArrayEnd + 1).trim())
+         }
+
+         const lastObjStart = text.lastIndexOf('{')
+         const lastObjEnd = text.lastIndexOf('}')
+         if (lastObjStart !== -1 && lastObjEnd > lastObjStart) {
+           candidates.push(text.slice(lastObjStart, lastObjEnd + 1).trim())
+         }
+
+         return candidates
+       }
+
+       const maybeApplyOperationsFromText = async () => {
+         if (!this.toolService) return
+         if (toolExtractionAttempted) return
+         toolExtractionAttempted = true
+
+         const candidates = extractJsonCandidates(assistantText)
+         for (const raw of candidates) {
+           try {
+             const parsed = JSON.parse(raw)
+             const ops = tryExtractOperations(parsed)
+             if (!ops) continue
+             await this.toolService.applyFileOperations(ops as any)
+             return
+           } catch {
+             continue
+           }
+         }
+       }
+
+       const finalizeStream = () => {
+         if (finalized) return
+         finalized = true
+         void maybeApplyOperationsFromText()
+         if (!res.writableEnded) {
+           res.write('data: [DONE]\n\n')
+           res.end()
+         }
+       }
+
+       response.data.on('data', (chunk: Buffer) => {
+          const lines = chunk.toString().split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const event = JSON.parse(line.slice(6));
+                
+                // Translate to OpenAI format
+                let content = '';
+                if (event.type === 'token' || event.type === 'model.response') {
+                  content = event.content || event.text || '';
+                } else if (event.type === 'tool.output') {
+                   // Maybe show tool output?
+                   content = `\n[Tool Output: ${event.output}]\n`;
+                }
+
+                if (content) {
+                  if (event.type === 'token' || event.type === 'model.response') {
+                    assistantText += content
+                  }
+                  const chunk = {
+                    id: 'run-' + jobId,
+                    object: 'chat.completion.chunk',
+                    created: Date.now(),
+                    model: req.body.model,
+                    choices: [{
+                      index: 0,
+                      delta: { content },
+                      finish_reason: null
+                    }]
+                  };
+                  res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+                }
+                
+                if (event.type === 'done' || event.type === 'error') {
+                   finalizeStream()
+                }
+
+              } catch (_e) {
+                // ignore parse error
+              }
+            }
+          }
+       });
+
+       response.data.on('end', finalizeStream);
+
+       response.data.on('error', (err: any) => {
+         console.error('Stream error:', err);
+         const errorChunk = { error: err.message };
+         res.write(`data: ${JSON.stringify(errorChunk)}\n\n`);
+         finalizeStream()
+       });
+
+     } catch (error) {
+       console.error('Runner request failed:', error);
+       res.status(502).json({ error: 'Failed to connect to Runner' });
+     }
   }
 
   private handleError(err: any, req: express.Request, res: express.Response, _next: express.NextFunction): void {

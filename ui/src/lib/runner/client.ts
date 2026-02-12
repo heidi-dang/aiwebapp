@@ -1,6 +1,7 @@
 import type { RunnerEvent, RunnerEventType } from './types'
 
 const RUNNER_URL = process.env.NEXT_PUBLIC_RUNNER_URL ?? '/api/runner'
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? '/api' // Server API URL
 
 function base(path: string) {
   // Ensure we don't double-up slashes when joining
@@ -8,6 +9,16 @@ function base(path: string) {
     return `${RUNNER_URL.replace(/\/$/, '')}${path}`
   }
   return `${RUNNER_URL}${path}`
+}
+
+function apiBase(path: string) {
+    // For Server API calls
+    // If path starts with http, use it as is
+    if (path.startsWith('http')) return path
+    
+    // Ensure we don't double-up slashes
+    const prefix = API_URL.endsWith('/') ? API_URL.replace(/\/$/, '') : API_URL
+    return `${prefix}${path}`
 }
 
 function getAuthHeaders() {
@@ -35,6 +46,24 @@ export async function createJob(input?: unknown, timeoutMs?: number) {
 
   const data = (await res.json()) as { id: string }
   return { jobId: data.id }
+}
+
+export async function createAgentRun(agentId: string, message: string, sessionId?: string) {
+    // Call Server API instead of Runner
+    const res = await fetch(apiBase(`/agents/${encodeURIComponent(agentId)}/runs`), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ message, session_id: sessionId })
+    })
+
+    if (!res.ok) {
+        const text = await res.text()
+        throw new Error(`createAgentRun failed: ${res.status} ${text}`)
+    }
+
+    const data = await res.json()
+    // data should be { jobId: string, sessionId: string, status: string }
+    return data
 }
 
 export async function startJob(jobId: string) {
@@ -70,14 +99,6 @@ export async function cancelJob(jobId: string) {
 }
 
 export async function approveJob(jobId: string, tokenId: string, approved: boolean) {
-  // Use the server proxy endpoint for approval
-  // Note: The Server API has /jobs/:id/approve which proxies to Runner
-  // However, since we are using the /api/runner proxy here which points directly to Runner (via Next.js proxy),
-  // we should match the runner's API contract.
-  
-  // Actually, checking the README, the UI uses /api/runner/* which proxies to Runner Service.
-  // The Runner Service has POST /api/jobs/:jobId/approval
-  
   const res = await fetch(
     base(`/api/jobs/${encodeURIComponent(jobId)}/approval`),
     {
@@ -112,18 +133,17 @@ type StreamCallbacks = {
   onDone?: () => void
 }
 
-export function streamJobEvents(jobId: string, cb: StreamCallbacks) {
-  const url = base(`/api/jobs/${encodeURIComponent(jobId)}/events`)
-  // SSE requires the full URL if we are not on the same origin, but here we are using a proxy.
-  // EventSource in browser sends cookies automatically for same-origin.
-  // If we are proxying, we need to ensure the cookies/auth are handled.
-  // Since our proxy handles auth token injection (if we passed it), but EventSource API doesn't support custom headers easily.
-  // The proxy at /api/runner/* uses the server-side RUNNER_TOKEN.
-  // The client doesn't need to send extra headers if the proxy handles it.
+export function streamJobEvents(jobId: string, cb: StreamCallbacks, useServerProxy = false) {
+  // If useServerProxy is true, use the Server API proxy endpoint
+  // Otherwise use the Runner API endpoint (legacy/direct)
   
-  // However, EventSource might fail if the server closes connection abruptly or returns 404/500.
-  // Let's add more robust error handling.
-  
+  let url: string
+  if (useServerProxy) {
+     url = apiBase(`/runs/${encodeURIComponent(jobId)}/events`) // /api/runs/:jobId/events
+  } else {
+     url = base(`/api/jobs/${encodeURIComponent(jobId)}/events`)
+  }
+
   const es = new EventSource(url, { withCredentials: true })
 
   const seen = new Set<string>()
@@ -138,13 +158,19 @@ export function streamJobEvents(jobId: string, cb: StreamCallbacks) {
       return
     }
 
-    if (!parsed?.id) return
-    if (seen.has(parsed.id)) return
-    seen.add(parsed.id)
+    // Filter duplicates if ID is present
+    if (parsed.id) {
+        if (seen.has(parsed.id)) return
+        seen.add(parsed.id)
+    }
 
     cb.onEvent(parsed)
 
-    if (parsed.type === 'done') cb.onDone?.()
+    if (parsed.type === 'done') {
+        // RunCompleted
+        cb.onDone?.()
+        es.close()
+    }
   }
 
   const types: RunnerEventType[] = [
@@ -166,10 +192,17 @@ export function streamJobEvents(jobId: string, cb: StreamCallbacks) {
   for (const t of types) {
     es.addEventListener(t, handle as EventListener)
   }
+  
+  // Also listen to default 'message' event which some SSE implementations use
+  es.onmessage = handle
 
-  es.onerror = () => {
-    // EventSource errors are not very readable; surface something useful
-    cb.onError?.(new Error('Runner SSE connection error (check runner logs)'))
+  es.onerror = (e) => {
+    // Check if readyState is CLOSED (2), which might just mean the stream ended naturally if the server closed it
+    if (es.readyState === 2) {
+       // Only trigger done if we haven't already
+    } else {
+       cb.onError?.(new Error('Runner SSE connection error'))
+    }
   }
 
   return () => {

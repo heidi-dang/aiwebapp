@@ -8,7 +8,7 @@ export class MetricsService {
   private metricsEndpoint: string;
 
   constructor() {
-    const config = vscode.workspace.getConfiguration('aiwebapp-copilot-gateway.usage');
+    const config = vscode.workspace.getConfiguration('heidi-gateway-proxy.usage');
     this.metricsEndpoint = config.get('metricsEndpoint', 'http://localhost:4001/api/metrics');
   }
 
@@ -98,7 +98,7 @@ export class MetricsService {
   }
 
   private isMetricsEnabled(): boolean {
-    const config = vscode.workspace.getConfiguration('aiwebapp-copilot-gateway.usage');
+    const config = vscode.workspace.getConfiguration('heidi-gateway-proxy.usage');
     return config.get('trackingEnabled', true);
   }
 

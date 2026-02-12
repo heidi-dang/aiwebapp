@@ -75,7 +75,7 @@ export class CopilotClient {
     return models;
   }
 
-  async createChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+  async createChatCompletion(request: ChatCompletionRequest, options?: { signal?: AbortSignal }): Promise<ChatCompletionResponse> {
     // Validate that Copilot is available
     if (!await this.isCopilotAvailable()) {
       throw new Error('GitHub Copilot is not available. Please ensure Copilot Chat extension is installed and you are signed in.');
@@ -91,31 +91,41 @@ export class CopilotClient {
     }
 
     // Prepare request options
-    const options: vscode.LanguageModelChatRequestOptions = {
-      justification: 'AIWebApp Copilot Gateway API request'
+    const requestOptions: vscode.LanguageModelChatRequestOptions = {
+      justification: 'heidi-gateway-proxy API request'
     };
 
     // Add temperature if specified
     if (request.temperature !== undefined) {
-      // VS Code API doesn't directly support temperature, but we can try to set it
-      (options as any).temperature = request.temperature;
+      (requestOptions as any).temperature = request.temperature;
     }
 
     // Add max tokens if specified
     if (request.max_tokens !== undefined) {
-      (options as any).maxTokens = request.max_tokens;
+      (requestOptions as any).maxTokens = request.max_tokens;
     }
 
     let attempts = 0;
     let lastError: Error | null = null;
 
     while (attempts <= this.config.retryAttempts) {
+      if (options?.signal?.aborted) {
+        throw new Error('Request aborted');
+      }
+
       try {
         // Make the request to Copilot using the correct API
         const cts = new vscode.CancellationTokenSource();
+
+        // Handle external abort signal
+        if (options?.signal) {
+          options.signal.onabort = () => cts.cancel();
+        }
+
         const timeoutHandle = setTimeout(() => cts.cancel(), this.config.timeout);
+
         try {
-          const response = await model.sendRequest(messages, options, cts.token);
+          const response = await model.sendRequest(messages, requestOptions, cts.token);
 
           // Convert response back to OpenAI format
           const completion = await this.processCopilotResponse(response, request);
@@ -134,9 +144,16 @@ export class CopilotClient {
         } finally {
           clearTimeout(timeoutHandle);
           cts.dispose();
+          if (options?.signal) {
+            options.signal.onabort = null;
+          }
         }
 
       } catch (error) {
+        if (error instanceof vscode.CancellationError || options?.signal?.aborted) {
+          throw new Error('Request aborted');
+        }
+
         lastError = error instanceof Error ? error : new Error(String(error));
         attempts++;
 
@@ -162,26 +179,38 @@ export class CopilotClient {
 
   private async selectModel(modelName: string): Promise<vscode.LanguageModelChat | undefined> {
     try {
-      // Map common model names to Copilot families
-      let family: string;
-      switch (modelName.toLowerCase()) {
-        case 'gpt-4':
-        case 'gpt-4o':
-          family = 'gpt-4o';
-          break;
-        case 'gpt-3.5-turbo':
-          family = 'gpt-3.5-turbo';
-          break;
-        default:
-          family = 'gpt-4o'; // Default to GPT-4
+      const name = (modelName || 'auto').toLowerCase().trim()
+
+      const candidates: string[] = []
+      const push = (v: string) => {
+        if (!candidates.includes(v)) candidates.push(v)
       }
 
-      const models = await vscode.lm.selectChatModels({
-        vendor: 'copilot',
-        family: family
-      });
+      if (name === 'auto' || name === '') {
+        const models = await vscode.lm.selectChatModels({ vendor: 'copilot' })
+        return models && models.length > 0 ? models[0] : undefined
+      }
 
-      return models && models.length > 0 ? models[0] : undefined;
+      if (name.includes('gpt-3.5')) push('gpt-3.5-turbo')
+      if (name.includes('gpt-4o') || name.includes('4o')) push('gpt-4o')
+      if (name.includes('gpt-4.1')) push('gpt-4.1')
+      if (name === 'gpt-4') push('gpt-4o')
+
+      if (candidates.length === 0) {
+        push('gpt-4o')
+        push('gpt-3.5-turbo')
+      }
+
+      for (const family of candidates) {
+        const models = await vscode.lm.selectChatModels({
+          vendor: 'copilot',
+          family
+        })
+
+        if (models && models.length > 0) return models[0]
+      }
+
+      return undefined
     } catch (error) {
       console.error('Error selecting model:', error);
       return undefined;
@@ -236,8 +265,14 @@ export class CopilotClient {
   private async streamToString(stream: AsyncIterable<any>): Promise<string> {
     let result = '';
     for await (const part of stream) {
-      if (part.type === 'text') {
-        result += part.text;
+      const p = part as any;
+      if (p?.type === 'text') {
+        const text =
+          (typeof p.text === 'string' && p.text) ||
+          (typeof p.value === 'string' && p.value) ||
+          (typeof p.content === 'string' && p.content) ||
+          '';
+        result += text;
       }
     }
     return result;
@@ -257,7 +292,7 @@ export class CopilotClient {
   }
 
   // Streaming support
-  async *createStreamingChatCompletion(request: ChatCompletionRequest): AsyncGenerator<StreamingChatCompletionResponse> {
+  async *createStreamingChatCompletion(request: ChatCompletionRequest, options?: { signal?: AbortSignal }): AsyncGenerator<StreamingChatCompletionResponse> {
     const model = await this.selectModel(request.model);
     if (!model) {
       throw new Error(`Model not found: ${request.model}`);
@@ -265,14 +300,29 @@ export class CopilotClient {
 
     const messages = this.convertMessages(request.messages);
     const cts = new vscode.CancellationTokenSource();
+
+    // Handle external abort signal
+    if (options?.signal) {
+      options.signal.onabort = () => cts.cancel();
+      if (options.signal.aborted) {
+        cts.cancel();
+      }
+    }
+
     const timeoutHandle = setTimeout(() => cts.cancel(), this.config.timeout);
     try {
-      const response = await model.sendRequest(messages, {}, cts.token);
+      const response = await model.sendRequest(messages, {
+        justification: 'heidi-gateway-proxy streaming API request'
+      }, cts.token);
 
       const responseId = `chatcmpl-${Date.now()}-${Math.random().toString(36).substring(2)}`;
       let responseText = '';
 
       for await (const part of response.stream) {
+        if (options?.signal?.aborted) {
+          break;
+        }
+
         const p = part as any;
         if (p?.type === 'text' && typeof p.text === 'string') {
           responseText += p.text;
@@ -293,23 +343,34 @@ export class CopilotClient {
         }
       }
 
-      const usage = this.estimateTokenUsage(request.messages, responseText);
-      yield {
-        id: responseId,
-        object: 'chat.completion.chunk',
-        created: Math.floor(Date.now() / 1000),
-        model: request.model,
-        choices: [{
-          index: 0,
-          delta: {},
-          finish_reason: 'stop'
-        }],
-        usage,
-        session_id: request.session_id
-      };
+      if (!options?.signal?.aborted) {
+        const usage = this.estimateTokenUsage(request.messages, responseText);
+        yield {
+          id: responseId,
+          object: 'chat.completion.chunk',
+          created: Math.floor(Date.now() / 1000),
+          model: request.model,
+          choices: [{
+            index: 0,
+            delta: {},
+            finish_reason: 'stop'
+          }],
+          usage,
+          session_id: request.session_id
+        };
+      }
+    } catch (error) {
+      if (error instanceof vscode.CancellationError || options?.signal?.aborted) {
+        // Silent return on cancellation
+        return;
+      }
+      throw error;
     } finally {
       clearTimeout(timeoutHandle);
       cts.dispose();
+      if (options?.signal) {
+        options.signal.onabort = null;
+      }
     }
   }
 }

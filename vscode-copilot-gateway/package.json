@@ -1,7 +1,7 @@
 {
-  "name": "heidi-ai-copilot-dashboard",
-  "displayName": "Heidi AI Copilot Dashboard",
-  "description": "Heidi AI WebApp Copilot Dashboard - OpenAI-compatible API gateway with authentication, session memory, tool orchestration, and usage insights for your Heidi AI workflows",
+  "name": "heidi-gateway",
+  "displayName": "heidi-gateway-dashboard",
+  "description": "heidi-gateway-proxy - OpenAI-compatible proxy and dashboard for routing IDE AI clients",
   "version": "1.0.1",
   "engines": {
     "vscode": "^1.85.0",
@@ -32,37 +32,52 @@
   "contributes": {
     "commands": [
       {
-        "command": "aiwebapp-copilot-gateway.startServer",
-        "title": "Start Heidi AI Copilot Dashboard",
-        "category": "Heidi AI"
+        "command": "heidi-gateway-dashboard.startServer",
+        "title": "Start heidi-gateway-proxy",
+        "category": "heidi-gateway"
       },
       {
-        "command": "aiwebapp-copilot-gateway.stopServer",
-        "title": "Stop Heidi AI Copilot Dashboard",
-        "category": "Heidi AI"
+        "command": "heidi-gateway-dashboard.stopServer",
+        "title": "Stop heidi-gateway-proxy",
+        "category": "heidi-gateway"
       },
       {
-        "command": "aiwebapp-copilot-gateway.showDashboard",
-        "title": "Show Heidi AI Dashboard",
-        "category": "Heidi AI"
+        "command": "heidi-gateway-dashboard.showDashboard",
+        "title": "Show heidi-gateway-dashboard",
+        "category": "heidi-gateway"
       },
       {
-        "command": "aiwebapp-copilot-gateway.openSettings",
-        "title": "Configure Heidi AI Dashboard",
-        "category": "Heidi AI"
+        "command": "heidi-gateway-dashboard.openSettings",
+        "title": "Configure heidi-gateway-proxy",
+        "category": "heidi-gateway"
+      },
+      {
+        "command": "heidi-gateway-dashboard.explainSelection",
+        "title": "Explain Selection",
+        "category": "heidi-gateway"
+      },
+      {
+        "command": "heidi-gateway-dashboard.testSelection",
+        "title": "Write Tests for Selection",
+        "category": "heidi-gateway"
+      },
+      {
+        "command": "heidi-gateway-dashboard.refactorSelection",
+        "title": "Refactor Selection",
+        "category": "heidi-gateway"
       }
     ],
     "configuration": {
-      "title": "Heidi AI Copilot Dashboard",
+      "title": "heidi-gateway-proxy",
       "properties": {
-        "aiwebapp-copilot-gateway.server.port": {
+        "heidi-gateway-proxy.server.port": {
           "type": "number",
           "default": 3030,
           "minimum": 1024,
           "maximum": 65535,
           "description": "Port for the HTTP server"
         },
-        "aiwebapp-copilot-gateway.server.host": {
+        "heidi-gateway-proxy.server.host": {
           "type": "string",
           "default": "127.0.0.1",
           "enum": [
@@ -75,65 +90,180 @@
           ],
           "description": "Host binding for the server"
         },
-        "aiwebapp-copilot-gateway.server.apiKey": {
+        "heidi-gateway-proxy.server.apiKey": {
           "type": "string",
           "default": "",
           "description": "Optional Bearer token for API authentication"
         },
-        "aiwebapp-copilot-gateway.server.autoStart": {
+        "heidi-gateway-proxy.server.autoStart": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically launch Heidi AI Copilot Dashboard on VS Code startup"
+          "description": "Automatically launch heidi-gateway-proxy on VS Code startup"
         },
-        "aiwebapp-copilot-gateway.server.maxConcurrentRequests": {
+        "heidi-gateway-proxy.server.maxConcurrentRequests": {
           "type": "number",
           "default": 5,
           "minimum": 1,
           "maximum": 50,
           "description": "Maximum concurrent requests to Copilot"
         },
-        "aiwebapp-copilot-gateway.server.requestTimeout": {
+        "heidi-gateway-proxy.server.requestTimeout": {
           "type": "number",
           "default": 30000,
           "minimum": 5000,
           "maximum": 120000,
           "description": "Request timeout in milliseconds"
         },
-        "aiwebapp-copilot-gateway.server.retryAttempts": {
+        "heidi-gateway-proxy.server.retryAttempts": {
           "type": "number",
           "default": 3,
           "minimum": 0,
           "maximum": 10,
           "description": "Number of retry attempts for failed requests"
         },
-        "aiwebapp-copilot-gateway.auth.integrationEnabled": {
+        "heidi-gateway-proxy.auth.integrationEnabled": {
           "type": "boolean",
           "default": true,
           "description": "Enable Heidi AI WebApp authentication integration"
         },
-        "aiwebapp-copilot-gateway.auth.serviceUrl": {
+        "heidi-gateway-proxy.auth.serviceUrl": {
           "type": "string",
           "default": "http://localhost:4003",
           "description": "Heidi AI WebApp authentication service URL"
         },
-        "aiwebapp-copilot-gateway.session.trackingEnabled": {
+        "heidi-gateway-proxy.session.trackingEnabled": {
           "type": "boolean",
           "default": true,
           "description": "Enable Heidi AI session tracking and memory"
         },
-        "aiwebapp-copilot-gateway.session.maxHistory": {
+        "heidi-gateway-proxy.session.maxHistory": {
           "type": "number",
           "default": 100,
           "minimum": 10,
           "maximum": 1000,
           "description": "Maximum conversation history to maintain per session"
         },
-        "aiwebapp-copilot-gateway.usage.trackingEnabled": {
+        "heidi-gateway-proxy.context.mode": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Inject context only for non-smart clients",
+            "Always inject context",
+            "Never inject context"
+          ],
+          "description": "Controls IDE context injection into chat requests"
+        },
+        "heidi-gateway-proxy.redaction.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Redact likely secrets before sending prompts to models"
+        },
+        "heidi-gateway-proxy.router.mode": {
+          "type": "string",
+          "default": "copilot",
+          "enum": [
+            "copilot",
+            "upstream"
+          ],
+          "enumDescriptions": [
+            "Use VS Code Copilot language model API",
+            "Forward to an upstream OpenAI-compatible endpoint"
+          ],
+          "description": "Routing mode for /v1/chat/completions and /v1/models"
+        },
+        "heidi-gateway-proxy.router.upstreamBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Upstream base URL (e.g. http://localhost:3003 or https://api.openai.com/v1)"
+        },
+        "heidi-gateway-proxy.router.upstreamApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Optional upstream API key (Bearer)"
+        },
+        "heidi-gateway-proxy.ollama.url": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Ollama base URL (used when model is ollama/* or llama*/mistral*)"
+        },
+        "heidi-gateway-proxy.runner.url": {
+          "type": "string",
+          "default": "http://localhost:4001",
+          "description": "Heidi Runner base URL (used when model is runner/agent/heidi*)"
+        },
+        "heidi-gateway-proxy.rag.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable local workspace text search and inject top matches into prompts"
+        },
+        "heidi-gateway-proxy.rag.maxFiles": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Maximum number of files to include from workspace search"
+        },
+        "heidi-gateway-proxy.proxy.clientProfile": {
+          "type": "string",
+          "default": "copilot",
+          "enum": [
+            "copilot",
+            "codex",
+            "gemini",
+            "trae",
+            "windsurf",
+            "cursor",
+            "opencode",
+            "continue",
+            "roo-code",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "Treat client as GitHub Copilot (needs local context injection)",
+            "Treat client as Codex",
+            "Treat client as Gemini",
+            "Treat client as Trae",
+            "Treat client as Windsurf",
+            "Treat client as Cursor",
+            "Treat client as OpenCode",
+            "Treat client as Continue.dev",
+            "Treat client as Roo Code (Cline)",
+            "Auto-detect by User-Agent"
+          ],
+          "description": "Controls client-specific proxy behavior (primarily context injection) when routing /v1/chat/completions"
+        },
+        "heidi-gateway-proxy.rag.maxResults": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "maximum": 200,
+          "description": "Maximum total matches to consider from workspace search"
+        },
+        "heidi-gateway-proxy.rag.maxMatchesPerFile": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Maximum matches to include per file"
+        },
+        "heidi-gateway-proxy.rag.maxChars": {
+          "type": "number",
+          "default": 4000,
+          "minimum": 0,
+          "maximum": 20000,
+          "description": "Maximum characters for injected workspace search block"
+        },
+        "heidi-gateway-proxy.usage.trackingEnabled": {
           "type": "boolean",
           "default": true,
           "description": "Track Heidi AI usage analytics and performance"
         },
-        "aiwebapp-copilot-gateway.usage.metricsEndpoint": {
+        "heidi-gateway-proxy.usage.metricsEndpoint": {
           "type": "string",
           "default": "http://localhost:4001/api/metrics",
           "description": "Heidi AI WebApp metrics endpoint"
@@ -143,28 +273,28 @@
     "views": {
       "explorer": [
         {
-          "id": "aiwebapp-copilot-gateway-explorer",
-          "name": "Heidi AI",
+          "id": "heidi-gateway",
+          "name": "heidi-gateway",
           "icon": "$(robot)",
-          "contextualTitle": "Heidi AI Copilot Dashboard"
+          "contextualTitle": "heidi-gateway-dashboard"
         }
       ]
     },
     "menus": {
       "view/title": [
         {
-          "command": "aiwebapp-copilot-gateway.startServer",
-          "when": "view == aiwebapp-copilot-gateway-explorer && !aiwebapp-copilot-gateway.serverRunning",
+          "command": "heidi-gateway-dashboard.startServer",
+          "when": "view == heidi-gateway && !heidi-gateway-proxy.serverRunning",
           "group": "navigation@1"
         },
         {
-          "command": "aiwebapp-copilot-gateway.stopServer",
-          "when": "view == aiwebapp-copilot-gateway-explorer && aiwebapp-copilot-gateway.serverRunning",
+          "command": "heidi-gateway-dashboard.stopServer",
+          "when": "view == heidi-gateway && heidi-gateway-proxy.serverRunning",
           "group": "navigation@1"
         },
         {
-          "command": "aiwebapp-copilot-gateway.showDashboard",
-          "when": "view == aiwebapp-copilot-gateway-explorer",
+          "command": "heidi-gateway-dashboard.showDashboard",
+          "when": "view == heidi-gateway",
           "group": "navigation@2"
         }
       ]

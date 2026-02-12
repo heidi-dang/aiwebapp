@@ -1,13 +1,13 @@
-# AIWebApp Copilot Gateway
+# heidi-gateway
 
-A VS Code extension that provides an OpenAI-compatible API gateway for GitHub Copilot, integrated with AIWebApp's authentication, session management, and tool calling capabilities.
+A VS Code extension that provides an OpenAI-compatible proxy (heidi-gateway-proxy) and dashboard (heidi-gateway-dashboard) for routing IDE AI clients.
 
 ## Features
 
 - 🤖 **OpenAI-Compatible API**: Exposes GitHub Copilot through OpenAI-style REST endpoints
-- 🔐 **Authentication**: Integrates with AIWebApp's auth service for secure access
+- 🔐 **Authentication**: Integrates with your auth service for secure access
 - 📝 **Session Management**: Track and manage conversation sessions
-- 🛠️ **Tool Calling**: Execute AIWebApp tools from your AI applications
+- 🛠️ **Tool Calling**: Execute tools from your AI applications
 - 📊 **Live Metrics**: WebSocket-based real-time server statistics
 - 🌊 **Streaming Support**: Server-Sent Events (SSE) for streaming responses
 - 🔒 **Security**: Timing-safe API key validation, helmet, CORS
@@ -17,7 +17,7 @@ A VS Code extension that provides an OpenAI-compatible API gateway for GitHub Co
 ### Option 1: From VSIX File
 
 ```bash
-code --install-extension aiwebapp-copilot-gateway-1.0.0.vsix
+code --install-extension heidi-gateway-1.0.1.vsix
 ```
 
 ### Option 2: From Source
@@ -27,7 +27,7 @@ code --install-extension aiwebapp-copilot-gateway-1.0.0.vsix
 3. Install dependencies: `npm install`
 4. Compile: `npm run compile`
 5. Package: `npx @vscode/vsce package`
-6. Install: `code --install-extension aiwebapp-copilot-gateway-1.0.0.vsix`
+6. Install: `code --install-extension heidi-gateway-1.0.1.vsix`
 
 ## Quick Start
 
@@ -36,7 +36,7 @@ code --install-extension aiwebapp-copilot-gateway-1.0.0.vsix
 - **VS Code**: Version 1.85.0 or higher
 - **Node.js**: Version 18.0.0 or higher
 - **GitHub Copilot**: Active subscription (uses VS Code LM API)
-- **AIWebApp Backend** (optional): Running on `localhost:4001` for tool calling
+- **Heidi Runner** (optional): Running on `localhost:4001` for agent routing
 
 ### 2. Server Configuration
 
@@ -44,11 +44,10 @@ The extension auto-starts by default. Configure via VS Code settings:
 
 ```json
 {
-  "aiwebapp-copilot-gateway.server.port": 3030,
-  "aiwebapp-copilot-gateway.server.host": "127.0.0.1",
-  "aiwebapp-copilot-gateway.server.apiKey": "",
-  "aiwebapp-copilot-gateway.server.autoStart": true,
-  "aiwebapp-copilot-gateway.backendUrl": "http://localhost:4001"
+  "heidi-gateway-proxy.server.port": 3030,
+  "heidi-gateway-proxy.server.host": "127.0.0.1",
+  "heidi-gateway-proxy.server.apiKey": "",
+  "heidi-gateway-proxy.server.autoStart": true
 }
 ```
 
@@ -58,12 +57,12 @@ The extension auto-starts by default. Configure via VS Code settings:
 
 **Manual start**: 
 - Open Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`)
-- Run: `AIWebApp: Start Copilot Gateway Server`
+- Run: `Start heidi-gateway-proxy`
 
 ### 4. View Dashboard
 
 - Open Command Palette
-- Run: `AIWebApp: Show Gateway Dashboard`
+- Run: `Show heidi-gateway-dashboard`
 
 ## Usage
 
@@ -265,8 +264,7 @@ chat('Explain async/await in JavaScript').then(console.log);
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `backendUrl` | string | `http://localhost:4001` | AIWebApp backend URL |
-| `auth.integrationEnabled` | boolean | `true` | Enable AIWebApp auth integration |
+| `auth.integrationEnabled` | boolean | `true` | Enable auth integration |
 | `auth.serviceUrl` | string | `http://localhost:4003` | Auth service URL |
 
 ### Session & Metrics
@@ -282,10 +280,10 @@ chat('Explain async/await in JavaScript').then(console.log);
 
 Access via Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 
-- **AIWebApp: Start Copilot Gateway Server** - Start the HTTP/WebSocket server
-- **AIWebApp: Stop Copilot Gateway Server** - Stop the server
-- **AIWebApp: Show Gateway Dashboard** - Open the web-based dashboard
-- **AIWebApp: Open Gateway Settings** - Open extension settings
+- **Start heidi-gateway-proxy** - Start the HTTP/WebSocket server
+- **Stop heidi-gateway-proxy** - Stop the server
+- **Show heidi-gateway-dashboard** - Open the web-based dashboard
+- **Configure heidi-gateway-proxy** - Open extension settings
 
 ## Security
 
@@ -295,7 +293,7 @@ Set an API key to require Bearer token authentication:
 
 ```json
 {
-  "aiwebapp-copilot-gateway.server.apiKey": "your-secret-key-here"
+  "heidi-gateway-proxy.server.apiKey": "your-secret-key-here"
 }
 ```
 
@@ -326,13 +324,13 @@ The extension uses **constant-time comparison** to prevent timing attacks.
 2. Try a different port in settings:
    ```json
    {
-     "aiwebapp-copilot-gateway.server.port": 3031
+     "heidi-gateway-proxy.server.port": 3031
    }
    ```
 
 3. Check VS Code Output panel:
    - View → Output
-   - Select "AIWebApp Copilot Gateway"
+   - Select "heidi-gateway"
 
 ### No Models Available
 
@@ -342,7 +340,7 @@ The extension uses **constant-time comparison** to prevent timing attacks.
 
 ### Tool Calling Fails
 
-- Verify AIWebApp backend is running on configured `backendUrl`
+- Verify your backend services are running
 - Check backend logs for authentication/authorization errors
 - Ensure `x-auth-token` header is provided if backend requires auth
 
@@ -384,13 +382,13 @@ VS Code Extension
 │   ├── Server Lifecycle Management
 │   ├── Command Registration
 │   └── Configuration Management
-├── Copilot Gateway Server (CopilotGatewayServer.ts)
+├── heidi-gateway-proxy (CopilotGatewayServer.ts)
 │   ├── Express HTTP Server
 │   ├── WebSocket Server (stats)
 │   ├── VS Code LM API Client
 │   └── Request Queue
 ├── Services
-│   ├── AuthService (AIWebApp integration)
+│   ├── AuthService
 │   ├── SessionManager (conversation tracking)
 │   └── MetricsService (usage analytics)
 └── UI
@@ -423,7 +421,8 @@ For issues or questions:
 - GitHub Copilot integration via VS Code LM API
 - Streaming support (SSE)
 - Session management
-- Tool calling integration with AIWebApp
+- Tool calling integration
+- Multi-file edit orchestration tool
 - WebSocket live stats
 - Authentication integration
 - Metrics tracking

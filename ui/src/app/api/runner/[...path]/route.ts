@@ -58,7 +58,9 @@ async function proxyRequest(request: NextRequest, path: string[]) {
       'connection',
       'transfer-encoding',
       'content-length',
-      'content-encoding'
+      'content-encoding',
+      'accept-encoding',
+      'expect'
     ]
     
     request.headers.forEach((value, key) => {
@@ -70,11 +72,17 @@ async function proxyRequest(request: NextRequest, path: string[]) {
     // Add auth token
     headers.set('Authorization', `Bearer ${runnerToken}`)
 
+    const contentLength = Number(request.headers.get('content-length') ?? '0')
+    const hasBody = Number.isFinite(contentLength) && contentLength > 0
+    if (!hasBody) {
+      headers.delete('content-type')
+    }
+
     const response = await fetch(finalUrl, {
       method: request.method,
       headers,
       body:
-        request.method !== 'GET' && request.method !== 'HEAD'
+        request.method !== 'GET' && request.method !== 'HEAD' && hasBody
           ? await request.arrayBuffer()
           : undefined,
       // @ts-expect-error - duplex is needed for some node versions/fetch implementations

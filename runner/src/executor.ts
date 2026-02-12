@@ -1,6 +1,6 @@
 /**
  * Phase 3: Job executor with realistic tool simulation
- * 
+ *
  * Executes jobs by:
  * 1. Emitting a plan event
  * 2. Running tools (simulated or via bridge)
@@ -22,6 +22,7 @@ import { loadHeidiGuidelines } from './services/heidi-guidelines.js'
 import { RepoMapper } from './services/repo-map.js'
 import { registerJobProcess } from './process-registry.js'
 import type { FastifyReply } from 'fastify'
+import { jobRateLimiter } from './rate-limiter.js'
 
 function nowIso() {
   return new Date().toISOString()
@@ -177,17 +178,29 @@ function stableClaimJson(claim: {
 }
 
 function resolveWithinBase(baseDir: string, targetPath: string) {
+  // Sanitize the target path to prevent null byte injection and other attacks
+  if (targetPath.includes('\0')) {
+    throw new Error('Null byte injection detected in path')
+  }
+
+  // Prevent common path traversal techniques
+  if (targetPath.includes('../') || targetPath.includes('..\\') || targetPath.includes('%2e%2e%2f') || targetPath.includes('%2e%2e%5c')) {
+    throw new Error('Path traversal detected in path')
+  }
+
   const candidate = path.isAbsolute(targetPath)
     ? targetPath
     : path.resolve(baseDir, targetPath)
+
   const baseResolved = path.resolve(baseDir)
   const normalizedCandidate = path.resolve(candidate)
-  if (
-    normalizedCandidate !== baseResolved &&
-    !normalizedCandidate.startsWith(baseResolved + path.sep)
-  ) {
+
+  // Additional check to ensure the resolved path is within the base directory
+  const relativePath = path.relative(baseResolved, normalizedCandidate)
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
     throw new Error('Access outside of base_dir is not allowed')
   }
+
   return normalizedCandidate
 }
 
@@ -200,6 +213,20 @@ function toSandboxPath(baseDir: string, absoluteHostPath: string) {
 }
 
 async function handleReadFileTool(ctx: JobContext, path: string) {
+  // Check rate limits before executing the tool
+  const rateLimitKey = `${ctx.jobId}:read_file`;
+  if (!jobRateLimiter.isAllowed(rateLimitKey)) {
+    const { resetTime } = jobRateLimiter.getRateLimitInfo(rateLimitKey);
+    const resetTimeFormatted = new Date(resetTime).toISOString();
+    const errorMessage = `Rate limit exceeded for read_file. Try again after ${resetTimeFormatted}`;
+
+    await emitEvent(ctx, 'tool.start', { tool: 'read_file', input: { path } });
+    await emitEvent(ctx, 'tool.output', { tool: 'read_file', output: errorMessage });
+    await emitEvent(ctx, 'tool.end', { tool: 'read_file', success: false, error: errorMessage });
+
+    return { error: errorMessage };
+  }
+
   await emitEvent(ctx, 'tool.start', { tool: 'read_file', input: { path } })
   try {
     const baseDir = ctx.baseDirResolved
@@ -225,6 +252,20 @@ async function handleReadFileTool(ctx: JobContext, path: string) {
 }
 
 async function handleWriteFileTool(ctx: JobContext, path: string, content: string) {
+  // Check rate limits before executing the tool
+  const rateLimitKey = `${ctx.jobId}:write_file`;
+  if (!jobRateLimiter.isAllowed(rateLimitKey)) {
+    const { resetTime } = jobRateLimiter.getRateLimitInfo(rateLimitKey);
+    const resetTimeFormatted = new Date(resetTime).toISOString();
+    const errorMessage = `Rate limit exceeded for write_file. Try again after ${resetTimeFormatted}`;
+
+    await emitEvent(ctx, 'tool.start', { tool: 'write_file', input: { path } });
+    await emitEvent(ctx, 'tool.output', { tool: 'write_file', output: errorMessage });
+    await emitEvent(ctx, 'tool.end', { tool: 'write_file', success: false, error: errorMessage });
+
+    return { error: errorMessage };
+  }
+
   await emitEvent(ctx, 'tool.start', { tool: 'write_file', input: { path } })
   try {
     const baseDir = ctx.baseDirResolved
@@ -264,6 +305,20 @@ async function handleWriteFileTool(ctx: JobContext, path: string, content: strin
 }
 
 async function handleListFilesTool(ctx: JobContext, globPattern: string) {
+  // Check rate limits before executing the tool
+  const rateLimitKey = `${ctx.jobId}:list_files`;
+  if (!jobRateLimiter.isAllowed(rateLimitKey)) {
+    const { resetTime } = jobRateLimiter.getRateLimitInfo(rateLimitKey);
+    const resetTimeFormatted = new Date(resetTime).toISOString();
+    const errorMessage = `Rate limit exceeded for list_files. Try again after ${resetTimeFormatted}`;
+
+    await emitEvent(ctx, 'tool.start', { tool: 'list_files', input: { glob: globPattern } });
+    await emitEvent(ctx, 'tool.output', { tool: 'list_files', output: errorMessage });
+    await emitEvent(ctx, 'tool.end', { tool: 'list_files', success: false, error: errorMessage });
+
+    return { error: errorMessage };
+  }
+
   await emitEvent(ctx, 'tool.start', { tool: 'list_files', input: { glob: globPattern } })
   try {
     const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
@@ -293,9 +348,33 @@ async function handleListFilesTool(ctx: JobContext, globPattern: string) {
 }
 
 async function handleRunCommandTool(ctx: JobContext, command: string) {
+  // Check rate limits before executing the command
+  const rateLimitKey = `${ctx.jobId}:run_command`;
+  if (!jobRateLimiter.isAllowed(rateLimitKey)) {
+    const { resetTime } = jobRateLimiter.getRateLimitInfo(rateLimitKey);
+    const resetTimeFormatted = new Date(resetTime).toISOString();
+    const errorMessage = `Rate limit exceeded for run_command. Try again after ${resetTimeFormatted}`;
+
+    await emitEvent(ctx, 'tool.start', { tool: 'run_command', input: { command } });
+    await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: errorMessage });
+    await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: errorMessage });
+
+    return { error: errorMessage };
+  }
+
   await emitEvent(ctx, 'tool.start', { tool: 'run_command', input: { command } })
+
   try {
+    // Validate command for dangerous patterns
+    if (isDangerousCommand(command)) {
+      const errorMessage = `Refused to run dangerous command: ${command}`;
+      await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: errorMessage });
+      await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: errorMessage });
+      return { error: errorMessage };
+    }
+
     const baseDir = ctx.baseDirResolved
+
     if (ctx.input.runtime_mode === 'sandbox') {
       const res = await sandboxService.execCommand(ctx.jobId, command, '/app/workspace')
       const output = (res.stdout || '').slice(0, 4000)
@@ -309,27 +388,64 @@ async function handleRunCommandTool(ctx: JobContext, command: string) {
       return { stdout: output, stderr: errOut, exitCode: res.exitCode }
     }
 
+    // Enhanced security: Only allow commands from a predefined safe list
+    const commandParts = command.trim().split(/\s+/);
+    const executable = commandParts[0];
+
+    // Define a list of allowed executables
+    const allowedExecutables = [
+      'ls', 'dir', 'pwd', 'echo', 'cat', 'head', 'tail', 'grep', 'find', 'ps', 'top', 'htop',
+      'df', 'du', 'stat', 'wc', 'which', 'where', 'type', 'tree', 'node', 'npm', 'npx', 'yarn',
+      'python', 'python3', 'pip', 'pip3', 'git', 'code', 'java', 'javac', 'gcc', 'clang',
+      'make', 'cmake', 'docker', 'docker-compose', 'bash', 'sh', 'zsh', 'fish', 'curl', 'wget',
+      'mkdir', 'touch', 'cp', 'mv', 'rm', 'rmdir', 'cd', 'cd..', 'cd ..', 'clear', 'cls'
+    ];
+
+    if (!allowedExecutables.includes(executable.toLowerCase())) {
+      const errorMessage = `Command '${executable}' is not in the allowed list of executables`;
+      await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: errorMessage });
+      await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: errorMessage });
+      return { error: errorMessage };
+    }
+
     const maxOutput = 4000
     const timeoutMs = 15000
+    const maxMemory = 512 * 1024 * 1024; // 512MB limit
 
     const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
-      const child = spawn('bash', ['-lc', command], { cwd: baseDir })
+      // Use spawn with restricted environment
+      const child = spawn('bash', ['-c', command], {
+        cwd: baseDir,
+        env: {
+          ...process.env,
+          PATH: '/usr/local/bin:/usr/bin:/bin:/sbin', // Restricted PATH
+          HOME: baseDir, // Restrict HOME directory
+        }
+      });
+
       registerJobProcess(ctx.jobId, child)
 
       let stdout = ''
       let stderr = ''
       let resolved = false
+      let memoryUsage = 0;
 
       const timer = setTimeout(() => {
         try {
-          child.kill('SIGKILL')
+          child.kill('SIGTERM'); // Try graceful termination first
+          setTimeout(() => {
+            child.kill('SIGKILL'); // Force kill if not terminated gracefully
+          }, 2000);
         } catch {
         }
       }, timeoutMs)
 
       const onAbort = () => {
         try {
-          child.kill('SIGKILL')
+          child.kill('SIGTERM');
+          setTimeout(() => {
+            child.kill('SIGKILL');
+          }, 2000);
         } catch {
         }
       }
@@ -337,10 +453,31 @@ async function handleRunCommandTool(ctx: JobContext, command: string) {
       ctx.signal?.addEventListener('abort', onAbort, { once: true })
 
       child.stdout.on('data', (chunk) => {
-        if (stdout.length < maxOutput) stdout += chunk.toString()
+        if (stdout.length < maxOutput) {
+          stdout += chunk.toString();
+          memoryUsage += chunk.length;
+
+          // Check memory usage periodically
+          if (memoryUsage > maxMemory) {
+            try {
+              child.kill('SIGKILL');
+            } catch {}
+          }
+        }
       })
+
       child.stderr.on('data', (chunk) => {
-        if (stderr.length < maxOutput) stderr += chunk.toString()
+        if (stderr.length < maxOutput) {
+          stderr += chunk.toString();
+          memoryUsage += chunk.length;
+
+          // Check memory usage periodically
+          if (memoryUsage > maxMemory) {
+            try {
+              child.kill('SIGKILL');
+            } catch {}
+          }
+        }
       })
 
       child.on('error', (err) => {
@@ -349,6 +486,7 @@ async function handleRunCommandTool(ctx: JobContext, command: string) {
         clearTimeout(timer)
         reject(err)
       })
+
       child.on('close', (code) => {
         if (resolved) return
         resolved = true
@@ -385,12 +523,148 @@ function looksLikeNaturalLanguageCommand(command: string): boolean {
 }
 
 function isDangerousCommand(command: string): boolean {
-  const lowered = command.toLowerCase()
-  // Simple blacklist of dangerous patterns
-  return /(^|\s)(rm\s+-rf|sudo\b|shutdown\b|reboot\b|mkfs\b|dd\s+if=|:\(\)\s*{\s*:|:;};:|:\s*>\s*\/|>\s*\/)/.test(lowered)
+  const lowered = command.toLowerCase().trim()
+
+  // Whitelist of safe commands - only allow known safe commands
+  const safeCommands = [
+    /^npm\s+(list|ls|search|view|info|show)$/,           // Package info commands
+    /^npm\s+outdated$/,                                  // Check outdated packages
+    /^npx\s+[^-]/,                                       // npx with package name (but not flags)
+    /^yarn\s+(list|info|show)$/,                         // Yarn info commands
+    /^node\s+--version|-v$/,                             // Node version
+    /^npm\s+--version|-v$/,                              // NPM version
+    /^yarn\s+--version|-v$/,                             // Yarn version
+    /^git\s+(status|diff|log|show|branch|remote|fetch)$/, // Safe git commands
+    /^git\s+checkout\s+\w/,                              // Git checkout (with ref)
+    /^git\s+switch\s+\w/,                                // Git switch (with ref)
+    /^ls\s+/,                                            // Directory listing
+    /^dir\s*$/,                                          // Windows directory listing
+    /^pwd$/,                                             // Print working directory
+    /^echo\s+/,                                          // Echo command
+    /^cat\s+/,                                           // Cat files
+    /^head\s+/,                                          // Head command
+    /^tail\s+/,                                          // Tail command
+    /^grep\s+/,                                          // Grep command
+    /^find\s+/,                                          // Find command
+    /^ps\s+/,                                            // Process status
+    /^top\s*$|htop\s*$/,                                 // Process monitoring
+    /^df\s*-h$/,                                         // Disk space
+    /^du\s+-sh/,                                         // Directory usage
+    /^stat\s+/,                                          // File statistics
+    /^wc\s+/,                                            // Word count
+    /^which\s+/,                                         // Locate command
+    /^where\s+/,                                         // Windows locate command
+    /^type\s+/,                                          // Windows type command
+    /^tree\s*/,                                          // Tree command
+    /^code\s+--version/,                                 // VS Code version
+    /^python\s+--version|-V$/,                           // Python version
+    /^python3\s+--version|-V$/,                          // Python3 version
+    /^pip\s+list$/,                                      // Pip list
+    /^pip3\s+list$/,                                     // Pip3 list
+    /^java\s+-version$/,                                 // Java version
+    /^javac\s+-version$/,                                // Java compiler version
+    /^gcc\s+--version$/,                                 // GCC version
+    /^clang\s+--version$/,                               // Clang version
+    /^make\s+--version$/,                                // Make version
+    /^cmake\s+--version$/,                               // CMake version
+    /^docker\s+ps|images|info|version$/,                 // Safe docker commands
+    /^docker-compose\s+ps|config|version$/               // Safe docker-compose commands
+  ]
+
+  // Check if command matches any safe pattern
+  for (const pattern of safeCommands) {
+    if (pattern.test(lowered)) {
+      return false // Command is safe
+    }
+  }
+
+  // Additional dangerous patterns not covered by whitelist
+  const dangerousPatterns = [
+    /(^|\s)(rm\s+|del\s+|erase\s+)/,                     // File deletion
+    /(^|\s)(sudo\b|su\b)/,                               // Privilege escalation
+    /(^|\s)(shutdown\b|reboot\b|halt\b|poweroff\b)/,     // System shutdown
+    /(^|\s)(mkfs\b|dd\b|mount\b|umount\b)/,              // Disk operations
+    /(^|\s)(chmod\b|chown\b|chattr\b)/,                  // Permission changes
+    /(^|\s)(mv\b|cp\b|ln\b)\s+.*\s+\/\s*$/,             // Moving/copying to root
+    /(^|\s)(mv\b|cp\b|ln\b)\s+.*\s+\~\s*$/,             // Moving/copying to home
+    /(^|\s)(mv\b|cp\b|ln\b)\s+.*\s+\/home\s*$/,         // Moving/copying to home dir
+    /(^|\s)(mv\b|cp\b|ln\b)\s+.*\s+\/etc\s*$/,          // Moving/copying to system config
+    /(^|\s)(mv\b|cp\b|ln\b)\s+.*\s+\/usr\s*$/,          // Moving/copying to system bin
+    /(^|\s)(mv\b|cp\b|ln\b)\s+.*\s+\/bin\s*$/,          // Moving/copying to system bin
+    /(^|\s)(mv\b|cp\b|ln\b)\s+.*\s+\/sbin\s*$/,         // Moving/copying to system sbin
+    /(^|\s)(mv\b|cp\b|ln\b)\s+.*\s+\/root\s*$/,         // Moving/copying to root home
+    /(:\(\)\s*{\s*:|:;};:|:\s*>\s*\/|>\s*\/)/,          // Fork bombs and redirections
+    /(&&\s*rm\s+|;\s*rm\s+|\|\s*rm\s+)/,                // Chained deletions
+    /(&&\s*sudo\s+|;\s*sudo\s+|\|\s*sudo\s+)/,          // Chained privilege escalation
+    /(&&\s*shutdown\s+|;\s*shutdown\s+|\|\s*shutdown\s+)/, // Chained shutdowns
+    /(&&\s*reboot\s+|;\s*reboot\s+|\|\s*reboot\s+)/,    // Chained reboots
+    /(&&\s*mkfs\s+|;\s*mkfs\s+|\|\s*mkfs\s+)/,          // Chained filesystem creation
+    /(&&\s*dd\s+|;\s*dd\s+|\|\s*dd\s+)/,                // Chained dd commands
+    /(&&\s*mount\s+|;\s*mount\s+|\|\s*mount\s+)/,       // Chained mount commands
+    /(&&\s*umount\s+|;\s*umount\s+|\|\s*umount\s+)/,    // Chained unmount commands
+    /(&&\s*chmod\s+|;\s*chmod\s+|\|\s*chmod\s+)/,       // Chained permission changes
+    /(&&\s*chown\s+|;\s*chown\s+|\|\s*chown\s+)/,       // Chained ownership changes
+    /(&&\s*chattr\s+|;\s*chattr\s+|\|\s*chattr\s+)/,    // Chained attribute changes
+    /(&&\s*mv\s+|;\s*mv\s+|\|\s*mv\s+).*\s+\/\s*$/,     // Chained moves to root
+    /(&&\s*cp\s+|;\s*cp\s+|\|\s*cp\s+).*\s+\/\s*$/,     // Chained copies to root
+    /(&&\s*ln\s+|;\s*ln\s+|\|\s*ln\s+).*\s+\/\s*$/,     // Chained links to root
+    /(&&\s*rm\s+|;\s*rm\s+|\|\s*rm\s+).*\s+\/\s*$/,     // Chained removals of root
+    /(&&\s*mv\s+|;\s*mv\s+|\|\s*mv\s+).*\s+\~\s*$/,     // Chained moves to home
+    /(&&\s*cp\s+|;\s*cp\s+|\|\s*cp\s+).*\s+\~\s*$/,     // Chained copies to home
+    /(&&\s*ln\s+|;\s*ln\s+|\|\s*ln\s+).*\s+\~\s*$/,     // Chained links to home
+    /(&&\s*rm\s+|;\s*rm\s+|\|\s*rm\s+).*\s+\~\s*$/,     // Chained removals of home
+    /(&&\s*mv\s+|;\s*mv\s+|\|\s*mv\s+).*\s+\/home\s*$/, // Chained moves to home dir
+    /(&&\s*cp\s+|;\s*cp\s+|\|\s*cp\s+).*\s+\/home\s*$/, // Chained copies to home dir
+    /(&&\s*ln\s+|;\s*ln\s+|\|\s*ln\s+).*\s+\/home\s*$/, // Chained links to home dir
+    /(&&\s*rm\s+|;\s*rm\s+|\|\s*rm\s+).*\s+\/home\s*$/, // Chained removals of home dir
+    /(&&\s*mv\s+|;\s*mv\s+|\|\s*mv\s+).*\s+\/etc\s*$/,  // Chained moves to system config
+    /(&&\s*cp\s+|;\s*cp\s+|\|\s*cp\s+).*\s+\/etc\s*$/,  // Chained copies to system config
+    /(&&\s*ln\s+|;\s*ln\s+|\|\s*ln\s+).*\s+\/etc\s*$/,  // Chained links to system config
+    /(&&\s*rm\s+|;\s*rm\s+|\|\s*rm\s+).*\s+\/etc\s*$/,  // Chained removals of system config
+    /(&&\s*mv\s+|;\s*mv\s+|\|\s*mv\s+).*\s+\/usr\s*$/,  // Chained moves to system bin
+    /(&&\s*cp\s+|;\s*cp\s+|\|\s*cp\s+).*\s+\/usr\s*$/,  // Chained copies to system bin
+    /(&&\s*ln\s+|;\s*ln\s+|\|\s*ln\s+).*\s+\/usr\s*$/,  // Chained links to system bin
+    /(&&\s*rm\s+|;\s*rm\s+|\|\s*rm\s+).*\s+\/usr\s*$/,  // Chained removals of system bin
+    /(&&\s*mv\s+|;\s*mv\s+|\|\s*mv\s+).*\s+\/bin\s*$/,  // Chained moves to system bin
+    /(&&\s*cp\s+|;\s*cp\s+|\|\s*cp\s+).*\s+\/bin\s*$/,  // Chained copies to system bin
+    /(&&\s*ln\s+|;\s*ln\s+|\|\s*ln\s+).*\s+\/bin\s*$/,  // Chained links to system bin
+    /(&&\s*rm\s+|;\s*rm\s+|\|\s*rm\s+).*\s+\/bin\s*$/,  // Chained removals of system bin
+    /(&&\s*mv\s+|;\s*mv\s+|\|\s*mv\s+).*\s+\/sbin\s*$/, // Chained moves to system sbin
+    /(&&\s*cp\s+|;\s*cp\s+|\|\s*cp\s+).*\s+\/sbin\s*$/, // Chained copies to system sbin
+    /(&&\s*ln\s+|;\s*ln\s+|\|\s*ln\s+).*\s+\/sbin\s*$/, // Chained links to system sbin
+    /(&&\s*rm\s+|;\s*rm\s+|\|\s*rm\s+).*\s+\/sbin\s*$/, // Chained removals of system sbin
+    /(&&\s*mv\s+|;\s*mv\s+|\|\s*mv\s+).*\s+\/root\s*$/, // Chained moves to root home
+    /(&&\s*cp\s+|;\s*cp\s+|\|\s*cp\s+).*\s+\/root\s*$/, // Chained copies to root home
+    /(&&\s*ln\s+|;\s*ln\s+|\|\s*ln\s+).*\s+\/root\s*$/, // Chained links to root home
+    /(&&\s*rm\s+|;\s*rm\s+|\|\s*rm\s+).*\s+\/root\s*$/  // Chained removals of root home
+  ]
+
+  for (const pattern of dangerousPatterns) {
+    if (pattern.test(lowered)) {
+      return true // Command is dangerous
+    }
+  }
+
+  // If not in whitelist and not flagged as dangerous, treat as potentially dangerous
+  // unless it's a simple command without dangerous patterns
+  return true
 }
 
 async function handleListDirTool(ctx: JobContext, path: string) {
+  // Check rate limits before executing the tool
+  const rateLimitKey = `${ctx.jobId}:list_dir`;
+  if (!jobRateLimiter.isAllowed(rateLimitKey)) {
+    const { resetTime } = jobRateLimiter.getRateLimitInfo(rateLimitKey);
+    const resetTimeFormatted = new Date(resetTime).toISOString();
+    const errorMessage = `Rate limit exceeded for list_dir. Try again after ${resetTimeFormatted}`;
+
+    await emitEvent(ctx, 'tool.start', { tool: 'list_dir', input: { path } });
+    await emitEvent(ctx, 'tool.output', { tool: 'list_dir', output: errorMessage });
+    await emitEvent(ctx, 'tool.end', { tool: 'list_dir', success: false, error: errorMessage });
+
+    return { error: errorMessage };
+  }
+
   await emitEvent(ctx, 'tool.start', { tool: 'list_dir', input: { path } })
   try {
     const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
@@ -424,6 +698,20 @@ async function handleListDirTool(ctx: JobContext, path: string) {
 }
 
 async function handleGrepSearchTool(ctx: JobContext, query: string, includePattern?: string) {
+  // Check rate limits before executing the tool
+  const rateLimitKey = `${ctx.jobId}:grep_search`;
+  if (!jobRateLimiter.isAllowed(rateLimitKey)) {
+    const { resetTime } = jobRateLimiter.getRateLimitInfo(rateLimitKey);
+    const resetTimeFormatted = new Date(resetTime).toISOString();
+    const errorMessage = `Rate limit exceeded for grep_search. Try again after ${resetTimeFormatted}`;
+
+    await emitEvent(ctx, 'tool.start', { tool: 'grep_search', input: { query, include_pattern: includePattern } });
+    await emitEvent(ctx, 'tool.output', { tool: 'grep_search', output: errorMessage });
+    await emitEvent(ctx, 'tool.end', { tool: 'grep_search', success: false, error: errorMessage });
+
+    return { error: errorMessage };
+  }
+
   await emitEvent(ctx, 'tool.start', { tool: 'grep_search', input: { query, include_pattern: includePattern } })
   try {
     const baseDir = ctx.input.base_dir && ctx.input.base_dir.trim() ? ctx.input.base_dir : process.cwd()
@@ -874,9 +1162,25 @@ For specific actions like running commands or modifying files, ask the user to c
   await emitEvent(ctx, 'tool.start', { tool: 'copilot', input: { model, message } })
 
   // Build the API URL
-  const base = (process.env.AI_API_URL ?? '').replace(/\/+$/, '')
+  const base = (
+    (process.env.AI_API_URL ??
+      process.env.COPILOT_API_URL ??
+      process.env.NEXT_PUBLIC_COPILOT_API_URL ??
+      '') || 'http://localhost:3030'
+  )
+    .trim()
+    .replace(/\/+$/, '')
   const chatPath = process.env.AI_API_CHAT_PATH ?? '/v1/chat/completions'
   const url = `${base}${chatPath.startsWith('/') ? '' : '/'}${chatPath}`
+
+  const requestTimeoutMs = Number(
+    process.env.AI_API_TIMEOUT_MS ?? process.env.REQUEST_TIMEOUT_MS ?? 30000
+  )
+
+  const failCopilot = async (reason: string) => {
+    await emitEvent(ctx, 'tool.end', { tool: 'copilot', success: false, error: reason })
+    throw new Error(reason)
+  }
 
   const debug = process.env.RUNNER_DEBUG === '1'
   if (debug) {
@@ -886,222 +1190,103 @@ For specific actions like running commands or modifying files, ask the user to c
     console.log('[CopilotAPI] model=', model)
   }
 
-  for (let i = 0; i < 6; i++) {
-    let res: Response
-    let raw = ''
+  async function readSseText(res: Response): Promise<string> {
+    if (!res.body) return ''
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let out = ''
 
-    try {
-      res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(process.env.AI_API_KEY ? { Authorization: `Bearer ${process.env.AI_API_KEY}` } : {})
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          ...(isActionRequest && tools.length > 0 ? { tools, tool_choice: 'auto' } : {}),
-          temperature: 0.7
-        })
-      })
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
 
-      // Read body ONCE
-      raw = await res.text()
-
-      if (debug) {
-        console.log('[CopilotAPI] status=', res.status)
-        console.log('[CopilotAPI] content-type=', res.headers.get('content-type'))
-        console.log('[CopilotAPI] body(head)=', raw.slice(0, 800))
-      }
-
-      // If not OK, include raw in error and exit
-      if (!res.ok) {
-        await emitEvent(ctx, 'error', {
-          message: `CopilotAPI request failed: ${res.status}. ${raw.slice(0, 500)}`
-        })
-        await emitEvent(ctx, 'done', { status: 'error' })
-        return
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (debug) console.log('[CopilotAPI] fetch threw:', msg)
-
-      await emitEvent(ctx, 'error', {
-        message: `CopilotAPI fetch failed: ${msg}`
-      })
-      await emitEvent(ctx, 'done', { status: 'error' })
-      return
-    }
-
-    const ct = res.headers.get('content-type') || ''
-    if (!ct.includes('application/json')) {
-      await emitEvent(ctx, 'error', {
-        message: `CopilotAPI returned non-JSON response: ${raw.slice(0, 500)}`
-      })
-      await emitEvent(ctx, 'done', { status: 'error' })
-      return
-    }
-
-    // Parse JSON from the same string (DON'T call res.json())
-    let json: any
-    try {
-      json = JSON.parse(raw)
-    } catch {
-      await emitEvent(ctx, 'error', {
-        message: `CopilotAPI returned invalid JSON: ${raw.slice(0, 500)}`
-      })
-      await emitEvent(ctx, 'done', { status: 'error' })
-      return
-    }
-    const choice = json.choices?.[0]
-    const assistantMessage = choice?.message as ChatMessage | undefined
-
-    if (!assistantMessage) {
-      await emitEvent(ctx, 'error', {
-        message: 'CopilotAPI returned no message'
-      })
-      await emitEvent(ctx, 'done', { status: 'error' })
-      return
-    }
-
-    messages.push(assistantMessage)
-
-    const toolCalls: ToolCall[] = assistantMessage.tool_calls ?? []
-    if (toolCalls.length === 0) {
-      const content = assistantMessage.content ?? 'No response'
-      await emitEvent(ctx, 'tool.output', { tool: 'copilot', output: content })
-      await emitEvent(ctx, 'tool.end', { tool: 'copilot', success: true })
-      return
-    }
-
-    for (const call of toolCalls) {
-      const args = parseToolArgs(call.function?.arguments)
-      let result: unknown = { error: 'Unsupported tool' }
-
-      if (call.function?.name === 'read_file') {
-        const path = typeof args.path === 'string' ? args.path : ''
-        result = path ? await handleReadFileTool(ctx, path) : { error: 'Missing path' }
-      } else if (call.function?.name === 'write_file') {
-        const path = typeof args.path === 'string' ? args.path : ''
-        const content = typeof args.content === 'string' ? args.content : ''
-        result = path ? await handleWriteFileTool(ctx, path, content) : { error: 'Missing path' }
-      } else if (call.function?.name === 'list_files') {
-        const glob = typeof args.glob === 'string' ? args.glob : ''
-        result = glob ? await handleListFilesTool(ctx, glob) : { error: 'Missing glob' }
-      } else if (call.function?.name === 'list_dir') {
-        const path = typeof args.path === 'string' ? args.path : ''
-        result = path ? await handleListDirTool(ctx, path) : { error: 'Missing path' }
-      } else if (call.function?.name === 'grep_search') {
-        const query = typeof args.query === 'string' ? args.query : ''
-        const includePattern = typeof args.include_pattern === 'string' ? args.include_pattern : undefined
-        result = query ? await handleGrepSearchTool(ctx, query, includePattern) : { error: 'Missing query' }
-      } else if (call.function?.name === 'run_command' || call.function?.name === 'shell_execute') {
-        const command = typeof args.command === 'string' ? args.command : ''
-        if (!command) {
-          result = { error: 'Missing command' }
-        } else {
-          // Load allowlist (cached) and enforce
-          const allowedPath = new URL('../..', import.meta.url)
-            .pathname.replace(/\/runner\/(?:\.\.)?$/, '') // fallback no-op
-          // Helper to read config file safely
-          async function loadAllowlist(): Promise<string[]> {
+      let idx = buffer.indexOf('\n\n')
+      while (idx !== -1) {
+        const block = buffer.slice(0, idx)
+        buffer = buffer.slice(idx + 2)
+        for (const line of block.split('\n')) {
+          const trimmed = line.trim()
+          if (trimmed.startsWith('data:')) {
+            const payload = trimmed.slice(5).trim()
+            if (payload === '[DONE]') return out
+            let json: any
             try {
-              const cfgPath = new URL('../../config/allowed-commands.json', import.meta.url).pathname
-              const content = await (await import('node:fs/promises')).readFile(cfgPath, 'utf8')
-              return JSON.parse(content) as string[]
+              json = JSON.parse(payload)
             } catch {
-              return []
+              json = null
             }
-          }
 
-          function matchesAllowlist(cmd: string, allowed: string[]) {
-            if (!allowed || allowed.length === 0) return false
-            const trimmed = cmd.trim()
-            for (const a of allowed) {
-              const pick = a.trim()
-              if (trimmed === pick) return true
-              if (trimmed.startsWith(pick + ' ')) return true
+            const err = json?.error
+            if (typeof err === 'string' && err.trim() !== '') {
+              throw new Error(err)
             }
-            return false
-          }
 
-          const allowed = await loadAllowlist()
-          if (!braveMode && !matchesAllowlist(command, allowed)) {
-            const message = 'Refused to run: command not on the allowlist.'
-            console.warn(`[Runner] Refused run_command: ${command}`)
-            // Emit structured refusal event containing the attempted command for UI affordances
-            try {
-              await emitEvent(ctx, 'tool.refused', { tool: 'run_command', command, reason: message })
-            } catch (e) {
-              /* best-effort */
-            }
-            await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message })
-            await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
-            // Audit log
-            try {
-              const logLine = `${nowIso()} ${ctx.jobId} REFUSE allowlist ${command}\n`
-              await (await import('node:fs/promises')).appendFile(process.cwd() + '/logs/command-refusals.log', logLine, 'utf8')
-            } catch (e) {
-              /* ignore logging errors */
-            }
-            result = { error: message }
-          } else if (looksLikeNaturalLanguageCommand(command)) {
-            const message = 'Refused to run: command looks like natural language rather than a shell command.'
-            try {
-              await emitEvent(ctx, 'tool.refused', { tool: 'run_command', command, reason: message })
-            } catch (e) {
-              /* best-effort */
-            }
-            await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message })
-            await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
-            try {
-              const logLine = `${nowIso()} ${ctx.jobId} REFUSE natural_language ${command}\n`
-              await (await import('node:fs/promises')).appendFile(process.cwd() + '/logs/command-refusals.log', logLine, 'utf8')
-            } catch (e) {
-              /* ignore logging errors */
-            }
-            result = { error: message }
-          } else if (isDangerousCommand(command)) {
-            const message = 'Refused to run: command matches disallowed or unsafe patterns.'
-            try {
-              await emitEvent(ctx, 'tool.refused', { tool: 'run_command', command, reason: message })
-            } catch (e) {
-              /* best-effort */
-            }
-            await emitEvent(ctx, 'tool.output', { tool: 'run_command', output: message })
-            await emitEvent(ctx, 'tool.end', { tool: 'run_command', success: false, error: message })
-            try {
-              const logLine = `${nowIso()} ${ctx.jobId} REFUSE dangerous ${command}\n`
-              await (await import('node:fs/promises')).appendFile(process.cwd() + '/logs/command-refusals.log', logLine, 'utf8')
-            } catch (e) {
-              /* ignore logging errors */
-            }
-            result = { error: message }
-          } else {
-            result = await handleRunCommandTool(ctx, command)
+            const delta = json?.choices?.[0]?.delta?.content
+            if (typeof delta === 'string') out += delta
           }
         }
+        idx = buffer.indexOf('\n\n')
       }
-
-      messages.push({
-        role: 'tool',
-        tool_call_id: call.id,
-        name: call.function?.name ?? 'unknown',
-        content: JSON.stringify(result)
-      })
     }
+
+    return out
   }
 
-  await emitEvent(ctx, 'tool.end', {
-    tool: 'copilot',
-    success: false,
-    error: 'Exceeded tool-call iterations'
-  })
-  await emitEvent(ctx, 'error', {
-    message: 'Copilot tool loop exceeded iteration limit'
-  })
-  await emitEvent(ctx, 'done', { status: 'error' })
-  return
+  const controller = new AbortController()
+  const timeoutHandle = setTimeout(() => controller.abort(), requestTimeoutMs)
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.AI_API_KEY ? { Authorization: `Bearer ${process.env.AI_API_KEY}` } : {})
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.7,
+        stream: true
+      }),
+      signal: controller.signal
+    })
+
+    const ct = res.headers.get('content-type') || ''
+
+    if (!res.ok) {
+      const raw = await res.text().catch(() => '')
+      await failCopilot(`CopilotAPI request failed: ${res.status}. ${raw.slice(0, 500)}`)
+    }
+
+    let content = ''
+    if (ct.includes('text/event-stream')) {
+      content = await readSseText(res)
+    } else if (ct.includes('application/json')) {
+      const raw = await res.text()
+      let json: any
+      try {
+        json = JSON.parse(raw)
+      } catch {
+        await failCopilot(`CopilotAPI returned invalid JSON: ${raw.slice(0, 500)}`)
+      }
+      const assistantMessage = json?.choices?.[0]?.message as ChatMessage | undefined
+      content = (assistantMessage?.content ?? '') || ''
+    } else {
+      const raw = await res.text().catch(() => '')
+      await failCopilot(`CopilotAPI returned unsupported response (${ct || 'unknown'}): ${raw.slice(0, 500)}`)
+    }
+
+    await emitEvent(ctx, 'tool.output', { tool: 'copilot', output: content || 'No response' })
+    await emitEvent(ctx, 'tool.end', { tool: 'copilot', success: true })
+    return
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (debug) console.log('[CopilotAPI] fetch threw:', msg)
+    await failCopilot(msg)
+  } finally {
+    clearTimeout(timeoutHandle)
+  }
 }
 
 /**

@@ -11,11 +11,11 @@ class RequestQueue {
         this.maxResponseTimes = 100; // Keep last 100 response times
         this.maxConcurrent = maxConcurrent;
     }
-    async add(_task) {
+    async add(task) {
         return new Promise((resolve, reject) => {
             const queueItem = {
                 id: Math.random().toString(36).substring(7),
-                request: {}, // Not used in this simplified version
+                task,
                 responsePromise: { resolve, reject },
                 timestamp: Date.now(),
                 priority: 0
@@ -34,8 +34,7 @@ class RequestQueue {
         this.activeCount++;
         const startTime = Date.now();
         try {
-            // Execute the task (this will be the Copilot API call)
-            const result = await this.executeTask(item);
+            const result = await item.task();
             // Record success metrics
             const responseTime = Date.now() - startTime;
             this.recordResponseTime(responseTime);
@@ -55,11 +54,6 @@ class RequestQueue {
             // Process next item in queue
             setImmediate(() => this.processQueue());
         }
-    }
-    async executeTask(_item) {
-        // This is a placeholder - the actual task execution happens in the calling code
-        // The task function is passed to the add method
-        throw new Error('Task execution should be handled by the caller');
     }
     recordResponseTime(time) {
         this.responseTimes.push(time);

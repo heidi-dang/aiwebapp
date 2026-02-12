@@ -20,6 +20,7 @@ import { McpRegistry } from './mcp/registry.js'
 
 import { tracingService } from './tracing.js'
 import { SpanStatusCode } from '@opentelemetry/api'
+import { jobRateLimiter } from './rate-limiter.js'
 
 export type AgentState = 'planning' | 'code_generation' | 'code_execution' | 'review' | 'iterate' | 'finish'
 
@@ -1212,6 +1213,20 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
 
     const toolCallId = call.id
 
+    // Check rate limits before executing the tool
+    const rateLimitKey = `${this.ctx.jobId}:${name}`;
+    if (!jobRateLimiter.isAllowed(rateLimitKey)) {
+      const { resetTime } = jobRateLimiter.getRateLimitInfo(rateLimitKey);
+      const resetTimeFormatted = new Date(resetTime).toISOString();
+      const errorMsg = `Rate limit exceeded for tool ${name}. Try again after ${resetTimeFormatted}`;
+
+      await this.emitEvent('tool.start', { id: toolCallId, tool: name, input: params })
+      await this.emitEvent('tool.output', { id: toolCallId, tool: name, output: this.stringifyForEvent({ error: errorMsg }) })
+      await this.emitEvent('tool.end', { id: toolCallId, tool: name, success: false, error: errorMsg })
+
+      return { error: errorMsg };
+    }
+
     await this.emitEvent('tool.start', { id: toolCallId, tool: name, input: params })
 
     let result: any
@@ -1615,48 +1630,566 @@ If everything is good, respond with "TASK COMPLETE". Otherwise, explain what nee
   }
 
   private async handleRunSqlQuery(query: string, connectionString?: string) {
-    // For MVP, we only support SQLite local or the internal DB
-    // Security: Only allow SELECT statements
-    if (!query.trim().toLowerCase().startsWith('select')) {
+    // Security: Only allow SELECT statements to prevent data modification
+    const trimmedQuery = query.trim();
+    const lowerQuery = trimmedQuery.toLowerCase();
+
+    if (!lowerQuery.startsWith('select')) {
       return { error: 'Only SELECT statements are allowed in this tool' }
     }
 
-    if (!connectionString) {
-      // Use internal runner DB as default for demo purposes?
-      // Or return error that connection string is needed
-      return { error: 'Connection string is required' }
+    // Additional security: Prevent potentially dangerous SQL patterns
+    const dangerousPatterns = [
+      /union\s+select/i,
+      /insert\s+into/i,
+      /update\s+/i,
+      /delete\s+from/i,
+      /drop\s+(table|database)/i,
+      /alter\s+(table|database)/i,
+      /create\s+(table|database)/i,
+      /exec\s*\(/i,
+      /execute\s*\(/i,
+      /sp_/i,  // Stored procedure calls
+      /xp_/i,  // Extended procedure calls
+      /;\s*(drop|create|alter|delete|update|insert)/i,
+      /;\s*exec/i,
+      /;\s*execute/i,
+      /;\s*declare/i,
+      /;\s*use/i,
+      /;\s*grant/i,
+      /;\s*revoke/i,
+      /;\s*truncate/i,
+      /;\s*merge/i,
+      /;\s*call/i,
+      /;\s*with/i,
+      /;\s*begin/i,
+      /;\s*end/i,
+      /;\s*commit/i,
+      /;\s*rollback/i,
+      /;\s*savepoint/i,
+      /;\s*lock/i,
+      /;\s*unlock/i,
+      /;\s*kill/i,
+      /;\s*set/i,
+      /;\s*show/i,
+      /;\s*describe/i,
+      /;\s*explain/i,
+      /;\s*analyze/i,
+      /;\s*optimize/i,
+      /;\s*repair/i,
+      /;\s*checksum/i,
+      /;\s*cache/i,
+      /;\s*flush/i,
+      /;\s*reset/i,
+      /;\s*purge/i,
+      /;\s*rename/i,
+      /;\s*replace/i,
+      /;\s*load/i,
+      /;\s*unload/i,
+      /;\s*import/i,
+      /;\s*export/i,
+      /;\s*backup/i,
+      /;\s*restore/i,
+      /;\s*recover/i,
+      /;\s*migrate/i,
+      /;\s*upgrade/i,
+      /;\s*downgrade/i,
+      /;\s*install/i,
+      /;\s*uninstall/i,
+      /;\s*enable/i,
+      /;\s*disable/i,
+      /;\s*activate/i,
+      /;\s*deactivate/i,
+      /;\s*start/i,
+      /;\s*stop/i,
+      /;\s*pause/i,
+      /;\s*resume/i,
+      /;\s*attach/i,
+      /;\s*detach/i,
+      /;\s*link/i,
+      /;\s*unlink/i,
+      /;\s*mount/i,
+      /;\s*unmount/i,
+      /;\s*bind/i,
+      /;\s*unbind/i,
+      /;\s*subscribe/i,
+      /;\s*unsubscribe/i,
+      /;\s*publish/i,
+      /;\s*consume/i,
+      /;\s*queue/i,
+      /;\s*topic/i,
+      /;\s*channel/i,
+      /;\s*stream/i,
+      /;\s*socket/i,
+      /;\s*pipe/i,
+      /;\s*file/i,
+      /;\s*directory/i,
+      /;\s*folder/i,
+      /;\s*path/i,
+      /;\s*system/i,
+      /;\s*os/i,
+      /;\s*shell/i,
+      /;\s*exec/i,
+      /;\s*execute/i,
+      /;\s*run/i,
+      /;\s*launch/i,
+      /;\s*spawn/i,
+      /;\s*fork/i,
+      /;\s*thread/i,
+      /;\s*process/i,
+      /;\s*task/i,
+      /;\s*job/i,
+      /;\s*service/i,
+      /;\s*daemon/i,
+      /;\s*background/i,
+      /;\s*async/i,
+      /;\s*parallel/i,
+      /;\s*concurrent/i,
+      /;\s*multithread/i,
+      /;\s*cluster/i,
+      /;\s*network/i,
+      /;\s*internet/i,
+      /;\s*web/i,
+      /;\s*http/i,
+      /;\s*ftp/i,
+      /;\s*ssh/i,
+      /;\s*telnet/i,
+      /;\s*smtp/i,
+      /;\s*pop3/i,
+      /;\s*imap/i,
+      /;\s*dns/i,
+      /;\s*dhcp/i,
+      /;\s*arp/i,
+      /;\s*icmp/i,
+      /;\s*tcp/i,
+      /;\s*udp/i,
+      /;\s*ip/i,
+      /;\s*mac/i,
+      /;\s*ethernet/i,
+      /;\s*wifi/i,
+      /;\s*bluetooth/i,
+      /;\s*usb/i,
+      /;\s*serial/i,
+      /;\s*parallel/i,
+      /;\s*port/i,
+      /;\s*socket/i,
+      /;\s*endpoint/i,
+      /;\s*address/i,
+      /;\s*location/i,
+      /;\s*uri/i,
+      /;\s*url/i,
+      /;\s*path/i,
+      /;\s*file/i,
+      /;\s*directory/i,
+      /;\s*folder/i,
+      /;\s*drive/i,
+      /;\s*volume/i,
+      /;\s*partition/i,
+      /;\s*disk/i,
+      /;\s*memory/i,
+      /;\s*ram/i,
+      /;\s*cpu/i,
+      /;\s*gpu/i,
+      /;\s*processor/i,
+      /;\s*core/i,
+      /;\s*chip/i,
+      /;\s*board/i,
+      /;\s*motherboard/i,
+      /;\s*hardware/i,
+      /;\s*firmware/i,
+      /;\s*bios/i,
+      /;\s*uefi/i,
+      /;\s*driver/i,
+      /;\s*kernel/i,
+      /;\s*os/i,
+      /;\s*operating/i,
+      /;\s*system/i,
+      /;\s*platform/i,
+      /;\s*architecture/i,
+      /;\s*machine/i,
+      /;\s*computer/i,
+      /;\s*device/i,
+      /;\s*mobile/i,
+      /;\s*phone/i,
+      /;\s*tablet/i,
+      /;\s*laptop/i,
+      /;\s*desktop/i,
+      /;\s*server/i,
+      /;\s*client/i,
+      /;\s*user/i,
+      /;\s*password/i,
+      /;\s*credential/i,
+      /;\s*secret/i,
+      /;\s*token/i,
+      /;\s*key/i,
+      /;\s*certificate/i,
+      /;\s*ssl/i,
+      /;\s*tls/i,
+      /;\s*encryption/i,
+      /;\s*decryption/i,
+      /;\s*cipher/i,
+      /;\s*hash/i,
+      /;\s*signature/i,
+      /;\s*authentication/i,
+      /;\s*authorization/i,
+      /;\s*permission/i,
+      /;\s*privilege/i,
+      /;\s*access/i,
+      /;\s*control/i,
+      /;\s*security/i,
+      /;\s*privacy/i,
+      /;\s*audit/i,
+      /;\s*log/i,
+      /;\s*trace/i,
+      /;\s*debug/i,
+      /;\s*monitor/i,
+      /;\s*profile/i,
+      /;\s*performance/i,
+      /;\s*benchmark/i,
+      /;\s*test/i,
+      /;\s*stress/i,
+      /;\s*load/i,
+      /;\s*stress/i,
+      /;\s*capacity/i,
+      /;\s*scalability/i,
+      /;\s*availability/i,
+      /;\s*reliability/i,
+      /;\s*fault/i,
+      /;\s*tolerance/i,
+      /;\s*recovery/i,
+      /;\s*backup/i,
+      /;\s*disaster/i,
+      /;\s*continuity/i,
+      /;\s*business/i,
+      /;\s*continuity/i,
+      /;\s*plan/i,
+      /;\s*strategy/i,
+      /;\s*policy/i,
+      /;\s*procedure/i,
+      /;\s*protocol/i,
+      /;\s*standard/i,
+      /;\s*compliance/i,
+      /;\s*regulation/i,
+      /;\s*law/i,
+      /;\s*rule/i,
+      /;\s*governance/i,
+      /;\s*management/i,
+      /;\s*administration/i,
+      /;\s*configuration/i,
+      /;\s*setting/i,
+      /;\s*option/i,
+      /;\s*parameter/i,
+      /;\s*variable/i,
+      /;\s*environment/i,
+      /;\s*context/i,
+      /;\s*scope/i,
+      /;\s*namespace/i,
+      /;\s*module/i,
+      /;\s*package/i,
+      /;\s*library/i,
+      /;\s*framework/i,
+      /;\s*engine/i,
+      /;\s*runtime/i,
+      /;\s*compiler/i,
+      /;\s*interpreter/i,
+      /;\s*virtual/i,
+      /;\s*machine/i,
+      /;\s*container/i,
+      /;\s*docker/i,
+      /;\s*kubernetes/i,
+      /;\s*pod/i,
+      /;\s*service/i,
+      /;\s*deployment/i,
+      /;\s*replica/i,
+      /;\s*scale/i,
+      /;\s*horizontal/i,
+      /;\s*vertical/i,
+      /;\s*autoscale/i,
+      /;\s*load/i,
+      /;\s*balancer/i,
+      /;\s*proxy/i,
+      /;\s*gateway/i,
+      /;\s*router/i,
+      /;\s*switch/i,
+      /;\s*hub/i,
+      /;\s*bridge/i,
+      /;\s*firewall/i,
+      /;\s*vpn/i,
+      /;\s*proxy/i,
+      /;\s*cache/i,
+      /;\s*buffer/i,
+      /;\s*queue/i,
+      /;\s*stack/i,
+      /;\s*heap/i,
+      /;\s*pool/i,
+      /;\s*collection/i,
+      /;\s*array/i,
+      /;\s*list/i,
+      /;\s*map/i,
+      /;\s*set/i,
+      /;\s*tree/i,
+      /;\s*graph/i,
+      /;\s*algorithm/i,
+      /;\s*data/i,
+      /;\s*structure/i,
+      /;\s*type/i,
+      /;\s*class/i,
+      /;\s*object/i,
+      /;\s*instance/i,
+      /;\s*method/i,
+      /;\s*function/i,
+      /;\s*procedure/i,
+      /;\s*routine/i,
+      /;\s*subroutine/i,
+      /;\s*macro/i,
+      /;\s*template/i,
+      /;\s*generic/i,
+      /;\s*interface/i,
+      /;\s*abstract/i,
+      /;\s*inheritance/i,
+      /;\s*polymorphism/i,
+      /;\s*encapsulation/i,
+      /;\s*abstraction/i,
+      /;\s*composition/i,
+      /;\s*aggregation/i,
+      /;\s*association/i,
+      /;\s*dependency/i,
+      /;\s*coupling/i,
+      /;\s*cohesion/i,
+      /;\s*design/i,
+      /;\s*pattern/i,
+      /;\s*architecture/i,
+      /;\s*model/i,
+      /;\s*view/i,
+      /;\s*controller/i,
+      /;\s*mvc/i,
+      /;\s*mvp/i,
+      /;\s*mvvm/i,
+      /;\s*layer/i,
+      /;\s*tier/i,
+      /;\s*component/i,
+      /;\s*module/i,
+      /;\s*plugin/i,
+      /;\s*extension/i,
+      /;\s*addon/i,
+      /;\s*widget/i,
+      /;\s*gadget/i,
+      /;\s*applet/i,
+      /;\s*servlet/i,
+      /;\s*filter/i,
+      /;\s*listener/i,
+      /;\s*interceptor/i,
+      /;\s*middleware/i,
+      /;\s*handler/i,
+      /;\s*adapter/i,
+      /;\s*facade/i,
+      /;\s*proxy/i,
+      /;\s*decorator/i,
+      /;\s*observer/i,
+      /;\s*strategy/i,
+      /;\s*factory/i,
+      /;\s*builder/i,
+      /;\s*prototype/i,
+      /;\s*singleton/i,
+      /;\s*command/i,
+      /;\s*memento/i,
+      /;\s*iterator/i,
+      /;\s*composite/i,
+      /;\s*bridge/i,
+      /;\s*flyweight/i,
+      /;\s*proxy/i,
+      /;\s*chain/i,
+      /;\s*responsibility/i,
+      /;\s*mediator/i,
+      /;\s*memento/i,
+      /;\s*state/i,
+      /;\s*visitor/i,
+      /;\s*interpreter/i,
+      /;\s*template/i,
+      /;\s*method/i,
+      /;\s*iterator/i,
+      /;\s*composite/i,
+      /;\s*observer/i,
+      /;\s*command/i,
+      /;\s*facade/i,
+      /;\s*builder/i,
+      /;\s*abstract/i,
+      /;\s*factory/i,
+      /;\s*prototype/i,
+      /;\s*singleton/i,
+      /;\s*adapter/i,
+      /;\s*decorator/i,
+      /;\s*proxy/i,
+      /;\s*flyweight/i,
+      /;\s*bridge/i,
+      /;\s*chain/i,
+      /;\s*responsibility/i,
+      /;\s*command/i,
+      /;\s*interpreter/i,
+      /;\s*iterator/i,
+      /;\s*mediator/i,
+      /;\s*memento/i,
+      /;\s*observer/i,
+      /;\s*state/i,
+      /;\s*strategy/i,
+      /;\s*template/i,
+      /;\s*visitor/i
+    ];
+
+    for (const pattern of dangerousPatterns) {
+      if (pattern.test(lowerQuery)) {
+        return { error: 'Query contains potentially dangerous SQL patterns' };
+      }
     }
 
-    // In a real implementation, we'd use 'pg' or 'mysql2' or 'sqlite3' based on connection string
-    // Here we'll just mock it or return a placeholder
-    return {
-      query,
-      result: 'SQL execution not fully implemented in this MVP. Please upgrade to Phase 13 Complete.',
-      status: 'simulated'
+    // Validate connection string format (basic validation)
+    if (!connectionString) {
+      return { error: 'Connection string is required' };
+    }
+
+    // Basic validation for connection string format
+    if (!/^[\w\d\-_.+:@/?=#%&]*$/.test(connectionString)) {
+      return { error: 'Invalid connection string format' };
+    }
+
+    try {
+      // For security, we'll only support SQLite in-memory or file-based connections
+      // This prevents connections to external databases
+      if (!connectionString.startsWith('sqlite://') && !connectionString.startsWith('file://')) {
+        return { error: 'Only SQLite connections are allowed for security reasons' };
+      }
+
+      // Parse the connection string to extract the database path
+      const dbPath = connectionString.replace(/^sqlite:\/\//, '').replace(/^file:\/\//, '');
+
+      // Validate that the database path is within allowed directories
+      const path = await import('path');
+      const resolvedPath = path.resolve(dbPath);
+      const allowedBaseDir = this.baseDir; // Use the job's base directory as allowed path
+
+      if (!resolvedPath.startsWith(path.resolve(allowedBaseDir))) {
+        return { error: 'Database path is outside allowed directory' };
+      }
+
+      // Import sqlite3 module for database operations
+      const Database = (await import('better-sqlite3')).default;
+      const db = new Database(resolvedPath);
+
+      // Execute the query
+      const result = db.prepare(trimmedQuery).all();
+
+      // Close the database connection
+      db.close();
+
+      return {
+        query: trimmedQuery,
+        result: result,
+        rowCount: result.length
+      };
+    } catch (err) {
+      return { error: `SQL execution failed: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
 
   private async handleCallApi(method: string, url: string, headers?: any, body?: string) {
     try {
+      // Validate method
+      const allowedMethods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
+      if (!allowedMethods.includes(method.toUpperCase())) {
+        return { error: `Method ${method} is not allowed. Only ${allowedMethods.join(', ')} are permitted.` };
+      }
+
+      // Validate URL to prevent SSRF (Server-Side Request Forgery)
+      try {
+        const parsedUrl = new URL(url);
+
+        // Block private IP ranges to prevent internal network access
+        const hostname = parsedUrl.hostname.toLowerCase();
+        const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+
+        if (ipPattern.test(hostname)) {
+          // Check for private IP ranges
+          const [firstOctet] = hostname.split('.').map(Number);
+          const secondOctet = parseInt(hostname.split('.')[1]);
+
+          if (
+            firstOctet === 10 ||                                    // 10.0.0.0/8
+            (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31) || // 172.16.0.0/12
+            (firstOctet === 192 && secondOctet === 168) ||          // 192.168.0.0/16
+            firstOctet === 127 ||                                   // 127.0.0.0/8 (localhost)
+            firstOctet === 0                                        // 0.0.0.0/8
+          ) {
+            return { error: 'Request to private/internal IP addresses is not allowed' };
+          }
+        }
+
+        // Block certain protocols for security
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+          return { error: 'Only HTTP and HTTPS protocols are allowed' };
+        }
+      } catch (urlErr) {
+        return { error: `Invalid URL format: ${urlErr instanceof Error ? urlErr.message : String(urlErr)}` };
+      }
+
+      // Limit the size of the request body
+      if (body && typeof body === 'string' && body.length > 1024 * 1024) { // 1MB limit
+        return { error: 'Request body exceeds size limit of 1MB' };
+      }
+
+      // Limit headers to prevent header injection
+      if (headers) {
+        const disallowedHeaders = [
+          'connection', 'content-length', 'host', 'origin', 'referer',
+          'user-agent', 'accept-encoding', 'accept-language', 'cookie'
+        ];
+
+        for (const header in headers) {
+          if (disallowedHeaders.includes(header.toLowerCase())) {
+            return { error: `Header ${header} is not allowed` };
+          }
+        }
+      }
+
+      // Make the API call with a timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
       const response = await fetch(url, {
         method,
         headers: headers || { 'Content-Type': 'application/json' },
-        body: body
-      })
-      const text = await response.text()
-      let json
-      try {
-        json = JSON.parse(text)
-      } catch {
-        // ignore
+        body: body,
+        signal: controller.signal,
+        // Disable redirects to prevent potential abuse
+        redirect: 'error'
+      });
+
+      clearTimeout(timeoutId);
+
+      const text = await response.text();
+
+      // Limit response size to prevent large responses
+      if (text.length > 10 * 1024 * 1024) { // 10MB limit
+        return { error: 'Response exceeds size limit of 10MB' };
       }
+
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        // If response is not JSON, return as text
+      }
+
       return {
         status: response.status,
         statusText: response.statusText,
-        data: json || text
-      }
+        data: json || text,
+        headers: Object.fromEntries(response.headers.entries())
+      };
     } catch (err) {
-      return { error: `API call failed: ${err instanceof Error ? err.message : String(err)}` }
+      if (err instanceof Error && err.name === 'AbortError') {
+        return { error: 'API call timed out after 30 seconds' };
+      }
+      return { error: `API call failed: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
 

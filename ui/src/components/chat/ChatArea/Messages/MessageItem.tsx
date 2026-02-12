@@ -72,22 +72,28 @@ const AgentMessage = memo(({ message }: MessageProps) => {
   }
 
   return (
-    <div className="flex flex-row items-start gap-4 font-geist">
-      <div className="flex-shrink-0">
-        <Icon type="agent" size="sm" />
+    <div className="flex flex-row items-start gap-4 font-geist transition-all hover:translate-x-0.5">
+      <div className="flex-shrink-0 mt-1">
+        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primaryAccent border border-white/5 shadow-sm">
+          <Icon type="agent" size="xs" className="text-primary/70" />
+        </div>
       </div>
-      {messageContent}
+      <div className="flex-1 min-w-0">
+         {messageContent}
+      </div>
     </div>
   )
 })
 
 const UserMessage = memo(({ message }: MessageProps) => {
   return (
-    <div className="flex items-start gap-4 pt-4 text-start max-md:break-words">
-      <div className="flex-shrink-0">
-        <Icon type="user" size="sm" />
+    <div className="flex items-start gap-4 pt-4 text-start max-md:break-words group">
+      <div className="flex-shrink-0 mt-1">
+        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/[0.03] border border-white/5 shadow-sm">
+          <Icon type="user" size="xs" className="opacity-50" />
+        </div>
       </div>
-      <div className="text-md rounded-lg font-geist text-secondary">
+      <div className="text-[15px] leading-relaxed rounded-2xl glass-dark px-4 py-3 font-geist text-secondary/90 shadow-sm border-white/5 transition-all group-hover:border-white/10">
         {message.content}
       </div>
     </div>

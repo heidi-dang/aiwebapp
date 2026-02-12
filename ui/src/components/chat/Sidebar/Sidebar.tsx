@@ -47,12 +47,12 @@ const NewChatButton = ({
 )
 
 const ModelDisplay = ({ model }: { model: string }) => (
-  <div className="flex h-9 w-full items-center gap-3 rounded-xl border border-primary/15 bg-accent p-3 text-xs font-medium uppercase text-muted">
+  <div className="flex h-9 w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-[11px] font-medium uppercase text-muted backdrop-blur-sm transition-all hover:bg-white/[0.06]">
     {(() => {
       const icon = getProviderIcon(model)
-      return icon ? <Icon type={icon} className="shrink-0" size="xs" /> : null
+      return icon ? <Icon type={icon} className="shrink-0 opacity-70" size="xs" /> : null
     })()}
-    {model}
+    <span className="truncate">{model}</span>
   </div>
 )
 
@@ -172,14 +172,16 @@ const Endpoint = () => {
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.2 }}
                 >
-                  <p className="text-xs font-medium text-muted">
+                  <p className="text-[11px] font-medium text-muted/80">
                     {isMounted
                       ? truncateText(selectedEndpoint, 21) ||
                         ENDPOINT_PLACEHOLDER
                       : 'http://localhost:4001'}
                   </p>
                   <div
-                    className={`size-2 shrink-0 rounded-full ${getStatusColor(isEndpointActive)}`}
+                    className={`size-2 shrink-0 rounded-full ${getStatusColor(isEndpointActive)} ${
+                      isEndpointActive ? 'animate-pulse-glow shadow-[0_0_8px_rgba(34,197,94,0.5)]' : ''
+                    }`}
                   />
                 </motion.div>
               )}
@@ -248,8 +250,8 @@ const Sidebar = ({
     <motion.aside
       className={
         isMobile
-          ? 'relative flex h-[100dvh] w-full flex-col overflow-hidden px-2 py-3 font-dmmono'
-          : 'relative flex h-screen shrink-0 grow-0 flex-col overflow-hidden px-2 py-3 font-dmmono'
+          ? 'relative flex h-[100dvh] w-full flex-col overflow-hidden px-2 py-3 font-dmmono glass'
+          : 'relative flex h-screen shrink-0 grow-0 flex-col overflow-hidden px-2 py-3 font-dmmono glass border-r border-white/5'
       }
       initial={isMobile ? false : { width: '16rem' }}
       animate={

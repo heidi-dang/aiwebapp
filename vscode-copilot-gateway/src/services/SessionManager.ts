@@ -8,7 +8,7 @@ export class SessionManager {
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
-    const config = vscode.workspace.getConfiguration('aiwebapp-copilot-gateway.session');
+    const config = vscode.workspace.getConfiguration('heidi-gateway-proxy.session');
     this.maxHistory = config.get('maxHistory', 100);
 
     // Load persisted sessions

@@ -6,7 +6,7 @@ export class AuthService {
   private authServiceUrl: string;
 
   constructor() {
-    const config = vscode.workspace.getConfiguration('aiwebapp-copilot-gateway.auth');
+    const config = vscode.workspace.getConfiguration('heidi-gateway-proxy.auth');
     this.authServiceUrl = config.get('serviceUrl', 'http://localhost:4003');
   }
 

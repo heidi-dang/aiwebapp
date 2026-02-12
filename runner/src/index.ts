@@ -5,6 +5,8 @@ import dotenv from 'dotenv'
 import dotenvExpand from 'dotenv-expand'
 const envConfig = dotenv.config({ path: '../.env' })
 dotenvExpand.expand(envConfig)
+console.log('RUNNER_TOKEN:', process.env.RUNNER_TOKEN)
+console.log('NODE_ENV:', process.env.NODE_ENV)
 
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
